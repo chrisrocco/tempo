@@ -1,0 +1,31 @@
+// ★ HOST ENTRYPOINT — process/host code imports from here.
+//
+// The runtime factory, its handle/registration types, the service seam, and the
+// public protocol vocabulary. Workflow *authors* do not import from here; they
+// import from `workflow.ts`. See doc 01 / doc 06.
+export { createLocalRuntime, type Runtime } from './local_runtime';
+export type { WorkflowHandle, Client } from './client';
+export type { ActivityFn } from './worker';
+export type { WorkflowFn, WorkflowContext } from './core';
+export { CancelledFailure } from './core';
+
+// the service seam + worker task contracts
+export type {
+  WorkflowService,
+  ExecutionStatus,
+  StartWorkflowOptions,
+  ActivityTask,
+  ActivityResult,
+  WorkflowTaskResult,
+} from './protocol';
+
+// the protocol vocabulary — the wire format consumers may reference
+export type {
+  Command,
+  CommandSpec,
+  ActivityOptions,
+  RetryPolicy,
+  HistoryEvent,
+  SignalEvent,
+  CompletionEvent,
+} from './protocol';

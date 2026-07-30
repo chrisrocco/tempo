@@ -1,0 +1,98 @@
+// The deterministic primitives workflow code calls. Each one records a command
+// (stamped with the next `seq`) and hands back a promise that stays parked until
+// the matching completion event is applied during replay. Only the workflow
+// entrypoint (`workflow.ts`) re-exports these; see doc 01.
+import type { ActivityOptions, Command, CommandSpec } from '../protocol';
+import { getContext } from './context';
+import { CancelledFailure } from './errors';
+
+function scheduleCommand(spec: CommandSpec): Promise<unknown> {
+  const ctx = getContext();
+  if (ctx.cancelled) return Promise.reject(new CancelledFailure()); // no new work after cancel
+  const seq = ctx.seq++;
+  const command = { ...spec, seq } as Command;
+  if (ctx.isLive) ctx.commands.push(command);
+  return new Promise<unknown>((resolve, reject) => ctx.completions.set(seq, { resolve, reject }));
+}
+
+const scheduleActivity = (name: string, options: ActivityOptions, args: unknown[]): Promise<unknown> =>
+  scheduleCommand({ type: 'scheduleActivity', name, args, options });
+
+export const runActivity = <T = unknown>(name: string, ...args: unknown[]): Promise<T> =>
+  scheduleActivity(name, {}, args) as Promise<T>;
+export const sleep = (ms: number): Promise<void> =>
+  scheduleCommand({ type: 'startTimer', ms }) as Promise<void>;
+/** Blocking child: start a child workflow and await its result. */
+export const executeChild = <T = unknown>(name: string, ...args: unknown[]): Promise<T> =>
+  scheduleCommand({ type: 'startChild', childName: name, childArgs: args, detached: false }) as Promise<T>;
+
+/** A fire-and-forget child's handle: it can be cancelled, but its result is not awaited. */
+export interface ChildHandle {
+  cancel(): void;
+}
+
+/**
+ * Fire-and-forget child: start a child workflow and keep going — no await, no
+ * completion is threaded back. Returns a handle to cancel it. This is the
+ * spawn-and-cancel shape the bug-hotlist monitor needs (doc 03 / ROADMAP). Cancel
+ * is itself replay-safe: it emits a `cancelChild` command the server acts on once.
+ */
+export function startChild(name: string, ...args: unknown[]): ChildHandle {
+  const ctx = getContext();
+  if (ctx.cancelled) return { cancel() {} };
+  const targetSeq = ctx.seq++;
+  const command: Command = { type: 'startChild', childName: name, childArgs: args, detached: true, seq: targetSeq };
+  if (ctx.isLive) ctx.commands.push(command);
+  return {
+    cancel() {
+      const c = getContext();
+      if (c.cancelled) return;
+      const seq = c.seq++;
+      const cancelCommand: Command = { type: 'cancelChild', targetSeq, seq };
+      if (c.isLive) c.commands.push(cancelCommand);
+    },
+  };
+}
+
+/**
+ * Terminal: end this run and start a fresh one carrying `args`. It emits a
+ * `continueAsNew` command and returns a promise that never resolves, so no code
+ * runs after it — `return continueAsNew(...)` (or `await` it) halts the run. The
+ * actual close-and-restart is the server's job (doc 05); the core just stops here.
+ */
+export const continueAsNew = (...args: unknown[]): Promise<never> =>
+  scheduleCommand({ type: 'continueAsNew', args }) as Promise<never>;
+
+export interface WorkflowInfo {
+  /** True when the server hints that history has grown enough to roll over. */
+  continueAsNewSuggested: boolean;
+}
+
+/** Read server-provided facts about the current run off the context. */
+export const workflowInfo = (): WorkflowInfo => {
+  const ctx = getContext();
+  return { continueAsNewSuggested: ctx.continueAsNewSuggested };
+};
+
+/** A record of activity signatures, keyed by activity name. */
+export type ActivityInterface = Record<string, (...args: any[]) => any>;
+
+/**
+ * A typed façade over `runActivity`: `proxyActivities<A>(options)` returns a proxy
+ * whose methods forward to the activity of the same name, carrying `options` on
+ * the command. Pure sugar living in the core (re-exported from `workflow.ts`);
+ * `A` drives the compile-time argument/return types. See doc 06 / doc 07.
+ */
+export function proxyActivities<A extends ActivityInterface>(
+  options: ActivityOptions = {},
+): { [K in keyof A]: (...args: Parameters<A[K]>) => Promise<Awaited<ReturnType<A[K]>>> } {
+  return new Proxy(
+    {} as { [K in keyof A]: (...args: Parameters<A[K]>) => Promise<Awaited<ReturnType<A[K]>>> },
+    {
+      get(_target, prop) {
+        const name = String(prop);
+        return (...args: unknown[]) => scheduleActivity(name, options, args);
+      },
+    },
+  );
+}
