@@ -1,89 +1,59 @@
-// The orchestration brain. It advances an execution task-by-task — but runs NO
-// user code itself: replay is delegated to a workflow-task executor (the workflow
-// worker) and activity functions to an activity-task executor (the activity
-// worker). Everything durable flows through the ports. This is the old `drive` /
-// `executeCommand` loop, refactored so the determinism boundary is also a
-// process boundary in waiting (doc 04, doc 06).
-//
-// The HistoryStore is async (a filesystem/db adapter is inherently async). Because
-// `append` is atomic per call and there is a single writer per execution (drives
-// serialized by pump; signals/cancels serialized by the adapter), no caller-side
-// version read is needed — the adapter bumps its own version. The optimistic-CAS
-// check returns in Phase 5, where concurrent workers make it meaningful.
+// The orchestration brain. It runs NO user code: workflow replay and activity
+// execution happen in workers that POLL it. The server hands out tasks
+// (buildWorkflowTask / pollActivityTask), applies what workers report back
+// (applyWorkflowTaskResult / reportActivityResult), and owns everything durable
+// via the ports. Waking an execution = enqueuing a workflow task; that queue's
+// coalescing is the distributed replacement for `pump` (doc 04 / 06).
 import type {
   ActivityResult,
-  ActivityTask,
   Command,
   ContinueAsNewCommand,
   HistoryEvent,
+  LeasedActivityTask,
+  TaskToken,
+  WorkflowTask,
   WorkflowTaskResult,
 } from '../protocol';
 import type { ExecutionRecord, HistoryStore } from './ports/history_store';
 import type { TaskQueue } from './ports/task_queue';
+import type { WorkflowTaskQueue } from './ports/workflow_task_queue';
 import type { TimerService } from './ports/timer_service';
 
-// Placeholder heuristic for when to hint continue-as-new. A real server tunes
-// this from history size/bytes; the in-memory server uses a low event count so
-// long-running workflows can observe the hint promptly (doc 05).
 const CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4;
-
-/** Replays one workflow task: history in, commands + terminal state out. */
-export interface WorkflowTaskExecutor {
-  replayTask(
-    name: string,
-    args: unknown[],
-    history: HistoryEvent[],
-    continueAsNewSuggested: boolean,
-  ): Promise<WorkflowTaskResult>;
-}
-
-/** Runs one activity task: the only place I/O happens. */
-export interface ActivityTaskExecutor {
-  runTask(task: ActivityTask): Promise<ActivityResult>;
-}
 
 export interface ServerCoreDeps {
   historyStore: HistoryStore;
-  taskQueue: TaskQueue;
+  workflowTaskQueue: WorkflowTaskQueue;
+  activityTaskQueue: TaskQueue;
   timerService: TimerService;
-  workflowExecutor: WorkflowTaskExecutor;
-  /**
-   * Launch a child execution (non-blocking) and return its workflowId. Owned by
-   * the service layer because it needs the concurrency guard. Both blocking and
-   * detached children are launched this way — a blocking child's parent parks and
-   * is woken by the child's `childCompleted` event (see notifyParentOfTerminal).
-   */
+  /** Launch a child execution (non-blocking) and return its workflowId. */
   launch(name: string, args: unknown[]): string;
-  /**
-   * Wake an execution to drive again. Used when a timer fires or a cancel is
-   * requested outside any drive. The service layer provides it (it owns the guard).
-   */
-  wake(workflowId: string): void;
-  /**
-   * Nudge the (async, in-proc) activity worker to drain the task queue. Called
-   * after enqueuing so the drive never has to await activity work itself.
-   */
+  /** Nudge the (async, in-proc) workflow worker to drain the workflow-task queue. */
+  kickWorkflowWorker(): void;
+  /** Nudge the (async, in-proc) activity worker to drain the activity-task queue. */
   kickActivityWorker(): void;
 }
 
 export interface ServerCore {
-  /** Drive an execution until it completes, fails, or parks on external input. */
-  driveExecution(workflowId: string): Promise<void>;
-  /** Append an externally injected signal to an execution's history. */
-  appendSignal(workflowId: string, signalName: string, payload: unknown): Promise<void>;
-  /** Request cancellation of an execution, cascading to its fire-and-forget children. */
-  requestCancel(workflowId: string): Promise<void>;
-  /** The activity worker reports a finished activity here; appends the event + wakes. */
+  /** Build the task for an execution the worker has claimed (or undefined if gone/terminal). */
+  buildWorkflowTask(workflowId: string): Promise<WorkflowTask | undefined>;
+  /** Apply a worker's replay result: settle, continue-as-new, or dispatch its commands. */
+  applyWorkflowTaskResult(workflowId: string, result: WorkflowTaskResult): Promise<void>;
+  /** The activity worker (in-proc) reports a finished activity: append + wake. */
   reportActivityResult(workflowId: string, seq: number, result: ActivityResult): Promise<void>;
-  /**
-   * Rebuild in-proc correlation and re-dispatch pending work from persisted history
-   * (crash recovery). The caller (service) then re-kicks the running executions.
-   */
+  /** Append an externally injected signal, then wake. */
+  appendSignal(workflowId: string, signalName: string, payload: unknown): Promise<void>;
+  /** Request cancellation, cascading to fire-and-forget children. */
+  requestCancel(workflowId: string): Promise<void>;
+  /** Rebuild correlation + re-dispatch pending work from persisted history (crash recovery). */
   resumeFromHistory(records: ExecutionRecord[]): Promise<void>;
+  // ── worker-facing seam (for out-of-process workers; see WorkflowService) ──
+  pollWorkflowTask(): Promise<WorkflowTask | undefined>;
+  completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void>;
+  pollActivityTask(): Promise<LeasedActivityTask | undefined>;
+  completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
 }
 
-// The seqs of operations already completed in a history, by kind — used on resume
-// to tell which scheduled activities / started timers / children are still pending.
 function completedSeqs(history: HistoryEvent[]): {
   activities: Set<number>; timers: Set<number>; children: Set<number>;
 } {
@@ -100,16 +70,16 @@ function completedSeqs(history: HistoryEvent[]): {
 
 export function createServerCore(deps: ServerCoreDeps): ServerCore {
   const {
-    historyStore, taskQueue, timerService, workflowExecutor, launch, wake,
-    kickActivityWorker,
+    historyStore, workflowTaskQueue, activityTaskQueue, timerService, launch,
+    kickWorkflowWorker, kickActivityWorker,
   } = deps;
 
-  // parentId -> (startChild seq -> childId), for targeted + cascading cancel.
-  // In-proc bookkeeping (not durable); a persisted adapter rebuilds it in Phase 4.
   const childrenByParent = new Map<string, Map<number, string>>();
-  // childId -> its parent link, for a BLOCKING child only: when the child settles
-  // we append its result back to the parent (the reverse of childrenByParent).
   const parentOfChild = new Map<string, { parentId: string; seq: number }>();
+  // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
+  // report it back and (for workflow tasks) run the optimistic version check.
+  const activityLeases = new Map<TaskToken, { workflowId: string; seq: number }>();
+  const workflowLeases = new Map<TaskToken, { workflowId: string; version: number }>();
 
   function recordChild(parentId: string, seq: number, childId: string): void {
     let kids = childrenByParent.get(parentId);
@@ -119,20 +89,22 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
 
   const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-  // Append one event atomically. The adapter bumps the version and throws if the
-  // execution is unknown; single-writer, so no caller-side version check.
   const appendEvent = (workflowId: string, event: HistoryEvent): Promise<void> =>
     historyStore.append(workflowId, [event]);
 
-  // When a blocking child settles, thread its outcome back to the parent as a
-  // `childCompleted` / `childFailed` event and wake the parent. Detached children
-  // have no parent link, so this is a no-op for them.
+  // Wake an execution: it needs another workflow task. The queue coalesces, so a
+  // wake during an in-flight task becomes exactly one more task.
+  function wake(workflowId: string): void {
+    workflowTaskQueue.enqueue(workflowId);
+    kickWorkflowWorker();
+  }
+
   async function notifyParentOfTerminal(childId: string): Promise<void> {
     const link = parentOfChild.get(childId);
     if (!link) return;
     parentOfChild.delete(childId);
     const parent = await historyStore.get(link.parentId);
-    if (!parent || parent.status !== 'running') return; // parent already gone (e.g. cancelled)
+    if (!parent || parent.status !== 'running') return;
     const child = await historyStore.get(childId);
     if (!child) return;
     await appendEvent(link.parentId, child.status === 'completed'
@@ -141,132 +113,89 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     wake(link.parentId);
   }
 
-  // A timer coming due is just another wake: record its firing in history, then
-  // ask the service to drive the execution so replay sees the `timerFired`.
   timerService.onFire(async (workflowId, seq) => {
     const rec = await historyStore.get(workflowId);
-    if (!rec || rec.status !== 'running') return; // execution already settled — drop it
+    if (!rec || rec.status !== 'running') return;
     await appendEvent(workflowId, { type: 'timerFired', seq });
     wake(workflowId);
   });
 
-  // The async activity worker calls this when an activity settles (after any
-  // retries). It records the completion and wakes the parked workflow — the drive
-  // never awaited the activity, so no frame was held for its duration.
+  // Dispatch one command. Everything dispatch-and-parks; its completion arrives
+  // later as its own event and wakes the workflow.
+  async function applyCommand(workflowId: string, cmd: Command): Promise<void> {
+    if (cmd.type === 'scheduleActivity') {
+      await appendEvent(workflowId, {
+        type: 'activityScheduled', seq: cmd.seq, name: cmd.name, args: cmd.args, options: cmd.options,
+      });
+      activityTaskQueue.enqueue({ workflowId, seq: cmd.seq, name: cmd.name, args: cmd.args, options: cmd.options });
+      kickActivityWorker();
+    } else if (cmd.type === 'startTimer') {
+      const fireAt = Date.now() + cmd.ms;
+      await appendEvent(workflowId, { type: 'timerStarted', seq: cmd.seq, fireAt });
+      timerService.schedule(workflowId, cmd.seq, fireAt);
+    } else if (cmd.type === 'startChild') {
+      const childId = launch(cmd.childName, cmd.childArgs);
+      recordChild(workflowId, cmd.seq, childId);
+      if (!cmd.detached) {
+        await appendEvent(workflowId, { type: 'childStarted', seq: cmd.seq, childId });
+        parentOfChild.set(childId, { parentId: workflowId, seq: cmd.seq });
+      }
+    } else if (cmd.type === 'cancelChild') {
+      const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
+      if (childId) await requestCancel(childId);
+    }
+  }
+
+  async function buildWorkflowTask(workflowId: string): Promise<WorkflowTask | undefined> {
+    const rec = await historyStore.get(workflowId);
+    if (!rec || rec.status !== 'running') return undefined;
+    return {
+      token: workflowId,
+      workflowId,
+      name: rec.name,
+      args: rec.args,
+      history: rec.history.slice(),
+      continueAsNewSuggested: rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+    };
+  }
+
+  async function applyWorkflowTaskResult(workflowId: string, result: WorkflowTaskResult): Promise<void> {
+    const rec = await historyStore.get(workflowId);
+    if (!rec || rec.status !== 'running') return;
+    if (result.done) {
+      await historyStore.setStatus(workflowId, 'completed', { result: result.result });
+      await notifyParentOfTerminal(workflowId);
+      return;
+    }
+    if (result.failed) {
+      await historyStore.setStatus(workflowId, 'failed', { failure: result.failure });
+      await notifyParentOfTerminal(workflowId);
+      return;
+    }
+    const caN = result.commands.find((c): c is ContinueAsNewCommand => c.type === 'continueAsNew');
+    if (caN) {
+      await historyStore.resetForContinueAsNew(workflowId, caN.args);
+      wake(workflowId); // drive the fresh run
+      return;
+    }
+    // Dispatch this batch; the execution then parks until a completion wakes it.
+    for (const cmd of result.commands) await applyCommand(workflowId, cmd);
+  }
+
   async function reportActivityResult(workflowId: string, seq: number, result: ActivityResult): Promise<void> {
     const rec = await historyStore.get(workflowId);
-    if (!rec || rec.status !== 'running') return; // execution already settled — drop it
+    if (!rec || rec.status !== 'running') return;
     await appendEvent(workflowId, result.ok
       ? { type: 'activityCompleted', seq, result: result.result }
       : { type: 'activityFailed', seq, error: result.error });
     wake(workflowId);
   }
 
-  // Dispatch one command. Returns whether it appended a completion event. All
-  // dispatching work is deferred (dispatch-and-park): the completion arrives later
-  // as its own event and re-drives the workflow, so the drive holds no frame.
-  async function executeCommand(workflowId: string, cmd: Command): Promise<boolean> {
-    if (cmd.type === 'scheduleActivity') {
-      // Record "scheduled before running" (crash-recovery idempotency + the marker
-      // that stops a re-emitted command from re-dispatching), enqueue, and park.
-      // The marker carries the payload so a resumed process can re-enqueue it.
-      await appendEvent(workflowId, {
-        type: 'activityScheduled', seq: cmd.seq, name: cmd.name, args: cmd.args, options: cmd.options,
-      });
-      taskQueue.enqueue({ workflowId, seq: cmd.seq, name: cmd.name, args: cmd.args, options: cmd.options });
-      kickActivityWorker();
-      return false;
-    }
-    if (cmd.type === 'startTimer') {
-      // Record the absolute fire-time, then arm. Resume re-arms from the marker.
-      const fireAt = Date.now() + cmd.ms;
-      await appendEvent(workflowId, { type: 'timerStarted', seq: cmd.seq, fireAt });
-      timerService.schedule(workflowId, cmd.seq, fireAt);
-      return false;
-    }
-    if (cmd.type === 'startChild') {
-      // Both modes launch and park; the difference is whether the parent is later
-      // woken by the child's result. Detached: no completion is threaded back.
-      const childId = launch(cmd.childName, cmd.childArgs);
-      recordChild(workflowId, cmd.seq, childId);
-      if (!cmd.detached) {
-        // Blocking: record the started marker and the reverse link, so when the
-        // child settles its result is appended back here (notifyParentOfTerminal).
-        await appendEvent(workflowId, { type: 'childStarted', seq: cmd.seq, childId });
-        parentOfChild.set(childId, { parentId: workflowId, seq: cmd.seq });
-      }
-      return false;
-    }
-    if (cmd.type === 'cancelChild') {
-      const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
-      if (childId) await requestCancel(childId);
-      return false;
-    }
-    return false;
-  }
-
-  /**
-   * Drive one execution forward, one workflow task at a time, until it reaches a
-   * resting point. Each iteration is a *cold replay*: a fresh context is built from
-   * the full history and the workflow re-run (the worker owns replay; the server
-   * keeps no per-execution memory between tasks). The result is then dispositioned:
-   *
-   * - **done / failed** — record the terminal outcome and stop.
-   * - **continueAsNew** — close this run and restart fresh on the same id (history
-   *   + args reset), then loop to drive the new run.
-   * - **commands** — dispatch each. If at least one appended a completion event,
-   *   loop to make more progress; if the batch only dispatched deferred work
-   *   (everything does now) it made no progress, so park and return.
-   * - **no commands** — parked on external input (a signal); return.
-   *
-   * Returning is not "finished": a parked execution is re-entered by a fresh
-   * `driveExecution` when something wakes it — a signal, a timer firing, an
-   * activity report, a child completing, or a cancel. Serializing concurrent wakes
-   * is `pump`'s job (services/pump.ts); this assumes one drive per execution.
-   *
-   * Every command dispatch-and-parks — activities, timers, and both blocking and
-   * fire-and-forget children — so no frame is ever held for an operation's duration.
-   */
-  async function driveExecution(workflowId: string): Promise<void> {
-    for (;;) {
-      const rec = await historyStore.get(workflowId);
-      if (!rec || rec.status !== 'running') return;
-      const suggested = rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD;
-      // fresh snapshot => cold replay each task, exactly as the old `drive` did
-      const out = await workflowExecutor.replayTask(rec.name, rec.args, rec.history.slice(), suggested);
-      if (out.done) {
-        await historyStore.setStatus(workflowId, 'completed', { result: out.result });
-        await notifyParentOfTerminal(workflowId);
-        return;
-      }
-      if (out.failed) {
-        await historyStore.setStatus(workflowId, 'failed', { failure: out.failure });
-        await notifyParentOfTerminal(workflowId);
-        return;
-      }
-      // Fourth terminal case: close this run and restart fresh on the same id.
-      // Children are spared (we cancel nothing), and history accounting resets —
-      // the suggestion is derived from history length, so it drops to false too.
-      const caN = out.commands.find((c): c is ContinueAsNewCommand => c.type === 'continueAsNew');
-      if (caN) { await historyStore.resetForContinueAsNew(workflowId, caN.args); continue; }
-      if (out.commands.length === 0) return; // parked, waiting on an external signal
-      let progressed = false;
-      for (const cmd of out.commands) {
-        if (await executeCommand(workflowId, cmd)) progressed = true;
-      }
-      // A batch that only dispatched deferred work appended nothing: park until a
-      // timer fires, an activity reports, or a child completes.
-      if (!progressed) return;
-    }
-  }
-
   async function appendSignal(workflowId: string, signalName: string, payload: unknown): Promise<void> {
     await historyStore.append(workflowId, [{ type: 'signal', name: signalName, payload }]);
+    wake(workflowId);
   }
 
-  // Cancellation as a recorded external input: append `cancelRequested`, cascade
-  // to fire-and-forget children, then wake so replay applies it. Idempotent — a
-  // second request on an already-cancelling/terminal run is a no-op.
   async function requestCancel(workflowId: string): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
@@ -277,34 +206,26 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     wake(workflowId);
   }
 
-  // Crash recovery. History is the source of truth: rebuild the parent/child
-  // correlation from `childStarted` markers, then for each still-running execution
-  // re-arm pending timers (from `timerStarted.fireAt`), re-enqueue pending
-  // activities (from `activityScheduled` payloads), and recover any child result
-  // that settled but whose notification to the parent was lost to the crash.
   async function resumeFromHistory(records: ExecutionRecord[]): Promise<void> {
     const byId = new Map(records.map((r) => [r.workflowId, r]));
-
     for (const rec of records) {
       for (const ev of rec.history) {
         if (ev.type === 'childStarted') recordChild(rec.workflowId, ev.seq, ev.childId);
       }
     }
-
     let anyActivity = false;
     for (const rec of records) {
       if (rec.status !== 'running') continue;
       const done = completedSeqs(rec.history);
       for (const ev of rec.history) {
         if (ev.type === 'activityScheduled' && !done.activities.has(ev.seq)) {
-          taskQueue.enqueue({ workflowId: rec.workflowId, seq: ev.seq, name: ev.name, args: ev.args, options: ev.options });
+          activityTaskQueue.enqueue({ workflowId: rec.workflowId, seq: ev.seq, name: ev.name, args: ev.args, options: ev.options });
           anyActivity = true;
         } else if (ev.type === 'timerStarted' && !done.timers.has(ev.seq)) {
           timerService.schedule(rec.workflowId, ev.seq, ev.fireAt);
         } else if (ev.type === 'childStarted' && !done.children.has(ev.seq)) {
           const child = byId.get(ev.childId);
           if (child && child.status !== 'running') {
-            // child finished but the parent never got the notification — replay it
             await appendEvent(rec.workflowId, child.status === 'completed'
               ? { type: 'childCompleted', seq: ev.seq, result: child.result }
               : { type: 'childFailed', seq: ev.seq, error: errorMessage(child.failure) });
@@ -313,9 +234,62 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           }
         }
       }
+      wake(rec.workflowId); // re-drive from history
     }
     if (anyActivity) kickActivityWorker();
   }
 
-  return { driveExecution, appendSignal, requestCancel, reportActivityResult, resumeFromHistory };
+  // ── worker-facing seam (out-of-process workers) ──────────────────────────
+  async function pollWorkflowTask(): Promise<WorkflowTask | undefined> {
+    const leased = workflowTaskQueue.poll();
+    if (!leased) return undefined;
+    const rec = await historyStore.get(leased.workflowId);
+    if (!rec || rec.status !== 'running') { workflowTaskQueue.complete(leased.token); return undefined; }
+    // remember the version this task was built at, for the completion-time check
+    workflowLeases.set(leased.token, { workflowId: leased.workflowId, version: rec.version });
+    return {
+      token: leased.token,
+      workflowId: leased.workflowId,
+      name: rec.name,
+      args: rec.args,
+      history: rec.history.slice(),
+      continueAsNewSuggested: rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+    };
+  }
+
+  async function completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void> {
+    const lease = workflowLeases.get(token);
+    if (lease) {
+      workflowLeases.delete(token);
+      const rec = await historyStore.get(lease.workflowId);
+      // Optimistic version check: apply only if nothing advanced this execution
+      // since the task was built. A lease-race loser sees a bumped version and is
+      // discarded — safe, because replay commits no external effects (doc 06).
+      if (rec && rec.status === 'running' && rec.version === lease.version) {
+        await applyWorkflowTaskResult(lease.workflowId, result);
+      }
+    }
+    workflowTaskQueue.complete(token);
+  }
+
+  async function pollActivityTask(): Promise<LeasedActivityTask | undefined> {
+    const task = activityTaskQueue.poll();
+    if (!task) return undefined;
+    activityLeases.set(task.token, { workflowId: task.workflowId, seq: task.seq });
+    return task;
+  }
+
+  async function completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void> {
+    const lease = activityLeases.get(token);
+    activityTaskQueue.complete(token);
+    if (!lease) return; // lease expired → task redelivered → this completer is stale
+    activityLeases.delete(token);
+    await reportActivityResult(lease.workflowId, lease.seq, result);
+  }
+
+  return {
+    buildWorkflowTask, applyWorkflowTaskResult, reportActivityResult,
+    appendSignal, requestCancel, resumeFromHistory,
+    pollWorkflowTask, completeWorkflowTask, pollActivityTask, completeActivityTask,
+  };
 }

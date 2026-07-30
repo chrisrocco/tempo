@@ -1,5 +1,11 @@
 # 03 — Condition, Signals & Timers
 
+> **⚠ Implementation note (see `PROJECT.md` §4):** `condition` and signals are as
+> described. **Timers have changed**: they are now real wall-clock and durable — a
+> `timerStarted{fireAt}` event is recorded in history, a real (unref'd) `setTimeout`
+> fires it, and `resume()` re-arms pending timers from history on restart. The
+> "fires immediately" caveat below is historical.
+
 The three mechanisms that let a workflow *wait* — and the pattern that started the
 whole project.
 

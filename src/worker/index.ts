@@ -2,3 +2,4 @@
 export * from './activity_registry';
 export * from './activity_worker';
 export * from './workflow_worker';
+export * from './worker_loops';

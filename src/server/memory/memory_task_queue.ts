@@ -1,18 +1,32 @@
-// In-memory TaskQueue: a plain FIFO. No leasing or redelivery — in LocalService
-// the server enqueues a task and polls it back synchronously in the same tick, so
-// nothing is ever in flight. The lease/expiry machinery is added with the durable
-// queue in Phase 5.
-import type { ActivityTask } from '../../protocol';
+// In-memory TaskQueue: a FIFO with leasing. `poll` leases the next task with a
+// token + timeout; `complete` acks it. On each poll, tasks whose leases expired
+// are redelivered (unshifted to the front) — a crashed activity worker's task
+// runs again, which is the at-least-once behavior activity authors must be
+// idempotent against. Lease/expiry semantics come from the shared LeaseTable.
+import type { ActivityTask, LeasedActivityTask, TaskToken } from '../../protocol';
 import type { TaskQueue } from '../ports/task_queue';
+import { LeaseTable } from '../lease';
+
+const DEFAULT_LEASE_MS = 30_000;
 
 export class MemoryTaskQueue implements TaskQueue {
   private readonly queue: ActivityTask[] = [];
+  private readonly leases = new LeaseTable<ActivityTask>('act');
+
+  constructor(private readonly leaseMs: number = DEFAULT_LEASE_MS) {}
 
   enqueue(task: ActivityTask): void {
     this.queue.push(task);
   }
 
-  poll(): ActivityTask | undefined {
-    return this.queue.shift();
+  poll(): LeasedActivityTask | undefined {
+    for (const task of this.leases.reclaimExpired()) this.queue.unshift(task); // redeliver
+    const task = this.queue.shift();
+    if (!task) return undefined;
+    return { ...task, token: this.leases.lease(task, this.leaseMs) };
+  }
+
+  complete(token: TaskToken): void {
+    this.leases.ack(token); // expired token → no-op (task already redelivered)
   }
 }

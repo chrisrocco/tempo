@@ -20,32 +20,48 @@ engine with a documented path to a distributed deployment.
   and re-drives running executions on restart — re-arming pending timers,
   re-dispatching pending activities, and recovering parent/child links from
   history. The `HistoryStore` port is async; in-memory stays the fast default.
+- **Distributed.** Workers poll the server over a `WorkflowService` seam — the
+  same worker code runs in-proc (`LocalService`) or across processes via
+  `RemoteService` (HTTP+JSON RPC). Task queues carry leases (a crashed worker's
+  task redelivers, at-least-once), and an optimistic version check discards a
+  lease-race loser's append. The three `bin/` process mains deploy the tiers
+  separately.
 - **Layered.** `protocol/ <- core/ <- {server, services, worker, client} <-
-  {local_runtime, entrypoints}`, plus the `workflow.ts` (author) and `index.ts`
-  (host) entrypoints. `pump` is scoped inside `LocalService`.
+  {local_runtime, entrypoints, bin}`, plus the `workflow.ts` (author) and
+  `index.ts` (host) entrypoints. `pump`'s per-execution mutex + coalescing now
+  lives in the workflow-task queue.
 - **Typed.** Full TypeScript, `tsc --noEmit` clean.
-- **Tested.** 43 specs passing under Jasmine + `tsx` (`npm test`), including the
-  bug-hotlist monitor example and end-to-end crash-recovery.
-- **Phases 1–4 of `ROADMAP.md` are complete.**
-- **Not yet built:** the import-path lint rule, distribution (Phase 5 — RPC,
-  `RemoteService`, leasing, the optimistic-CAS version check), and production
-  hardening (Phase 6). See `ROADMAP.md`.
+- **Tested.** 51 specs passing under Jasmine + `tsx` (`npm test`), including the
+  bug-hotlist example, end-to-end crash-recovery, and a real multi-process
+  distributed run over RPC.
+- **Phases 1–4 complete; Phase 5 (distribution) core done** — its exit criterion
+  (a real server process with worker-crash redelivery, at-least-once, and
+  lease-race rejection) passes.
+- **Not yet built:** Phase-5 refinements (sticky cache, activity heartbeats +
+  start-to-close timeouts, durable timer-sweep failover), the import-path lint
+  rule, and production hardening (Phase 6). See `ROADMAP.md`.
 
 ## How to read these
 
+**On a fresh session, read [`PROJECT.md`](PROJECT.md) first** — it is the living
+"you are here": current status, the real code map, which of these concept docs have
+drifted from the implementation (with a divergence table), the test map, and what's
+next. The docs below explain the *ideas*; `PROJECT.md` tracks what is *built*.
+
 Read in order the first time; they build on each other.
 
-| Doc | What it covers |
-|-----|----------------|
-| `00-overview.md` | Origin, what exists, the mental model, glossary |
-| `01-determinism-boundary.md` | **The** organizing principle — read this first if nothing else |
-| `02-replay-and-execution.md` | Replay vs activation, warm/cold paths, the core loop, ALS |
-| `03-condition-signals-timers.md` | `condition` internals, signals, the queue pattern, timers |
-| `04-runtime-pump-and-drive.md` | `drive`, `pump`'s two jobs, `executeCommand` |
-| `05-continue-as-new.md` | The suggested flag, the primitive, the layer split |
-| `06-architecture-and-distribution.md` | File structure, entrypoints, the service seam, going distributed |
-| `07-type-model.md` | The `protocol` types and the modeling decisions behind them |
-| `ROADMAP.md` | Phased implementation plan with exit criteria |
+| Doc | What it covers | Status |
+|-----|----------------|--------|
+| [`PROJECT.md`](PROJECT.md) | **Handoff hub** — status, code map, doc-vs-code divergences, test map, TODO | current |
+| `00-overview.md` | Origin, what exists, the mental model, glossary | ideas ✅ |
+| `01-determinism-boundary.md` | **The** organizing principle — read this first if nothing else | ✅ |
+| `02-replay-and-execution.md` | Replay vs activation, warm/cold paths, the core loop, ALS | ✅ |
+| `03-condition-signals-timers.md` | `condition` internals, signals, the queue pattern, timers | ⚠ timers now durable |
+| `04-runtime-pump-and-drive.md` | `drive`, `pump`'s two jobs, `executeCommand` | ❌ superseded by the poll/queue model — read for the *why* |
+| `05-continue-as-new.md` | The suggested flag, the primitive, the layer split | ✅ |
+| `06-architecture-and-distribution.md` | File structure, entrypoints, the service seam, going distributed | ⚠ mostly built; see `PROJECT.md §4` |
+| `07-type-model.md` | The `protocol` types and the modeling decisions behind them | ⚠ grown; see `PROJECT.md §4` |
+| `ROADMAP.md` | Phased implementation plan with exit criteria | accurate; P1–4 + P5 core done |
 
 ## Target project structure
 

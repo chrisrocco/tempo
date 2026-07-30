@@ -1,5 +1,16 @@
 # 04 — Runtime: `drive`, `pump`, and Command Execution
 
+> **⚠ Implementation status (read `PROJECT.md` §4):** this describes the original
+> **Phase-0 in-process model** and is now **superseded**. `drive` and `pump` no
+> longer exist as such: the runtime is a **poll/respond** model
+> (`server_core.buildWorkflowTask` / `applyWorkflowTaskResult`), and `pump`'s two
+> jobs (mutual exclusion + wake-coalescing) now live in the **workflow-task queue**
+> (`server/memory/memory_workflow_task_queue.ts`), with leasing added for crash
+> tolerance. Read this doc for the *why* — the two concrete bugs `pump` prevents
+> still apply, they're just enforced by the queue now. Also note: every dispatched
+> op now records a marker event and *parks* (dispatch-and-park), rather than
+> `executeCommand` running it inline.
+
 The non-deterministic half. Where the core's commands get executed and where
 concurrency is controlled. In the distributed system these responsibilities move
 to the server and workers (`06`); this doc describes the in-process form.

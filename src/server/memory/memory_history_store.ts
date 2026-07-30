@@ -5,6 +5,7 @@
 // writes. Powers LocalService and the fast test path.
 import type { ExecutionStatus, HistoryEvent } from '../../protocol';
 import type { ExecutionRecord, HistoryStore } from '../ports/history_store';
+import { VersionConflictError } from '../ports/history_store';
 
 export class MemoryHistoryStore implements HistoryStore {
   private readonly records = new Map<string, ExecutionRecord>();
@@ -27,6 +28,14 @@ export class MemoryHistoryStore implements HistoryStore {
   async append(workflowId: string, events: HistoryEvent[]): Promise<void> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.history.push(...events);
+    rec.version += 1;
+  }
+
+  async appendIfVersion(workflowId: string, events: HistoryEvent[], expectedVersion: number): Promise<void> {
+    const rec = this.records.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    if (rec.version !== expectedVersion) throw new VersionConflictError(workflowId, expectedVersion, rec.version);
     rec.history.push(...events);
     rec.version += 1;
   }

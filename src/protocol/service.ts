@@ -5,6 +5,8 @@
 // share the task shapes without importing each other (see doc 06).
 import type { ActivityOptions } from './activity_options';
 import type { Command } from './commands';
+import type { HistoryEvent } from './history_events';
+import type { TaskToken } from './task_token';
 
 export type ExecutionStatus = 'running' | 'completed' | 'failed';
 
@@ -13,20 +15,24 @@ export interface StartWorkflowOptions {
 }
 
 /**
- * The client-facing surface. Workers and client are written once against this
- * seam; two implementations satisfy it (local + remote).
- *
- * NOTE: the *worker-facing* poll/respond methods (and leasing) described in doc
- * 06 are the distributed seam — they join this interface in Phase 5 alongside
- * `RemoteService`. Today the in-proc workers are wired directly by
- * `local_runtime`, so `WorkflowService` carries only the client-facing methods.
+ * The seam both `LocalService` (in-proc) and, later, `RemoteService` (RPC) satisfy.
+ * It has two faces: the client-facing methods (start/signal/cancel/get*) and the
+ * worker-facing poll/respond methods. Workers are written once against the latter
+ * — the in-proc workers poll a local implementation; distributed workers poll a
+ * remote one over RPC (doc 06).
  */
 export interface WorkflowService {
+  // ── client-facing ──
   start(name: string, args?: unknown[], opts?: StartWorkflowOptions): { workflowId: string };
   signal(workflowId: string, signalName: string, payload?: unknown): void;
   cancel(workflowId: string): void;
   getResult(workflowId: string): Promise<unknown>;
   getStatus(workflowId: string): ExecutionStatus;
+  // ── worker-facing (poll a task, respond when done) ──
+  pollWorkflowTask(): Promise<WorkflowTask | undefined>;
+  completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void>;
+  pollActivityTask(): Promise<LeasedActivityTask | undefined>;
+  completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
 }
 
 // ── worker task contracts ───────────────────────────────────────────────
@@ -44,6 +50,25 @@ export interface ActivityTask {
 export type ActivityResult =
   | { ok: true; result: unknown }
   | { ok: false; error: string };
+
+/** An activity task handed to a worker, with the lease token to complete it. */
+export interface LeasedActivityTask extends ActivityTask {
+  token: TaskToken;
+}
+
+/**
+ * A workflow task handed to a workflow worker: replay this history and respond
+ * with the resulting commands + terminal state. The `token` identifies the task
+ * on complete; `continueAsNewSuggested` is the server's history-growth hint.
+ */
+export interface WorkflowTask {
+  token: TaskToken;
+  workflowId: string;
+  name: string;
+  args: unknown[];
+  history: HistoryEvent[];
+  continueAsNewSuggested: boolean;
+}
 
 /** What a workflow worker returns after replaying one workflow task. */
 export interface WorkflowTaskResult {

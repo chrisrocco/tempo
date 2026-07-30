@@ -19,6 +19,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import type { ExecutionStatus, HistoryEvent } from '../../protocol';
 import type { ExecutionRecord, HistoryStore } from '../ports/history_store';
+import { VersionConflictError } from '../ports/history_store';
 
 interface PersistedMeta {
   workflowId: string;
@@ -86,6 +87,17 @@ export class FileHistoryStore implements HistoryStore {
   async append(workflowId: string, events: HistoryEvent[]): Promise<void> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
+    await this.persistAppend(workflowId, rec, events);
+  }
+
+  async appendIfVersion(workflowId: string, events: HistoryEvent[], expectedVersion: number): Promise<void> {
+    const rec = this.cache.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    if (rec.version !== expectedVersion) throw new VersionConflictError(workflowId, expectedVersion, rec.version);
+    await this.persistAppend(workflowId, rec, events);
+  }
+
+  private async persistAppend(workflowId: string, rec: ExecutionRecord, events: HistoryEvent[]): Promise<void> {
     rec.history.push(...events);
     rec.version += 1;
     const lines = events.map((e) => `${JSON.stringify(e)}\n`).join('');

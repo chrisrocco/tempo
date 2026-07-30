@@ -2,4 +2,6 @@
 export * from './commands';
 export * from './activity_options';
 export * from './history_events';
+export * from './task_token';
 export * from './service';
+export * from './rpc';

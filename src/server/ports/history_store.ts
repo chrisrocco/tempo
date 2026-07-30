@@ -20,6 +20,15 @@ export interface ExecutionRecord {
   failure?: unknown;
 }
 
+/** Thrown by `appendIfVersion` when the execution has moved on — a lost lease race. */
+export class VersionConflictError extends Error {
+  constructor(workflowId: string, expected: number, actual: number) {
+    super(`version conflict on ${workflowId}: expected ${expected}, have ${actual}`);
+    this.name = 'VersionConflictError';
+    Object.setPrototypeOf(this, VersionConflictError.prototype);
+  }
+}
+
 export interface HistoryStore {
   /** Register a fresh execution. Rejects if the id already exists. */
   create(workflowId: string, name: string, args: unknown[]): Promise<void>;
@@ -29,6 +38,14 @@ export interface HistoryStore {
   list(): Promise<ExecutionRecord[]>;
   /** Append events atomically and bump the version. Rejects if the id is unknown. */
   append(workflowId: string, events: HistoryEvent[]): Promise<void>;
+  /**
+   * Append conditional on `expectedVersion` matching the current version
+   * (optimistic concurrency) — throws VersionConflictError otherwise. The
+   * distributed replacement for the single-writer assumption: two workers racing
+   * the same task both hold the same expected version, and only the first append
+   * lands (doc 06). Safe to reject the loser because replay commits no effects.
+   */
+  appendIfVersion(workflowId: string, events: HistoryEvent[], expectedVersion: number): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */
   setStatus(
     workflowId: string,

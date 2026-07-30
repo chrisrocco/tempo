@@ -1,4 +1,8 @@
-// The WorkflowService implementations workers + client talk to. (RemoteService
-// joins LocalService here in Phase 5.)
-export * from './pump';
+// The WorkflowService implementations workers + client talk to: LocalService
+// (in-proc) and RemoteService (RPC), plus the server host + HTTP transport the
+// distributed server is built from. `pump` retired here — its per-execution mutex
+// + coalescing moved into the workflow-task queue (server/memory).
 export * from './local_service';
+export * from './server_host';
+export * from './rpc_server';
+export * from './remote_service';

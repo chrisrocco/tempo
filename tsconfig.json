@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["node", "jasmine"]
   },
-  "include": ["src/**/*.ts", "spec/**/*.ts", "examples/**/*.ts"]
+  "include": ["src/**/*.ts", "spec/**/*.ts", "examples/**/*.ts", "bin/**/*.ts"]
 }
