@@ -41,7 +41,7 @@ export interface ChildFailedEvent extends CompletionEventBase {
  * "scheduled before running" for crash-recovery idempotency, and advance history
  * past the command so a re-emitted `scheduleActivity` isn't re-dispatched. It also
  * carries the dispatch payload (name/args/options) so a resumed process can
- * re-enqueue the task from history alone. See doc 06 / ROADMAP Phase 4.
+ * re-enqueue the task from history alone. See docs/architecture/distribution.md; ROADMAP Phase 4.
  */
 export interface ActivityScheduledEvent {
   type: 'activityScheduled';
@@ -54,7 +54,7 @@ export interface ActivityScheduledEvent {
 /**
  * Marker: a timer has been started. Records the absolute `fireAt` so a resumed
  * process re-arms it from history (past-due timers fire at once) — history stays
- * the single source of truth for time (doc 03). Not workflow-visible; `sleep`
+ * the single source of truth for time (docs/concepts/conditions-signals-timers.md). Not workflow-visible; `sleep`
  * still resolves on the `timerFired` completion.
  */
 export interface TimerStartedEvent {
@@ -87,7 +87,7 @@ export interface SignalEvent {
  * Externally injected cancellation request (from a client, or a parent cancelling
  * a child). Like a signal it carries no seq; applying it rejects the run's
  * outstanding operations with a CancelledFailure. Recorded so the cancel point is
- * fixed in history and replay stays deterministic (doc 03).
+ * fixed in history and replay stays deterministic (docs/concepts/conditions-signals-timers.md).
  */
 export interface CancelRequestedEvent {
   type: 'cancelRequested';

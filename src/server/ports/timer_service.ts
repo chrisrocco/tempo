@@ -5,7 +5,7 @@
 // sweep — after a restart the in-memory `setTimeout` handles are gone, so the
 // server re-arms (or immediately fires past-due) every timer still in the table.
 // The durable adapter (a DB-backed table + a crash-tolerant sweep with failover)
-// is the Phase 4/5 swap; the server logic here does not change. See doc 03 / 06.
+// is the Phase 4/5 swap; the server logic here does not change. See docs/concepts/conditions-signals-timers.md and docs/architecture/distribution.md.
 export interface TimerService {
   /** Wire the sweep's fire callback. Called once at server startup. */
   onFire(handler: (workflowId: string, seq: number) => void): void;

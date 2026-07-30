@@ -1,6 +1,6 @@
-# 03 — Condition, Signals & Timers
+# Conditions, Signals & Timers
 
-> **⚠ Implementation note (see `PROJECT.md` §4):** `condition` and signals are as
+> **⚠ Implementation note (see [`PROJECT.md` §4](../../PROJECT.md)):** `condition` and signals are as
 > described. **Timers have changed**: they are now real wall-clock and durable — a
 > `timerStarted{fireAt}` event is recorded in history, a real (unref'd) `setTimeout`
 > fires it, and `resume()` re-arms pending timers from history on restart. The
@@ -87,5 +87,5 @@ payload and that the "worker" is the runtime's timer service.
 The timer's fire-time must be **recorded in history**, not read from `Date.now()`
 at replay. A workflow's sense of "now" comes from history like everything else.
 The current in-memory runtime fires timers immediately; a real one records a
-fire-time and sweeps due timers with a crash-tolerant background loop (see `06`
-and `ROADMAP.md`).
+fire-time and sweeps due timers with a crash-tolerant background loop (see
+[distribution](../architecture/distribution.md) and [`ROADMAP.md`](../../ROADMAP.md)).

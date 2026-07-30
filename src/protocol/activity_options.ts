@@ -2,7 +2,7 @@
 // Declared here in `protocol` because it is part of the wire format, but the core
 // only *emits* it — it is **interpreted only by the server** when a command is
 // turned into activity work (retry decisions, later timeouts/task-queue routing).
-// See doc 07 and doc 06.
+// See docs/concepts/type-model.md and docs/architecture/distribution.md.
 
 export interface RetryPolicy {
   /**

@@ -1,4 +1,4 @@
-# 02 — Replay & Execution Model
+# Replay & Execution Model
 
 How a workflow actually advances, and the mechanics of the core engine.
 
@@ -32,7 +32,7 @@ regardless of what triggered it.
 
 Because any activation might land cold, every suspension point must be
 reconstructible identically from history — which is exactly the determinism rule
-from `01`.
+from [the determinism boundary](determinism-boundary.md).
 
 ## The core loop mechanics
 
@@ -65,7 +65,7 @@ for a signal, to its handler). An event referencing an unknown seq is a
 
 After applying each event, the engine runs `settle`: drain the microtask queue,
 then run the **condition unblock pass** to a fixpoint (re-check every blocked
-predicate; resolving one may enable another). See `03` for the condition
+predicate; resolving one may enable another). See [conditions, signals & timers](conditions-signals-timers.md) for the condition
 mechanism. `settle` is the atomic "advance the workflow as far as it can go on the
 information currently available" step.
 

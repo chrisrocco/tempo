@@ -1,4 +1,4 @@
-# 05 — Continue-As-New
+# Continue-As-New
 
 `continueAsNew` is the mechanism for a long-running (or infinite) workflow to
 avoid unbounded history growth: it ends the current run and starts a fresh one,
@@ -73,8 +73,9 @@ Two behaviors established earlier live specifically here:
 - **History accounting resets.** The new run starts empty (the whole point), and
   the server sets `continueAsNewSuggested` back to false on it.
 
-Home: `server/workflow_task_handler.ts`, as a fourth terminal case alongside
-completed / failed / (schedule-more-tasks).
+Home: `server_core.ts` (`applyWorkflowTaskResult`), as a fourth terminal case
+alongside completed / failed / (schedule-more-tasks). There is no separate
+`workflow_task_handler.ts` file — the disposition lives in `server_core.ts`.
 
 ## The rule to hold
 
@@ -87,4 +88,4 @@ run-spanning state into an engine that should know about exactly one run at a ti
 
 Because it threads through the service seam, local mode gets it for free:
 `LocalService`'s in-process handler implements the same close-and-restart logic
-against the in-memory store, driven by `pump`.
+against the in-memory store, driven by the in-proc drain loops.

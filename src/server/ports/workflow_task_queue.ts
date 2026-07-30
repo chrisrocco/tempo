@@ -4,7 +4,7 @@
 // and completion releases it. The in-memory adapter keeps `pump`'s two guarantees
 // — at most one task in flight per execution (Job 1), and a wake arriving mid-task
 // coalesces into exactly one more task (Job 2) — and adds a lease so a crashed
-// worker's task redelivers on timeout (doc 04 / 06).
+// worker's task redelivers on timeout (docs/architecture/task-execution-and-concurrency.md, distribution.md).
 import type { TaskToken } from '../../protocol';
 
 export interface WorkflowTaskQueue {

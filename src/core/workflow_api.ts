@@ -1,7 +1,7 @@
 // The deterministic primitives workflow code calls. Each one records a command
 // (stamped with the next `seq`) and hands back a promise that stays parked until
 // the matching completion event is applied during replay. Only the workflow
-// entrypoint (`workflow.ts`) re-exports these; see doc 01.
+// entrypoint (`workflow.ts`) re-exports these; see docs/concepts/determinism-boundary.md.
 import type { ActivityOptions, Command, CommandSpec } from '../protocol';
 import { getContext } from './context';
 import { CancelledFailure } from './errors';
@@ -34,7 +34,7 @@ export interface ChildHandle {
 /**
  * Fire-and-forget child: start a child workflow and keep going — no await, no
  * completion is threaded back. Returns a handle to cancel it. This is the
- * spawn-and-cancel shape the bug-hotlist monitor needs (doc 03 / ROADMAP). Cancel
+ * spawn-and-cancel shape the bug-hotlist monitor needs (docs/concepts/conditions-signals-timers.md; ROADMAP). Cancel
  * is itself replay-safe: it emits a `cancelChild` command the server acts on once.
  */
 export function startChild(name: string, ...args: unknown[]): ChildHandle {
@@ -58,7 +58,7 @@ export function startChild(name: string, ...args: unknown[]): ChildHandle {
  * Terminal: end this run and start a fresh one carrying `args`. It emits a
  * `continueAsNew` command and returns a promise that never resolves, so no code
  * runs after it — `return continueAsNew(...)` (or `await` it) halts the run. The
- * actual close-and-restart is the server's job (doc 05); the core just stops here.
+ * actual close-and-restart is the server's job (docs/concepts/continue-as-new.md); the core just stops here.
  */
 export const continueAsNew = (...args: unknown[]): Promise<never> =>
   scheduleCommand({ type: 'continueAsNew', args }) as Promise<never>;
@@ -81,7 +81,7 @@ export type ActivityInterface = Record<string, (...args: any[]) => any>;
  * A typed façade over `runActivity`: `proxyActivities<A>(options)` returns a proxy
  * whose methods forward to the activity of the same name, carrying `options` on
  * the command. Pure sugar living in the core (re-exported from `workflow.ts`);
- * `A` drives the compile-time argument/return types. See doc 06 / doc 07.
+ * `A` drives the compile-time argument/return types. See docs/architecture/distribution.md and docs/concepts/type-model.md.
  */
 export function proxyActivities<A extends ActivityInterface>(
   options: ActivityOptions = {},

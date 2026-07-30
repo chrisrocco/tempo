@@ -43,7 +43,7 @@ export interface HistoryStore {
    * (optimistic concurrency) — throws VersionConflictError otherwise. The
    * distributed replacement for the single-writer assumption: two workers racing
    * the same task both hold the same expected version, and only the first append
-   * lands (doc 06). Safe to reject the loser because replay commits no effects.
+   * lands (docs/architecture/distribution.md). Safe to reject the loser because replay commits no effects.
    */
   appendIfVersion(workflowId: string, events: HistoryEvent[], expectedVersion: number): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */

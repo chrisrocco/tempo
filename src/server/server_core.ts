@@ -3,7 +3,7 @@
 // (buildWorkflowTask / pollActivityTask), applies what workers report back
 // (applyWorkflowTaskResult / reportActivityResult), and owns everything durable
 // via the ports. Waking an execution = enqueuing a workflow task; that queue's
-// coalescing is the distributed replacement for `pump` (doc 04 / 06).
+// coalescing is the distributed replacement for `pump` (docs/architecture/task-execution-and-concurrency.md, distribution.md).
 import type {
   ActivityResult,
   Command,
@@ -264,7 +264,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       const rec = await historyStore.get(lease.workflowId);
       // Optimistic version check: apply only if nothing advanced this execution
       // since the task was built. A lease-race loser sees a bumped version and is
-      // discarded — safe, because replay commits no external effects (doc 06).
+      // discarded — safe, because replay commits no external effects (docs/architecture/distribution.md).
       if (rec && rec.status === 'running' && rec.version === lease.version) {
         await applyWorkflowTaskResult(lease.workflowId, result);
       }

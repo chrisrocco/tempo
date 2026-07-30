@@ -8,6 +8,13 @@ a tested interface, never a rewrite.
 
 Legend: **Goal** · **Deliverables** · **Exit criteria** · **Docs**
 
+> Doc references below use the original `0N` shorthand. Those docs now live under
+> [`docs/`](docs/README.md) with semantic names: `00`→concepts/overview,
+> `01`→concepts/determinism-boundary, `02`→concepts/replay-and-execution,
+> `03`→concepts/conditions-signals-timers, `04`→architecture/task-execution-and-concurrency,
+> `05`→concepts/continue-as-new, `06`→architecture/{structure-and-layers, distribution},
+> `07`→concepts/type-model. See the [docs index](docs/README.md).
+
 ---
 
 ## Phase 0 — Current state (done)

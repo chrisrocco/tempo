@@ -40,7 +40,7 @@ export interface CancelChildCommand extends CommandBase {
 /**
  * Terminal command: end the current run and start a fresh one carrying `args`.
  * The core only emits it and halts; the close-and-restart is a server disposition
- * (doc 05). Not something the core ever acts on itself.
+ * (docs/concepts/continue-as-new.md). Not something the core ever acts on itself.
  */
 export interface ContinueAsNewCommand extends CommandBase {
   type: 'continueAsNew';

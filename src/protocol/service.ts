@@ -2,7 +2,7 @@
 // task payloads the server hands to workers and gets back. These are pure data +
 // signatures — the seam that `LocalService` (in-proc) and, later, `RemoteService`
 // (RPC) both satisfy. Living in `protocol/` is what lets `server` and `worker`
-// share the task shapes without importing each other (see doc 06).
+// share the task shapes without importing each other (see docs/architecture/structure-and-layers.md).
 import type { ActivityOptions } from './activity_options';
 import type { Command } from './commands';
 import type { HistoryEvent } from './history_events';
@@ -19,7 +19,7 @@ export interface StartWorkflowOptions {
  * It has two faces: the client-facing methods (start/signal/cancel/get*) and the
  * worker-facing poll/respond methods. Workers are written once against the latter
  * — the in-proc workers poll a local implementation; distributed workers poll a
- * remote one over RPC (doc 06).
+ * remote one over RPC (docs/architecture/structure-and-layers.md).
  */
 export interface WorkflowService {
   // ── client-facing ──

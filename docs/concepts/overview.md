@@ -1,4 +1,4 @@
-# 00 — Overview
+# Overview
 
 ## Where this came from
 
@@ -40,20 +40,14 @@ Two roles of code run against the engine:
 
 Everything in this engine is an elaboration of that loop.
 
-## What exists today (and what doesn't)
+## What exists today
 
-Built and tested, in-memory, single process:
-- The deterministic **core**: context, command primitives, `condition`, signal
-  handling, event application, and the replay engine.
-- An in-process **runtime**: an execution store, the `drive` loop, `pump`
-  concurrency guard, command execution, and blocking child workflows.
-
-Not built yet (see `ROADMAP.md`):
-- Persistence, real task queues, durable timers.
-- Distribution (separate server / workflow-worker / activity-worker processes).
-- Cancellation and *fire-and-forget* children — the missing pieces needed to run
-  the original bug-hotlist monitor for real, rather than the blocking child model
-  we have now.
+The concept docs describe the *design*. For the current build status — what's
+implemented, what's deferred, and where the code has moved past these docs — see
+[`PROJECT.md` §1](../../PROJECT.md), the maintained "you are here" for the
+codebase. As of this writing the engine runs three ways (in-memory, durably on
+disk, and distributed across processes), and the original bug-hotlist monitor
+runs for real — see [getting started](../guides/getting-started.md).
 
 ## Glossary
 
@@ -79,4 +73,5 @@ Not built yet (see `ROADMAP.md`):
 - **Execution** — one running instance of a workflow, identified by a workflowId
   (and, across continue-as-new, a runId per run).
 - **Determinism boundary** — the architectural line between the deterministic
-  core and the non-deterministic runtime. See `01`.
+  core and the non-deterministic runtime. See [the determinism
+  boundary](determinism-boundary.md).

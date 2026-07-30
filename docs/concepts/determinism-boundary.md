@@ -1,4 +1,4 @@
-# 01 — The Determinism Boundary
+# The Determinism Boundary
 
 This is the single most important idea in the system. Every structural decision —
 file layout, entrypoints, how features are split across layers, how the thing
@@ -53,7 +53,8 @@ be reached for directly.
 - **Distribution (the big one).** Since the core commits no external effects,
   running it twice is harmless. That is precisely what makes it safe for two
   workers to replay the same execution in a race and discard the loser's work
-  (see `06`). Distribution is *only* tractable because of this boundary.
+  (see [distribution](../architecture/distribution.md)). Distribution is *only*
+  tractable because of this boundary.
 
 ## How the boundary is enforced (not just documented)
 
@@ -65,9 +66,11 @@ be reached for directly.
 2. **Dependency direction.** `protocol <- core <- runtime <- entrypoints`. Nothing
    in `core/` may import from the runtime layers. `core/` may import only
    `protocol/` (pure data).
-3. **A lint rule** on import paths makes the two points above mechanical rather
-   than aspirational: a file of workflow code that reaches for `Date.now()` or a
-   runtime function fails the build.
+3. **A lint rule (planned).** An import-path lint rule would make the two points
+   above mechanical rather than aspirational — a file of workflow code that reaches
+   for `Date.now()` or a runtime function would fail the build. It is not yet
+   implemented (see [`PROJECT.md` §6](../../PROJECT.md)); today the boundary is
+   upheld by the two entrypoints and dependency direction plus discipline.
 
 If you remember one thing from this documentation: **respect the line.** When
 deciding where a new feature goes, ask "is this deterministic (history-in,

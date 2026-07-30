@@ -1,6 +1,6 @@
-# 04 — Runtime: `drive`, `pump`, and Command Execution
+# Task Execution & Concurrency
 
-> **⚠ Implementation status (read `PROJECT.md` §4):** this describes the original
+> **⚠ Implementation status (read [`PROJECT.md` §4](../../PROJECT.md)):** this describes the original
 > **Phase-0 in-process model** and is now **superseded**. `drive` and `pump` no
 > longer exist as such: the runtime is a **poll/respond** model
 > (`server_core.buildWorkflowTask` / `applyWorkflowTaskResult`), and `pump`'s two
@@ -13,7 +13,7 @@
 
 The non-deterministic half. Where the core's commands get executed and where
 concurrency is controlled. In the distributed system these responsibilities move
-to the server and workers (`06`); this doc describes the in-process form.
+to the server and workers (see [distribution](distribution.md)); this doc describes the in-process form.
 
 ## The execution record
 
@@ -50,7 +50,8 @@ because they separate in the distributed system:
 
 Today activities run inline (`await fn(...)`), timers fire immediately, and
 children are **blocking** (`executeChild` starts a child and awaits its result).
-Fire-and-forget children + cancellation are deferred (see `ROADMAP.md`).
+Fire-and-forget children + cancellation were deferred at this phase; both are
+built now (see [`PROJECT.md` §1](../../PROJECT.md)).
 
 ## `pump`: the concurrency guard
 
@@ -87,5 +88,5 @@ stand-in for two distributed mechanisms: a per-workflow single-in-flight task
 queue / lease (Job 1) and at-least-once wake delivery (Job 2). The `running`
 boolean can't survive across processes, so the durable version replaces it with an
 optimistic-locking version check on history append plus a durable task queue
-(`06`). In the productionized layout, `pump` is **scoped to the in-process
+(see [distribution](distribution.md)). In the productionized layout, `pump` is **scoped to the in-process
 `LocalService`** and does not exist in the distributed server.

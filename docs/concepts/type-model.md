@@ -1,4 +1,4 @@
-# 07 — Type Model
+# Type Model
 
 The `protocol/` types are the contract both sides of the determinism boundary
 speak, and (once distributed) the wire format. The modeling choices below favor
@@ -92,7 +92,7 @@ It also lets `SignalEvent` be a plain named export instead of
 - `proxyActivities<A>(options)` returns a typed proxy: `A` (a record of activity
   signatures) drives inferred argument/return types on each method — the
   compile-time payoff of the proxy. At runtime it's a thin forwarder to
-  `runActivity` (see `06`).
+  `runActivity` (see [distribution](../architecture/distribution.md)).
 
 ## `ActivityOptions` — declared here, interpreted elsewhere
 

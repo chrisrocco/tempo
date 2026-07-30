@@ -1,4 +1,4 @@
-# Workflow Engine — Design & Handoff Documentation
+# Workflow Engine — Design Record
 
 This is the design record for a minimal-but-correct durable workflow engine (a
 small Temporal-shaped system) written in TypeScript. It began as a question about
@@ -7,39 +7,16 @@ engine with a documented path to a distributed deployment.
 
 ## Current status
 
-- **Working runtime** behind the `WorkflowService` seam, with activities
-  (`proxyActivities` + retry policy), real wall-clock timers, signals,
-  `condition`, blocking **and** fire-and-forget child workflows, `continueAsNew`,
-  and cancellation (`CancelledFailure`, cascading to children).
-- **Dispatch-and-park.** No operation holds an orchestration frame while it runs —
-  activities, timers, and children all dispatch, park the workflow in history, and
-  resume on their completion event. The server keeps no per-execution memory
-  between tasks.
-- **Durable + crash-recoverable.** A filesystem `HistoryStore` (append-only event
-  log per execution, single-writer lockfile) persists state; `resume()` rebuilds
-  and re-drives running executions on restart — re-arming pending timers,
-  re-dispatching pending activities, and recovering parent/child links from
-  history. The `HistoryStore` port is async; in-memory stays the fast default.
-- **Distributed.** Workers poll the server over a `WorkflowService` seam — the
-  same worker code runs in-proc (`LocalService`) or across processes via
-  `RemoteService` (HTTP+JSON RPC). Task queues carry leases (a crashed worker's
-  task redelivers, at-least-once), and an optimistic version check discards a
-  lease-race loser's append. The three `bin/` process mains deploy the tiers
-  separately.
-- **Layered.** `protocol/ <- core/ <- {server, services, worker, client} <-
-  {local_runtime, entrypoints, bin}`, plus the `workflow.ts` (author) and
-  `index.ts` (host) entrypoints. `pump`'s per-execution mutex + coalescing now
-  lives in the workflow-task queue.
-- **Typed.** Full TypeScript, `tsc --noEmit` clean.
-- **Tested.** 51 specs passing under Jasmine + `tsx` (`npm test`), including the
-  bug-hotlist example, end-to-end crash-recovery, and a real multi-process
-  distributed run over RPC.
-- **Phases 1–4 complete; Phase 5 (distribution) core done** — its exit criterion
-  (a real server process with worker-crash redelivery, at-least-once, and
-  lease-race rejection) passes.
-- **Not yet built:** Phase-5 refinements (sticky cache, activity heartbeats +
-  start-to-close timeouts, durable timer-sweep failover), the import-path lint
-  rule, and production hardening (Phase 6). See `ROADMAP.md`.
+A working, event-sourced durable workflow engine that runs three ways — in-memory,
+durable single-binary (filesystem + crash-recovery), and distributed (server +
+workers over RPC). Programming model: activities (`proxyActivities` + retries),
+real timers, signals, `condition`, blocking **and** fire-and-forget children,
+`continueAsNew`, cancellation. `tsc --noEmit` clean; full suite green via `npm test`.
+
+> **Live status, the real code map, the doc-vs-implementation divergence table,
+> the test map, and what's next all live in [`PROJECT.md`](PROJECT.md)** — the
+> single source of truth for "what's built." This README is the stable design
+> front-door: the ideas, the concept-doc index, and the destination structure.
 
 ## How to read these
 
@@ -50,32 +27,39 @@ next. The docs below explain the *ideas*; `PROJECT.md` tracks what is *built*.
 
 Read in order the first time; they build on each other.
 
+The full documentation set lives under [`docs/`](docs/README.md), organized into
+**concepts** (why), **architecture** (how it's built), **behavior** (what's
+guaranteed, linked to the specs), **guides** (how-to), and **contributing**. The
+[docs index](docs/README.md) has the reading order and the four-bucket map. The
+core concept docs, in reading order:
+
 | Doc | What it covers | Status |
 |-----|----------------|--------|
 | [`PROJECT.md`](PROJECT.md) | **Handoff hub** — status, code map, doc-vs-code divergences, test map, TODO | current |
-| `00-overview.md` | Origin, what exists, the mental model, glossary | ideas ✅ |
-| `01-determinism-boundary.md` | **The** organizing principle — read this first if nothing else | ✅ |
-| `02-replay-and-execution.md` | Replay vs activation, warm/cold paths, the core loop, ALS | ✅ |
-| `03-condition-signals-timers.md` | `condition` internals, signals, the queue pattern, timers | ⚠ timers now durable |
-| `04-runtime-pump-and-drive.md` | `drive`, `pump`'s two jobs, `executeCommand` | ❌ superseded by the poll/queue model — read for the *why* |
-| `05-continue-as-new.md` | The suggested flag, the primitive, the layer split | ✅ |
-| `06-architecture-and-distribution.md` | File structure, entrypoints, the service seam, going distributed | ⚠ mostly built; see `PROJECT.md §4` |
-| `07-type-model.md` | The `protocol` types and the modeling decisions behind them | ⚠ grown; see `PROJECT.md §4` |
-| `ROADMAP.md` | Phased implementation plan with exit criteria | accurate; P1–4 + P5 core done |
+| [concepts/overview](docs/concepts/overview.md) | Origin, the mental model, glossary | ✅ |
+| [concepts/determinism-boundary](docs/concepts/determinism-boundary.md) | **The** organizing principle — read this first if nothing else | ✅ |
+| [concepts/replay-and-execution](docs/concepts/replay-and-execution.md) | Replay vs activation, warm/cold paths, the core loop, ALS | ✅ |
+| [concepts/conditions-signals-timers](docs/concepts/conditions-signals-timers.md) | `condition` internals, signals, the queue pattern, timers | ⚠ timers now durable |
+| [concepts/continue-as-new](docs/concepts/continue-as-new.md) | The suggested flag, the primitive, the layer split | ✅ |
+| [concepts/type-model](docs/concepts/type-model.md) | The `protocol` types and the modeling decisions behind them | ⚠ grown; see `PROJECT.md §4` |
+| [architecture/structure-and-layers](docs/architecture/structure-and-layers.md) | File structure, entrypoints, the service seam | ⚠ mostly built; see `PROJECT.md §4` |
+| [architecture/distribution](docs/architecture/distribution.md) | Going distributed; the failure-semantics caveat | ⚠ mostly built; see `PROJECT.md §4` |
+| [architecture/task-execution-and-concurrency](docs/architecture/task-execution-and-concurrency.md) | `drive`, `pump`'s two jobs, `executeCommand` | ❌ superseded by the poll/queue model — read for the *why* |
+| [`ROADMAP.md`](ROADMAP.md) | Phased implementation plan with exit criteria | accurate; P1–4 + P5 core done |
 
-## Target project structure
+## Design blueprint (the intended shape)
 
-This is the **destination** layout (roughly Phase 5 of `ROADMAP.md`). The tree
-below the entrypoints now matches through Phase 3: `protocol/`, `core/`,
-`server/` (ports + in-memory adapters + `server_core`), `services/` (`pump` +
-`LocalService`), `worker/`, `client/`, and `local_runtime.ts`. Still ahead are the
-durable adapters under `server/memory/`'s eventual siblings, `remote_service.ts`,
-the `bin/` process mains, and some server files not yet split out
-(`workflow_task_handler.ts` etc. are currently folded into `server_core.ts`). The
-full shape is kept here because it encodes the whole design: the layering *is* the
-determinism boundary, and the dependency arrows only ever point down
+This is the **original design target**, annotated with which concept doc owns each
+piece — the blueprint, **not an inventory of what exists today**. Some pieces shown
+aren't built yet (the `workflow_task_handler` / `activity_task_handler` split,
+`worker/sticky_cache.ts`); some were superseded (`services/pump.ts` — its mutex +
+coalescing moved into the workflow-task queue); some built files aren't shown; and
+the `spec/` tree here is illustrative, not the real one. **For the actual current
+tree see [`PROJECT.md`](PROJECT.md) §3; for where the code diverged from this
+blueprint, §4.** The shape still earns its place: the layering *is* the determinism
+boundary, and the dependency arrows only ever point down
 (`protocol <- core <- {server, services, worker, client} <- {entrypoints, bin}`).
-Bracketed notes point at the concept doc or explainer that owns each piece.
+Bracketed notes point at the concept doc that owns each piece.
 
 ```
 workflow-engine/
