@@ -27,14 +27,21 @@ export interface StartWorkflowOptions {
  */
 export interface WorkflowService {
   // ── client-facing ──
-  start(name: string, args?: unknown[], opts?: StartWorkflowOptions): { workflowId: string };
+  start(
+    name: string,
+    args?: unknown[],
+    opts?: StartWorkflowOptions,
+  ): { workflowId: string };
   signal(workflowId: string, signalName: string, payload?: unknown): void;
   cancel(workflowId: string): void;
   getResult(workflowId: string): Promise<unknown>;
   getStatus(workflowId: string): ExecutionStatus;
   // ── worker-facing (poll a task, respond when done) ──
   pollWorkflowTask(): Promise<WorkflowTask | undefined>;
-  completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void>;
+  completeWorkflowTask(
+    token: TaskToken,
+    result: WorkflowTaskResult,
+  ): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
 }
@@ -52,8 +59,7 @@ export interface ActivityTask {
 
 /** What an activity worker reports back after running an activity function. */
 export type ActivityResult =
-  | { ok: true; result: unknown }
-  | { ok: false; error: string };
+  { ok: true; result: unknown } | { ok: false; error: string };
 
 /** An activity task handed to a worker, with the lease token to complete it. */
 export interface LeasedActivityTask extends ActivityTask {

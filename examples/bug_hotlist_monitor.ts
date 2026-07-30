@@ -41,7 +41,9 @@ export async function hotlistMonitor(): Promise<string[]> {
   const everMonitored: string[] = [];
 
   setHandler(diffSignal, (d: BugDiff) => queue.push(d));
-  setHandler(stopSignal, () => { stopped = true; });
+  setHandler(stopSignal, () => {
+    stopped = true;
+  });
 
   for (;;) {
     await condition(() => queue.length > 0 || stopped);
@@ -66,9 +68,14 @@ export async function hotlistMonitor(): Promise<string[]> {
 }
 
 /** Wire a LocalService runtime with the monitor + its child, reporting each check. */
-export function bugHotlistRuntime(onCheck: (bugId: string) => void = () => {}): Runtime {
+export function bugHotlistRuntime(
+  onCheck: (bugId: string) => void = () => {},
+): Runtime {
   return createLocalRuntime()
-    .registerActivity('checkBug', (bugId: string) => { onCheck(bugId); return true; })
+    .registerActivity('checkBug', (bugId: string) => {
+      onCheck(bugId);
+      return true;
+    })
     .registerWorkflow('bugMonitor', bugMonitor)
     .registerWorkflow('hotlistMonitor', hotlistMonitor);
 }

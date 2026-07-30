@@ -13,7 +13,9 @@ export interface ActivityWorker {
   runTask(task: ActivityTask): Promise<ActivityResult>;
 }
 
-export function createActivityWorker(registry: ActivityRegistry): ActivityWorker {
+export function createActivityWorker(
+  registry: ActivityRegistry,
+): ActivityWorker {
   return {
     async runTask(task: ActivityTask): Promise<ActivityResult> {
       const fn = registry.get(task.name);

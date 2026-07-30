@@ -9,14 +9,14 @@ readable as a specification and keep the guides that lean on it from rotting.
 Not every test is documentation, and forcing it to be makes both worse.
 
 - **Documentation specs** — the author-facing programming model. These are meant
-  to be *read* as the spec of what the engine does:
+  to be _read_ as the spec of what the engine does:
   [`spec/integration/local.spec.ts`](../../spec/integration/local.spec.ts) and
   [`spec/examples/`](../../spec/examples/). Hold them to the conventions below.
 - **Correctness / internals specs** — [`spec/server/`](../../spec/server/) and the
   distributed/resume integration specs. These prove invariants behind the
   [architecture](../architecture/) docs (version CAS, lease redelivery, durable
   timers). Keep them rigorous, but don't contort them into English prose; they
-  document *for contributors*, not for authors.
+  document _for contributors_, not for authors.
 
 ## Conventions for documentation specs
 
@@ -29,7 +29,7 @@ Not every test is documentation, and forcing it to be makes both worse.
    - ✅ `it('retries a flaky activity and succeeds within maximumAttempts')`
    - ❌ `it('should work with signals')`
    - ❌ `it('test condition 2')`
-3. **One guarantee per test.** If the name needs "and" between two *different*
+3. **One guarantee per test.** If the name needs "and" between two _different_
    behaviors, split it. (An "and" describing a single cause→effect is fine — see
    the first example above.)
 4. **Each test is a minimal, self-contained example.** Define the workflow inline

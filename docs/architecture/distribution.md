@@ -19,16 +19,16 @@ workflow worker.**
   Client-facing API (start/signal/getResult) and worker-facing API (poll/respond
   for both task types, heartbeat). Its heart is the workflow-task handling in
   `server_core.ts` (`buildWorkflowTask` / `applyWorkflowTaskResult`): on receiving
-  a command batch it *atomically* appends events, creates downstream tasks, and
+  a command batch it _atomically_ appends events, creates downstream tasks, and
   closes the task — conditional on a version check. (This handling lives in
   `server_core.ts`; it is **not** a separate `workflow_task_handler.ts` file.)
 - **Workflow workers** — stateless. Poll a workflow task → build context from the
   returned history → replay (core) → respond with commands. A **sticky cache** of
   warm executions is a planned optimization (not yet built); today every task is a
-  cold replay from fetched history. Workflow *types* register here.
+  cold replay from fetched history. Workflow _types_ register here.
 - **Activity workers** — stateless. Poll an activity task → run the registered
   activity function → report result/failure, heartbeating long ones. This is the
-  **only place I/O happens**. Activity *implementations* register here.
+  **only place I/O happens**. Activity _implementations_ register here.
 
 ## What makes it resilient
 
@@ -66,8 +66,8 @@ options are just more history-in/commands-out payload.
 
 `LocalService` and `RemoteService` are **not** behaviorally identical: local is
 effectively exactly-once and synchronous-ish; remote is at-least-once with
-redelivery, retries, and latency. The seam unifies the *code path*, not the
-*failure semantics*. Keep `LocalService` for the fast inner loop, but run a subset
+redelivery, retries, and latency. The seam unifies the _code path_, not the
+_failure semantics_. Keep `LocalService` for the fast inner loop, but run a subset
 of integration tests against a real server
 (`spec/integration/remote.spec.ts`, `spec/integration/distributed.spec.ts`) to
 exercise duplicate execution and non-idempotent effects. Pretending the two are

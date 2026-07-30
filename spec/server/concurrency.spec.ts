@@ -20,9 +20,17 @@ describe('optimistic version check (appendIfVersion)', () => {
     await store.create('wf', 'w', []);
     const v0 = (await store.get('wf'))!.version;
 
-    await store.appendIfVersion('wf', [{ type: 'signal', name: 'a', payload: 1 }], v0); // v0 -> v0+1
+    await store.appendIfVersion(
+      'wf',
+      [{ type: 'signal', name: 'a', payload: 1 }],
+      v0,
+    ); // v0 -> v0+1
     await expectAsync(
-      store.appendIfVersion('wf', [{ type: 'signal', name: 'b', payload: 2 }], v0),
+      store.appendIfVersion(
+        'wf',
+        [{ type: 'signal', name: 'b', payload: 2 }],
+        v0,
+      ),
     ).toBeRejectedWithError(VersionConflictError);
 
     const rec = await store.get('wf');
@@ -90,8 +98,13 @@ describe('lease race resolved by the version check', () => {
 
     // both replayed the same history → both respond with the same command
     const result: WorkflowTaskResult = {
-      done: false, result: undefined, failed: false, failure: undefined,
-      commands: [{ type: 'scheduleActivity', seq: 0, name: 'a', args: [], options: {} }],
+      done: false,
+      result: undefined,
+      failed: false,
+      failure: undefined,
+      commands: [
+        { type: 'scheduleActivity', seq: 0, name: 'a', args: [], options: {} },
+      ],
     };
 
     await core.completeWorkflowTask(taskA!.token, result); // first: version matches → applies
@@ -100,6 +113,8 @@ describe('lease race resolved by the version check', () => {
     await core.completeWorkflowTask(taskB!.token, result); // second: version moved on → rejected
     const rec = await historyStore.get('wf');
     expect(rec!.version).toBe(1); // unchanged — the loser's result was discarded
-    expect(rec!.history.filter((e) => e.type === 'activityScheduled').length).toBe(1);
+    expect(
+      rec!.history.filter((e) => e.type === 'activityScheduled').length,
+    ).toBe(1);
   });
 });

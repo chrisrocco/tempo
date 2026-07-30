@@ -21,9 +21,12 @@ export interface WorkflowWorker {
   ): Promise<WorkflowTaskResult>;
 }
 
-export const createWorkflowRegistry = (): WorkflowRegistry => new Map<string, WorkflowFn>();
+export const createWorkflowRegistry = (): WorkflowRegistry =>
+  new Map<string, WorkflowFn>();
 
-export function createWorkflowWorker(registry: WorkflowRegistry): WorkflowWorker {
+export function createWorkflowWorker(
+  registry: WorkflowRegistry,
+): WorkflowWorker {
   return {
     has(name: string): boolean {
       return registry.has(name);

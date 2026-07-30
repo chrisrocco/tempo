@@ -20,10 +20,21 @@ export async function settle(ctx: WorkflowContext): Promise<void> {
   }
 }
 
-export async function replay(ctx: WorkflowContext, workflowFn: WorkflowFn): Promise<WorkflowContext> {
+export async function replay(
+  ctx: WorkflowContext,
+  workflowFn: WorkflowFn,
+): Promise<WorkflowContext> {
   const wf = als.run(ctx, () => workflowFn(...ctx.args));
-  wf.then((r) => { ctx.done = true; ctx.result = r; },
-          (e) => { ctx.failed = true; ctx.failure = e; });
+  wf.then(
+    (r) => {
+      ctx.done = true;
+      ctx.result = r;
+    },
+    (e) => {
+      ctx.failed = true;
+      ctx.failure = e;
+    },
+  );
   await settle(ctx);
   while (!ctx.done && !ctx.failed && ctx.idx < ctx.events.length) {
     const ev = ctx.events[ctx.idx++];

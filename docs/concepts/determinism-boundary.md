@@ -6,7 +6,7 @@ scales to many processes — is downstream of it.
 
 ## The line
 
-> The **deterministic core** turns a *history* into a set of *commands*. It does
+> The **deterministic core** turns a _history_ into a set of _commands_. It does
 > nothing else: no I/O, no wall-clock reads, no randomness, no access to mutable
 > global state. Everything non-deterministic lives on the other side of the line,
 > in the **runtime**.
@@ -53,7 +53,7 @@ be reached for directly.
 - **Distribution (the big one).** Since the core commits no external effects,
   running it twice is harmless. That is precisely what makes it safe for two
   workers to replay the same execution in a race and discard the loser's work
-  (see [distribution](../architecture/distribution.md)). Distribution is *only*
+  (see [distribution](../architecture/distribution.md)). Distribution is _only_
   tractable because of this boundary.
 
 ## How the boundary is enforced (not just documented)

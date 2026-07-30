@@ -6,13 +6,13 @@ How a workflow actually advances, and the mechanics of the core engine.
 
 - An **activation** (workflow task) is one batch of new events the runtime applies
   to move a workflow forward: "a signal arrived," "a timer fired," "an activity
-  completed." A signal *causes an activation*.
+  completed." A signal _causes an activation_.
 - **Replay** is rebuilding in-memory state that was lost, by re-running the
   workflow function from the top and re-feeding recorded history.
 
 The crucial correction: **a signal does not cause a replay.** An event causes an
-activation; that activation involves replay *only if the worker no longer holds
-the execution's live state.*
+activation; that activation involves replay _only if the worker no longer holds
+the execution's live state._
 
 ### Warm path (sticky cache)
 
@@ -26,7 +26,7 @@ applies only the new events to that live state and resumes from where it stopped
 If the live state is gone — crash, cache eviction, redeploy, a different worker —
 the worker has nothing in memory, so before applying the new event it must
 reconstruct "where were we" by running the workflow from line one, re-feeding
-every recorded event in order, until it catches up. *Then* it applies the new
+every recorded event in order, until it catches up. _Then_ it applies the new
 activation. Replay would happen for **any** activation on a cold worker,
 regardless of what triggered it.
 
@@ -51,7 +51,7 @@ The per-run state object (the "context", a.k.a. activator) holds:
 
 Each primitive call (`runActivity`, `sleep`, …) allocates a seq, registers a
 completion promise, and — **only if `isLive`** — pushes a command. During replay
-(`isLive === false`), commands are *suppressed*: they're already durable in
+(`isLive === false`), commands are _suppressed_: they're already durable in
 history, so re-emitting them would double-dispatch. The moment the last recorded
 event is consumed, `isLive` flips to `true` (**the live edge**), and further calls
 push genuinely new commands. So one flag divides "catching up" from "making
@@ -75,7 +75,7 @@ Workflow code calls bare `runActivity(...)` with no context argument; the
 primitive recovers the context via `AsyncLocalStorage`. The subtle, load-bearing
 property: an `await` continuation is bound to the context that was active **when
 the await suspended**, not when the promise is resolved. So when the engine
-resolves a parked promise from *outside* the `als.run(...)` scope (in the replay
+resolves a parked promise from _outside_ the `als.run(...)` scope (in the replay
 driver), the workflow's resumed code still re-enters with the correct context.
 This is why you don't thread context through every call — and why a naive global
 would break the instant two workflows interleave on one worker.

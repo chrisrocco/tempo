@@ -10,7 +10,7 @@ the core.
 
 Every workflow execution has a hard history ceiling; a monitor loop that runs
 forever would eventually hit it and be terminated. Any unbounded workflow needs
-*some* continue-as-new strategy. It's not optional for long-lived workflows.
+_some_ continue-as-new strategy. It's not optional for long-lived workflows.
 
 ## `continueAsNewSuggested` — the flag (core-side input)
 
@@ -24,12 +24,13 @@ await continueAsNew(carriedState);
 ```
 
 Key points:
+
 - It's a **server-provided input**, not a command — it flows in via history/context.
 - It updates at activation boundaries (each new workflow task re-evaluates it).
 - Acting on it is your choice; act at a **clean checkpoint** (state coherent,
   queue drained), never mid-reconciliation.
-- It's a *hint*. You can also roll over on your own `historyLength` threshold or a
-  cadence; for high-throughput workflows you may want to continue-as-new *earlier*
+- It's a _hint_. You can also roll over on your own `historyLength` threshold or a
+  cadence; for high-throughput workflows you may want to continue-as-new _earlier_
   than the suggestion.
 
 Its home is `core/context.ts` (the field) and the workflow reads it; the server
@@ -51,7 +52,7 @@ Home: `core/workflow_api.ts`, beside `runActivity`; re-exported from the
 `protocol/commands.ts` gains
 `ContinueAsNewCommand extends CommandBase { type: 'continueAsNew'; args: unknown[] }`,
 added to `Command` and `CommandSpec`. Optionally a `WorkflowContinuedAsNew`
-history event so a run records *how* it ended (mirroring completed/failed).
+history event so a run records _how_ it ended (mirroring completed/failed).
 
 ## Server — the actual behavior
 
@@ -66,7 +67,7 @@ it performs a distinct terminal disposition, atomically:
 
 Two behaviors established earlier live specifically here:
 
-- **Children survive.** Continue-as-new is *not* a real close, so parent-close
+- **Children survive.** Continue-as-new is _not_ a real close, so parent-close
   policy must not fire: child workflows (and pollers) carry into the new run. The
   handler's teardown must not cascade cancellation the way a genuine
   completion/termination does. It's a branch in the close logic.
@@ -80,8 +81,8 @@ alongside completed / failed / (schedule-more-tasks). There is no separate
 ## The rule to hold
 
 Do **not** let `core/replay.ts` "handle" continue-as-new by looping internally or
-re-seeding its own context. The core's job ends at *emitting the terminal command
-and halting the run*. Starting the next run is a stateful, transactional act only
+re-seeding its own context. The core's job ends at _emitting the terminal command
+and halting the run_. Starting the next run is a stateful, transactional act only
 the server can do atomically (new runId, enqueue, spare children). Keeping that
 division is what prevents a genuinely run-spanning mechanism from smuggling
 run-spanning state into an engine that should know about exactly one run at a time.

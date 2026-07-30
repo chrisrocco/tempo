@@ -15,12 +15,18 @@ export function maxAttempts(retry?: RetryPolicy): number {
 }
 
 /** Given `attemptsMade` (>= 1) that all failed, should another attempt run? */
-export function shouldRetry(retry: RetryPolicy | undefined, attemptsMade: number): boolean {
+export function shouldRetry(
+  retry: RetryPolicy | undefined,
+  attemptsMade: number,
+): boolean {
   return attemptsMade < maxAttempts(retry);
 }
 
 /** Backoff delay before the attempt that follows `attemptsMade` failures. */
-export function backoffMs(retry: RetryPolicy | undefined, attemptsMade: number): number {
+export function backoffMs(
+  retry: RetryPolicy | undefined,
+  attemptsMade: number,
+): number {
   if (!retry) return 0;
   const initial = retry.initialIntervalMs ?? 0;
   const coefficient = retry.backoffCoefficient ?? 2;

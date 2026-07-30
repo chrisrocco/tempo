@@ -41,7 +41,11 @@ import type { ActivityWorker, WorkflowWorker } from '../worker';
 // A plain server-side wait between activity attempts. Distinct from TimerService
 // (durable, workflow-facing): retry backoff never touches history.
 const sleepMs = (ms: number): Promise<void> =>
-  ms > 0 ? new Promise((r) => { setTimeout(r, ms).unref?.(); }) : Promise.resolve();
+  ms > 0
+    ? new Promise((r) => {
+        setTimeout(r, ms).unref?.();
+      })
+    : Promise.resolve();
 
 interface ResultWaiter {
   promise: Promise<unknown>;
@@ -72,8 +76,13 @@ export function createLocalService(
   let counter = 0;
 
   const core = createServerCore({
-    historyStore, workflowTaskQueue, activityTaskQueue, timerService, launch: (n, a) => launch(n, a),
-    kickWorkflowWorker, kickActivityWorker,
+    historyStore,
+    workflowTaskQueue,
+    activityTaskQueue,
+    timerService,
+    launch: (n, a) => launch(n, a),
+    kickWorkflowWorker,
+    kickActivityWorker,
   });
 
   // Startup sweep: re-arm persisted timers on boot (no-op on a fresh in-memory table).
@@ -86,17 +95,26 @@ export function createLocalService(
     wfDraining = true;
     void (async () => {
       try {
-        for (let leased = workflowTaskQueue.poll(); leased; leased = workflowTaskQueue.poll()) {
+        for (
+          let leased = workflowTaskQueue.poll();
+          leased;
+          leased = workflowTaskQueue.poll()
+        ) {
           const { token, workflowId: id } = leased;
           const task = await core.buildWorkflowTask(id);
           if (task) {
             const result = await workflowWorker.replayTask(
-              task.name, task.args, task.history, task.continueAsNewSuggested);
+              task.name,
+              task.args,
+              task.history,
+              task.continueAsNewSuggested,
+            );
             await core.applyWorkflowTaskResult(id, result);
             const rec = await historyStore.get(id);
             if (rec) {
               statusMirror.set(id, rec.status);
-              if (rec.status !== 'running') settleTerminal(id, rec.status, rec.result, rec.failure);
+              if (rec.status !== 'running')
+                settleTerminal(id, rec.status, rec.result, rec.failure);
             }
           }
           workflowTaskQueue.complete(token);
@@ -115,7 +133,11 @@ export function createLocalService(
     actDraining = true;
     void (async () => {
       try {
-        for (let task = activityTaskQueue.poll(); task; task = activityTaskQueue.poll()) {
+        for (
+          let task = activityTaskQueue.poll();
+          task;
+          task = activityTaskQueue.poll()
+        ) {
           const result = await runActivityWithRetry(task);
           await core.reportActivityResult(task.workflowId, task.seq, result);
           activityTaskQueue.complete(task.token);
@@ -126,12 +148,15 @@ export function createLocalService(
     })();
   }
 
-  async function runActivityWithRetry(task: ActivityTask): Promise<ActivityResult> {
+  async function runActivityWithRetry(
+    task: ActivityTask,
+  ): Promise<ActivityResult> {
     let attemptsMade = 0;
     for (;;) {
       const result = await activityWorker.runTask(task);
       attemptsMade += 1;
-      if (result.ok || !shouldRetry(task.options.retry, attemptsMade)) return result;
+      if (result.ok || !shouldRetry(task.options.retry, attemptsMade))
+        return result;
       await sleepMs(backoffMs(task.options.retry, attemptsMade));
     }
   }
@@ -141,7 +166,10 @@ export function createLocalService(
     if (!w) {
       let resolve!: (v: unknown) => void;
       let reject!: (e: unknown) => void;
-      const promise = new Promise<unknown>((res, rej) => { resolve = res; reject = rej; });
+      const promise = new Promise<unknown>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
       promise.catch(() => {}); // avoid unhandledRejection if getResult is never awaited
       w = { promise, resolve, reject, settled: false };
       waiters.set(workflowId, w);
@@ -156,19 +184,33 @@ export function createLocalService(
     w.reject(error);
   }
 
-  function settleTerminal(workflowId: string, status: ExecutionStatus, result: unknown, failure: unknown): void {
+  function settleTerminal(
+    workflowId: string,
+    status: ExecutionStatus,
+    result: unknown,
+    failure: unknown,
+  ): void {
     const w = ensureWaiter(workflowId);
     if (w.settled) return;
     w.settled = true;
-    if (status === 'completed') w.resolve(result); else w.reject(failure);
+    if (status === 'completed') w.resolve(result);
+    else w.reject(failure);
   }
 
-  function launch(name: string, args: unknown[], opts: StartWorkflowOptions = {}): string {
+  function launch(
+    name: string,
+    args: unknown[],
+    opts: StartWorkflowOptions = {},
+  ): string {
     const workflowId = opts.workflowId ?? `${name}-${++counter}`;
     statusMirror.set(workflowId, 'running');
     ensureWaiter(workflowId);
-    void historyStore.create(workflowId, name, args)
-      .then(() => { workflowTaskQueue.enqueue(workflowId); kickWorkflowWorker(); })
+    void historyStore
+      .create(workflowId, name, args)
+      .then(() => {
+        workflowTaskQueue.enqueue(workflowId);
+        kickWorkflowWorker();
+      })
       .catch((err) => rejectWaiter(workflowId, err));
     return workflowId;
   }
@@ -178,11 +220,13 @@ export function createLocalService(
       return { workflowId: launch(name, args, opts) };
     },
     signal(workflowId, signalName, payload) {
-      if (!statusMirror.has(workflowId)) throw new Error(`no execution ${workflowId}`);
+      if (!statusMirror.has(workflowId))
+        throw new Error(`no execution ${workflowId}`);
       void core.appendSignal(workflowId, signalName, payload); // appends + wakes
     },
     cancel(workflowId) {
-      if (!statusMirror.has(workflowId)) throw new Error(`no execution ${workflowId}`);
+      if (!statusMirror.has(workflowId))
+        throw new Error(`no execution ${workflowId}`);
       void core.requestCancel(workflowId);
     },
     getResult(workflowId) {
@@ -195,13 +239,19 @@ export function createLocalService(
     pollWorkflowTask(): Promise<WorkflowTask | undefined> {
       return core.pollWorkflowTask();
     },
-    completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void> {
+    completeWorkflowTask(
+      token: TaskToken,
+      result: WorkflowTaskResult,
+    ): Promise<void> {
       return core.completeWorkflowTask(token, result);
     },
     pollActivityTask(): Promise<LeasedActivityTask | undefined> {
       return core.pollActivityTask();
     },
-    completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void> {
+    completeActivityTask(
+      token: TaskToken,
+      result: ActivityResult,
+    ): Promise<void> {
       return core.completeActivityTask(token, result);
     },
     async resume() {
@@ -209,7 +259,8 @@ export function createLocalService(
       for (const rec of records) {
         statusMirror.set(rec.workflowId, rec.status);
         ensureWaiter(rec.workflowId);
-        if (rec.status !== 'running') settleTerminal(rec.workflowId, rec.status, rec.result, rec.failure);
+        if (rec.status !== 'running')
+          settleTerminal(rec.workflowId, rec.status, rec.result, rec.failure);
       }
       await core.resumeFromHistory(records); // rebuilds correlation, re-dispatches, wakes running
     },

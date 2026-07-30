@@ -23,14 +23,20 @@ import type {
   WorkflowTaskResult,
 } from '../protocol';
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => { setTimeout(r, ms).unref?.(); });
+const sleep = (ms: number): Promise<void> =>
+  new Promise((r) => {
+    setTimeout(r, ms).unref?.();
+  });
 
 export interface RemoteServiceOptions {
   /** How often getResult/pollers back off when there's nothing yet. */
   pollIntervalMs?: number;
 }
 
-export function createRemoteService(baseUrl: string, options: RemoteServiceOptions = {}): WorkflowService {
+export function createRemoteService(
+  baseUrl: string,
+  options: RemoteServiceOptions = {},
+): WorkflowService {
   const pollIntervalMs = options.pollIntervalMs ?? 5;
   const statusCache = new Map<string, ExecutionStatus>();
   let idCounter = 0;
@@ -51,11 +57,15 @@ export function createRemoteService(baseUrl: string, options: RemoteServiceOptio
       // Generate the id client-side so the handle is usable before the round trip lands.
       const workflowId = opts.workflowId ?? `wf-${Date.now()}-${++idCounter}`;
       statusCache.set(workflowId, 'running');
-      void call({ method: 'start', name, args, opts: { workflowId } }).catch(() => {});
+      void call({ method: 'start', name, args, opts: { workflowId } }).catch(
+        () => {},
+      );
       return { workflowId };
     },
     signal(workflowId, signalName, payload) {
-      void call({ method: 'signal', workflowId, signalName, payload }).catch(() => {});
+      void call({ method: 'signal', workflowId, signalName, payload }).catch(
+        () => {},
+      );
     },
     cancel(workflowId) {
       void call({ method: 'cancel', workflowId }).catch(() => {});
@@ -65,23 +75,40 @@ export function createRemoteService(baseUrl: string, options: RemoteServiceOptio
     },
     async getResult(workflowId) {
       for (;;) {
-        const outcome = (await call({ method: 'getOutcome', workflowId })) as WorkflowOutcome;
+        const outcome = (await call({
+          method: 'getOutcome',
+          workflowId,
+        })) as WorkflowOutcome;
         statusCache.set(workflowId, outcome.status);
         if (outcome.status === 'completed') return outcome.result;
-        if (outcome.status === 'failed') throw new Error(outcome.failure ?? 'workflow failed');
+        if (outcome.status === 'failed')
+          throw new Error(outcome.failure ?? 'workflow failed');
         await sleep(pollIntervalMs);
       }
     },
     async pollWorkflowTask(): Promise<WorkflowTask | undefined> {
-      return ((await call({ method: 'pollWorkflowTask' })) as WorkflowTask | null) ?? undefined;
+      return (
+        ((await call({ method: 'pollWorkflowTask' })) as WorkflowTask | null) ??
+        undefined
+      );
     },
-    async completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void> {
+    async completeWorkflowTask(
+      token: TaskToken,
+      result: WorkflowTaskResult,
+    ): Promise<void> {
       await call({ method: 'completeWorkflowTask', token, result });
     },
     async pollActivityTask(): Promise<LeasedActivityTask | undefined> {
-      return ((await call({ method: 'pollActivityTask' })) as LeasedActivityTask | null) ?? undefined;
+      return (
+        ((await call({
+          method: 'pollActivityTask',
+        })) as LeasedActivityTask | null) ?? undefined
+      );
     },
-    async completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void> {
+    async completeActivityTask(
+      token: TaskToken,
+      result: ActivityResult,
+    ): Promise<void> {
       await call({ method: 'completeActivityTask', token, result });
     },
   };

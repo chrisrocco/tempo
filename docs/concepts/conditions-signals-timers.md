@@ -6,7 +6,7 @@
 > fires it, and `resume()` re-arms pending timers from history on restart. The
 > "fires immediately" caveat below is historical.
 
-The three mechanisms that let a workflow *wait* — and the pattern that started the
+The three mechanisms that let a workflow _wait_ — and the pattern that started the
 whole project.
 
 ## `condition`: waiting on state, deterministically
@@ -30,18 +30,18 @@ whole project.
    that makes another true.
 
 The essential line is the registration into `blockedConditions`; the eager check
-is only an optimization. A predicate that's false stays parked until *something
-wakes the workflow* — a condition cannot spontaneously become true. It can only
+is only an optimization. A predicate that's false stays parked until _something
+wakes the workflow_ — a condition cannot spontaneously become true. It can only
 flip as a side effect of an activation (a signal, a completion) that runs the
 unblock pass. If nothing ever arrives, it waits forever — harmlessly, since a
 parked workflow accrues no history and consumes no resources.
 
 ### Why not just await a never-resolving promise?
 
-Because a signal doesn't *wake* an await — it only runs a handler. Something must
+Because a signal doesn't _wake_ an await — it only runs a handler. Something must
 bridge "handler mutated state" to "the parked promise resolves," and that bridge
 is the `blockedConditions` registry plus the unblock pass. `condition` is the
-general, replay-safe form of that wiring. (You *can* hand-roll it for one signal
+general, replay-safe form of that wiring. (You _can_ hand-roll it for one signal
 by capturing a `resolve` in the handler — that's just a single-use `condition`.)
 
 ## Signals: injecting input from outside
@@ -71,7 +71,7 @@ for (;;) {
 }
 ```
 
-The signal that pushes onto `queue` *is* the activation that triggers the unblock
+The signal that pushes onto `queue` _is_ the activation that triggers the unblock
 pass, and the handler runs before the pass — so the condition reliably sees the
 new item. That ordering guarantee is why the queue pattern never misses a diff.
 

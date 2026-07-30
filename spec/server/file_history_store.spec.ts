@@ -17,9 +17,13 @@ describe('FileHistoryStore', () => {
     try {
       const rt = createLocalRuntime({ historyStore: store })
         .registerActivity('greet', (n: string) => `hi ${n}`)
-        .registerWorkflow('greeter', async () => runActivity<string>('greet', 'world'));
+        .registerWorkflow('greeter', async () =>
+          runActivity<string>('greet', 'world'),
+        );
 
-      await expectAsync(rt.start<string>('greeter').result()).toBeResolvedTo('hi world');
+      await expectAsync(rt.start<string>('greeter').result()).toBeResolvedTo(
+        'hi world',
+      );
     } finally {
       await store.close();
       await fs.rm(dir, { recursive: true, force: true });
@@ -32,7 +36,9 @@ describe('FileHistoryStore', () => {
       const store1 = await FileHistoryStore.open(dir);
       const rt = createLocalRuntime({ historyStore: store1 })
         .registerActivity('double', (n: number) => n * 2)
-        .registerWorkflow('doubler', async () => runActivity<number>('double', 21));
+        .registerWorkflow('doubler', async () =>
+          runActivity<number>('double', 21),
+        );
 
       await rt.start<number>('doubler', [], { workflowId: 'wf-1' }).result();
       await store1.close(); // flush + release lock
@@ -42,8 +48,12 @@ describe('FileHistoryStore', () => {
       const rec = await store2.get('wf-1');
       expect(rec?.status).toBe('completed');
       expect(rec?.result).toBe(42);
-      expect(rec?.history.some((e) => e.type === 'activityScheduled')).toBe(true);
-      expect(rec?.history.some((e) => e.type === 'activityCompleted')).toBe(true);
+      expect(rec?.history.some((e) => e.type === 'activityScheduled')).toBe(
+        true,
+      );
+      expect(rec?.history.some((e) => e.type === 'activityCompleted')).toBe(
+        true,
+      );
       await store2.close();
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
@@ -54,7 +64,9 @@ describe('FileHistoryStore', () => {
     const dir = await tmpDir();
     try {
       const store1 = await FileHistoryStore.open(dir);
-      await expectAsync(FileHistoryStore.open(dir)).toBeRejectedWithError(/locked/);
+      await expectAsync(FileHistoryStore.open(dir)).toBeRejectedWithError(
+        /locked/,
+      );
 
       await store1.close(); // releasing the lock lets a fresh store open
       const store2 = await FileHistoryStore.open(dir);

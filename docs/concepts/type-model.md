@@ -42,7 +42,7 @@ Why this shape rather than an inline discriminated union with helper types:
 - `CommandBase` documents the shared `seq` once.
 - `CommandSpec` (the pre-seq input to `scheduleCommand`) is written as explicit
   per-variant `Omit`s. This is the fix for a real gotcha: `Omit<Command, 'seq'>`
-  over a *union* collapses to only the keys common to all members
+  over a _union_ collapses to only the keys common to all members
   (`{ type }`), silently dropping `name`/`ms`/etc. Omitting from each concrete
   interface avoids that. It's more verbose, and deliberately so — no
   `DistributiveOmit` conditional-type helper to decode.

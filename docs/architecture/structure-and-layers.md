@@ -1,7 +1,7 @@
 # Structure & Layers
 
 How the code is organized, the seams that make it extensible, and the two rules
-that keep the layering honest. This doc explains the *principles*; for the exact,
+that keep the layering honest. This doc explains the _principles_; for the exact,
 annotated file tree as it stands today, see [`PROJECT.md` §3](../../PROJECT.md) —
 that is the single source of truth for the live layout, kept current as the code
 moves so this doc doesn't have to re-rot a duplicated file list.
@@ -31,7 +31,7 @@ Above the stack sit the two entrypoints and the deployable process mains
 ## The two rules that keep it honest
 
 1. **Dependencies point down:** `protocol <- core <- {server, services, worker,
-   client} <- {local_runtime, entrypoints, bin}`. Nothing in `core/` imports from
+client} <- {local_runtime, entrypoints, bin}`. Nothing in `core/` imports from
    below it; `core/` may import only `protocol/` (pure data).
 2. **Two entrypoints:** workflow code imports only from `workflow.ts` (the
    deterministic surface); hosts import from `index.ts`. This is what turns the
@@ -54,7 +54,7 @@ implementations satisfy it:
 - **`RemoteService`** — an RPC client to a networked server (`ServerHost` behind
   `rpc_server`).
 
-Local vs. distributed is a *choice of implementation*, not a fork of the runtime.
+Local vs. distributed is a _choice of implementation_, not a fork of the runtime.
 The integration suite runs against `LocalService` unchanged, and a subset runs
 against a real server (see [distribution](distribution.md)).
 

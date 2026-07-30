@@ -6,9 +6,9 @@
 > (`server_core.buildWorkflowTask` / `applyWorkflowTaskResult`), and `pump`'s two
 > jobs (mutual exclusion + wake-coalescing) now live in the **workflow-task queue**
 > (`server/memory/memory_workflow_task_queue.ts`), with leasing added for crash
-> tolerance. Read this doc for the *why* — the two concrete bugs `pump` prevents
+> tolerance. Read this doc for the _why_ — the two concrete bugs `pump` prevents
 > still apply, they're just enforced by the queue now. Also note: every dispatched
-> op now records a marker event and *parks* (dispatch-and-park), rather than
+> op now records a marker event and _parks_ (dispatch-and-park), rather than
 > `executeCommand` running it inline.
 
 The non-deterministic half. Where the core's commands get executed and where
@@ -35,7 +35,7 @@ failed, or genuinely parked:
 4. Otherwise execute each command (appending completion events) and loop — the
    new events let the next iteration make more progress.
 
-Its inner `for(;;)` loops on the workflow's *own* forward progress.
+Its inner `for(;;)` loops on the workflow's _own_ forward progress.
 
 ## `executeCommand`: the only code that touches the world
 
@@ -64,21 +64,21 @@ snapshot):
 ### Job 1 — mutual exclusion
 
 If `signal()` called `drive` directly, a signal landing mid-drive would start a
-*second* `drive` interleaving with the first over the same `exec`. Both could
+_second_ `drive` interleaving with the first over the same `exec`. Both could
 reach the live edge for the same command seq — running an activity twice and
 settling the result promise twice. `if (running) return` makes a competing drive
 impossible.
 
 ### Job 2 — no lost wakeups
 
-`drive` works off a history snapshot. If a signal is appended *after* the snapshot
+`drive` works off a history snapshot. If a signal is appended _after_ the snapshot
 is taken but while the drive is still running, that drive never sees it and parks
 — and the workflow would sleep forever despite a pending signal. `pump` closes the
 window: a wake arriving while `running` sets `rerun = true`, and the
 `do { … } while (rerun)` loop runs `drive` once more against fresh history.
 
-`pump`'s outer `do…while` (re-run on an *external* wake) is not redundant with
-`drive`'s inner `for(;;)` (the workflow's *own* progress) — different triggers.
+`pump`'s outer `do…while` (re-run on an _external_ wake) is not redundant with
+`drive`'s inner `for(;;)` (the workflow's _own_ progress) — different triggers.
 
 ### Scope, and what it becomes
 

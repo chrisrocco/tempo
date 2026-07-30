@@ -19,13 +19,21 @@ import {
   runWorkflowWorker,
   type WorkerLoop,
 } from '../../src/worker';
-import { condition, defineSignal, runActivity, setHandler } from '../../src/workflow';
+import {
+  condition,
+  defineSignal,
+  runActivity,
+  setHandler,
+} from '../../src/workflow';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 interface Harness {
   service: ReturnType<typeof createRemoteService>;
-  registerWorkflow: (name: string, fn: (...a: any[]) => Promise<unknown>) => void;
+  registerWorkflow: (
+    name: string,
+    fn: (...a: any[]) => Promise<unknown>,
+  ) => void;
   registerActivity: (name: string, fn: (...a: any[]) => unknown) => void;
   teardown: () => Promise<void>;
 }
@@ -51,7 +59,9 @@ async function startHarness(): Promise<Harness> {
     teardown: async () => {
       await Promise.all(loops.map((l) => l.stop()));
       host.shutdown();
-      (server as Server & { closeAllConnections?: () => void }).closeAllConnections?.();
+      (
+        server as Server & { closeAllConnections?: () => void }
+      ).closeAllConnections?.();
       await new Promise<void>((r) => server.close(() => r()));
     },
   };
@@ -62,10 +72,14 @@ describe('distributed — client + workers over RPC', () => {
     const h = await startHarness();
     try {
       h.registerActivity('greet', (n: string) => `hi ${n}`);
-      h.registerWorkflow('greeter', async () => runActivity<string>('greet', 'world'));
+      h.registerWorkflow('greeter', async () =>
+        runActivity<string>('greet', 'world'),
+      );
 
       const { workflowId } = h.service.start('greeter');
-      await expectAsync(h.service.getResult(workflowId)).toBeResolvedTo('hi world');
+      await expectAsync(h.service.getResult(workflowId)).toBeResolvedTo(
+        'hi world',
+      );
     } finally {
       await h.teardown();
     }
@@ -76,7 +90,9 @@ describe('distributed — client + workers over RPC', () => {
     try {
       h.registerWorkflow('waiter', async () => {
         let go = false;
-        setHandler(defineSignal('go'), () => { go = true; });
+        setHandler(defineSignal('go'), () => {
+          go = true;
+        });
         await condition(() => go);
         return 'went';
       });

@@ -5,7 +5,11 @@
  * the RPC server dispatches to a server host. Pure data, like the rest of protocol.
  */
 
-import type { ActivityResult, ExecutionStatus, WorkflowTaskResult } from './service';
+import type {
+  ActivityResult,
+  ExecutionStatus,
+  WorkflowTaskResult,
+} from './service';
 import type { StartWorkflowOptions } from './service';
 import type { TaskToken } from './task_token';
 
@@ -17,15 +21,32 @@ export interface WorkflowOutcome {
 }
 
 export type RpcRequest =
-  | { method: 'start'; name: string; args: unknown[]; opts: StartWorkflowOptions }
-  | { method: 'signal'; workflowId: string; signalName: string; payload: unknown }
+  | {
+      method: 'start';
+      name: string;
+      args: unknown[];
+      opts: StartWorkflowOptions;
+    }
+  | {
+      method: 'signal';
+      workflowId: string;
+      signalName: string;
+      payload: unknown;
+    }
   | { method: 'cancel'; workflowId: string }
   | { method: 'getOutcome'; workflowId: string }
   | { method: 'pollWorkflowTask' }
-  | { method: 'completeWorkflowTask'; token: TaskToken; result: WorkflowTaskResult }
+  | {
+      method: 'completeWorkflowTask';
+      token: TaskToken;
+      result: WorkflowTaskResult;
+    }
   | { method: 'pollActivityTask' }
-  | { method: 'completeActivityTask'; token: TaskToken; result: ActivityResult };
+  | {
+      method: 'completeActivityTask';
+      token: TaskToken;
+      result: ActivityResult;
+    };
 
 export type RpcResponse =
-  | { ok: true; value: unknown }
-  | { ok: false; error: string };
+  { ok: true; value: unknown } | { ok: false; error: string };

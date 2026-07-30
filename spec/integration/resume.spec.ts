@@ -14,11 +14,17 @@ const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 describe('crash recovery — resume from a durable store', () => {
   it('resumes a workflow parked on a timer', async () => {
     const dir = await tmpDir();
-    const napper = async () => { await sleep(30); return 'awake'; };
+    const napper = async () => {
+      await sleep(30);
+      return 'awake';
+    };
     try {
       // process 1: dispatch the timer, then "crash"
       const store1 = await FileHistoryStore.open(dir);
-      const rt1 = createLocalRuntime({ historyStore: store1 }).registerWorkflow('napper', napper);
+      const rt1 = createLocalRuntime({ historyStore: store1 }).registerWorkflow(
+        'napper',
+        napper,
+      );
       rt1.start('napper', [], { workflowId: 'nap-1' });
       await wait(15); // let timerStarted persist
       rt1.shutdown();
@@ -26,10 +32,15 @@ describe('crash recovery — resume from a durable store', () => {
 
       // process 2: fresh runtime rebuilds from disk and re-arms the timer
       const store2 = await FileHistoryStore.open(dir);
-      const rt2 = createLocalRuntime({ historyStore: store2 }).registerWorkflow('napper', napper);
+      const rt2 = createLocalRuntime({ historyStore: store2 }).registerWorkflow(
+        'napper',
+        napper,
+      );
       await rt2.resume();
 
-      await expectAsync(rt2.getHandle<string>('nap-1').result()).toBeResolvedTo('awake');
+      await expectAsync(rt2.getHandle<string>('nap-1').result()).toBeResolvedTo(
+        'awake',
+      );
       rt2.shutdown();
       await store2.close();
     } finally {
@@ -53,11 +64,16 @@ describe('crash recovery — resume from a durable store', () => {
       let ran = 0;
       const store2 = await FileHistoryStore.open(dir);
       const rt2 = createLocalRuntime({ historyStore: store2 })
-        .registerActivity('work', () => { ran += 1; return 'worked'; })
+        .registerActivity('work', () => {
+          ran += 1;
+          return 'worked';
+        })
         .registerWorkflow('doer', doer);
       await rt2.resume();
 
-      await expectAsync(rt2.getHandle<string>('do-1').result()).toBeResolvedTo('worked');
+      await expectAsync(rt2.getHandle<string>('do-1').result()).toBeResolvedTo(
+        'worked',
+      );
       expect(ran).toBe(1); // re-dispatched exactly once (from the activityScheduled marker)
       rt2.shutdown();
       await store2.close();
@@ -68,7 +84,10 @@ describe('crash recovery — resume from a durable store', () => {
 
   it('resumes a parent blocked on a child, rebuilding the correlation', async () => {
     const dir = await tmpDir();
-    const child = async (n: number) => { await sleep(30); return n; };
+    const child = async (n: number) => {
+      await sleep(30);
+      return n;
+    };
     const parent = async () => (await executeChild<number>('child', 5)) * 2;
     try {
       const store1 = await FileHistoryStore.open(dir);
@@ -86,7 +105,9 @@ describe('crash recovery — resume from a durable store', () => {
         .registerWorkflow('parent', parent);
       await rt2.resume(); // rebuilds parent<->child link, re-arms the child's timer
 
-      await expectAsync(rt2.getHandle<number>('par-1').result()).toBeResolvedTo(10);
+      await expectAsync(rt2.getHandle<number>('par-1').result()).toBeResolvedTo(
+        10,
+      );
       rt2.shutdown();
       await store2.close();
     } finally {

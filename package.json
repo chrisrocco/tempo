@@ -6,12 +6,15 @@
   "description": "A minimal-but-correct durable workflow engine (a small Temporal-shaped system).",
   "scripts": {
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@types/jasmine": "^5.1.4",
     "@types/node": "^22.10.0",
     "jasmine": "^5.5.0",
+    "prettier": "^3.9.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

@@ -5,7 +5,9 @@ import type { AddressInfo } from 'node:net';
 import { createRpcServer, createServerHost } from '../src/services';
 
 const port = process.env.PORT ? Number(process.env.PORT) : 0;
-const activityLeaseMs = process.env.ACTIVITY_LEASE_MS ? Number(process.env.ACTIVITY_LEASE_MS) : undefined;
+const activityLeaseMs = process.env.ACTIVITY_LEASE_MS
+  ? Number(process.env.ACTIVITY_LEASE_MS)
+  : undefined;
 
 const host = createServerHost(undefined, { activityLeaseMs });
 const server = createRpcServer(host);

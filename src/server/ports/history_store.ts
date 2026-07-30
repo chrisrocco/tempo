@@ -27,7 +27,9 @@ export interface ExecutionRecord {
 /** Thrown by `appendIfVersion` when the execution has moved on — a lost lease race. */
 export class VersionConflictError extends Error {
   constructor(workflowId: string, expected: number, actual: number) {
-    super(`version conflict on ${workflowId}: expected ${expected}, have ${actual}`);
+    super(
+      `version conflict on ${workflowId}: expected ${expected}, have ${actual}`,
+    );
     this.name = 'VersionConflictError';
     Object.setPrototypeOf(this, VersionConflictError.prototype);
   }
@@ -49,7 +51,11 @@ export interface HistoryStore {
    * the same task both hold the same expected version, and only the first append
    * lands (docs/architecture/distribution.md). Safe to reject the loser because replay commits no effects.
    */
-  appendIfVersion(workflowId: string, events: HistoryEvent[], expectedVersion: number): Promise<void>;
+  appendIfVersion(
+    workflowId: string,
+    events: HistoryEvent[],
+    expectedVersion: number,
+  ): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */
   setStatus(
     workflowId: string,

@@ -12,7 +12,10 @@ import type { WorkflowWorker } from './workflow_worker';
 
 // Ref'd on purpose: a worker process must stay alive between polls. The loops are
 // bounded by an explicit stop(), so this never keeps a process alive spuriously.
-const sleep = (ms: number): Promise<void> => new Promise((r) => { setTimeout(r, ms); });
+const sleep = (ms: number): Promise<void> =>
+  new Promise((r) => {
+    setTimeout(r, ms);
+  });
 
 export interface WorkerLoop {
   /** Stop polling and wait for the in-flight iteration to finish. */
@@ -35,15 +38,28 @@ export function runWorkflowWorker(
     while (!stopped) {
       try {
         const task = await service.pollWorkflowTask();
-        if (!task) { await sleep(pollIntervalMs); continue; }
-        const result = await worker.replayTask(task.name, task.args, task.history, task.continueAsNewSuggested);
+        if (!task) {
+          await sleep(pollIntervalMs);
+          continue;
+        }
+        const result = await worker.replayTask(
+          task.name,
+          task.args,
+          task.history,
+          task.continueAsNewSuggested,
+        );
         await service.completeWorkflowTask(task.token, result);
       } catch {
         await sleep(pollIntervalMs); // transient (server restart / network) — retry
       }
     }
   })();
-  return { stop: async () => { stopped = true; await done; } };
+  return {
+    stop: async () => {
+      stopped = true;
+      await done;
+    },
+  };
 }
 
 export function runActivityWorker(
@@ -57,7 +73,10 @@ export function runActivityWorker(
     while (!stopped) {
       try {
         const task = await service.pollActivityTask();
-        if (!task) { await sleep(pollIntervalMs); continue; }
+        if (!task) {
+          await sleep(pollIntervalMs);
+          continue;
+        }
         // One attempt per delivery; the lease redelivers on failure/crash (at-least-once).
         const result = await worker.runTask(task);
         await service.completeActivityTask(task.token, result);
@@ -66,5 +85,10 @@ export function runActivityWorker(
       }
     }
   })();
-  return { stop: async () => { stopped = true; await done; } };
+  return {
+    stop: async () => {
+      stopped = true;
+      await done;
+    },
+  };
 }

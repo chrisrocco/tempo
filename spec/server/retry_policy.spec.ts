@@ -1,7 +1,11 @@
 // Unit test for the retry policy: the pure decisions the server makes when an
 // activity fails. Exercised end-to-end (via proxyActivities) in the integration
 // suite; here we pin the arithmetic directly.
-import { maxAttempts, shouldRetry, backoffMs } from '../../src/server/retry_policy';
+import {
+  maxAttempts,
+  shouldRetry,
+  backoffMs,
+} from '../../src/server/retry_policy';
 
 describe('retry_policy', () => {
   it('defaults to a single attempt when no policy is given', () => {

@@ -15,8 +15,14 @@ import { CancelledFailure } from './errors';
 export function condition(fn: () => boolean): Promise<void> {
   const ctx = getContext();
   return new Promise<void>((resolve, reject) => {
-    if (ctx.cancelled) { reject(new CancelledFailure()); return; }
-    if (fn()) { resolve(); return; }             // eager fast-path
+    if (ctx.cancelled) {
+      reject(new CancelledFailure());
+      return;
+    }
+    if (fn()) {
+      resolve();
+      return;
+    } // eager fast-path
     const seq = ctx.condSeq++;
     ctx.blockedConditions.set(seq, { fn, resolve, reject });
   });

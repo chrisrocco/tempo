@@ -26,15 +26,27 @@ import {
   type HistoryStore,
 } from '../server';
 
-const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+const errorMessage = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e);
 
 export interface ServerHost {
-  start(name: string, args?: unknown[], opts?: StartWorkflowOptions): { workflowId: string };
-  signal(workflowId: string, signalName: string, payload: unknown): Promise<void>;
+  start(
+    name: string,
+    args?: unknown[],
+    opts?: StartWorkflowOptions,
+  ): { workflowId: string };
+  signal(
+    workflowId: string,
+    signalName: string,
+    payload: unknown,
+  ): Promise<void>;
   cancel(workflowId: string): Promise<void>;
   getOutcome(workflowId: string): Promise<WorkflowOutcome>;
   pollWorkflowTask(): Promise<WorkflowTask | undefined>;
-  completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void>;
+  completeWorkflowTask(
+    token: TaskToken,
+    result: WorkflowTaskResult,
+  ): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /** Re-drive persisted executions after a restart. */
@@ -54,21 +66,33 @@ export function createServerHost(
   historyStore: HistoryStore = new MemoryHistoryStore(),
   options: ServerHostOptions = {},
 ): ServerHost {
-  const workflowTaskQueue = new MemoryWorkflowTaskQueue(options.workflowLeaseMs);
+  const workflowTaskQueue = new MemoryWorkflowTaskQueue(
+    options.workflowLeaseMs,
+  );
   const activityTaskQueue = new MemoryTaskQueue(options.activityLeaseMs);
   const timerService = new MemoryTimerService();
   let counter = 0;
 
   const core = createServerCore({
-    historyStore, workflowTaskQueue, activityTaskQueue, timerService, launch,
+    historyStore,
+    workflowTaskQueue,
+    activityTaskQueue,
+    timerService,
+    launch,
     // No in-proc workers to nudge — remote workers poll on their own cadence.
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
   });
   timerService.recover();
 
-  function createAndEnqueue(workflowId: string, name: string, args: unknown[]): void {
-    void historyStore.create(workflowId, name, args).then(() => workflowTaskQueue.enqueue(workflowId));
+  function createAndEnqueue(
+    workflowId: string,
+    name: string,
+    args: unknown[],
+  ): void {
+    void historyStore
+      .create(workflowId, name, args)
+      .then(() => workflowTaskQueue.enqueue(workflowId));
   }
 
   function launch(name: string, args: unknown[]): string {
@@ -95,14 +119,27 @@ export function createServerHost(
       return {
         status: rec.status,
         result: rec.result,
-        failure: rec.status === 'failed' ? errorMessage(rec.failure) : undefined,
+        failure:
+          rec.status === 'failed' ? errorMessage(rec.failure) : undefined,
       };
     },
-    pollWorkflowTask() { return core.pollWorkflowTask(); },
-    completeWorkflowTask(token, result) { return core.completeWorkflowTask(token, result); },
-    pollActivityTask() { return core.pollActivityTask(); },
-    completeActivityTask(token, result) { return core.completeActivityTask(token, result); },
-    async resume() { await core.resumeFromHistory(await historyStore.list()); },
-    shutdown() { timerService.stop(); },
+    pollWorkflowTask() {
+      return core.pollWorkflowTask();
+    },
+    completeWorkflowTask(token, result) {
+      return core.completeWorkflowTask(token, result);
+    },
+    pollActivityTask() {
+      return core.pollActivityTask();
+    },
+    completeActivityTask(token, result) {
+      return core.completeActivityTask(token, result);
+    },
+    async resume() {
+      await core.resumeFromHistory(await historyStore.list());
+    },
+    shutdown() {
+      timerService.stop();
+    },
   };
 }

@@ -32,7 +32,10 @@ async function main(): Promise<void> {
   const loop = runWorkflowWorker(service, createWorkflowWorker(registry));
   console.log('WORKFLOW_WORKER_READY');
 
-  const stop = async (): Promise<void> => { await loop.stop(); process.exit(0); };
+  const stop = async (): Promise<void> => {
+    await loop.stop();
+    process.exit(0);
+  };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
 }

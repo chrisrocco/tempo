@@ -7,7 +7,11 @@
  * import from `workflow.ts`. See docs/concepts/determinism-boundary.md and docs/architecture/structure-and-layers.md.
  */
 
-export { createLocalRuntime, type Runtime, type LocalRuntimeOptions } from './local_runtime';
+export {
+  createLocalRuntime,
+  type Runtime,
+  type LocalRuntimeOptions,
+} from './local_runtime';
 export { FileHistoryStore } from './server';
 export type { HistoryStore, ExecutionRecord } from './server';
 export type { WorkflowHandle, Client } from './client';

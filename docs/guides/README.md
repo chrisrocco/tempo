@@ -1,6 +1,6 @@
 # Guides
 
-Task-oriented docs: *how do I…?* Where [concepts](../concepts/) explain **why** and
+Task-oriented docs: _how do I…?_ Where [concepts](../concepts/) explain **why** and
 [behavior](../behavior/README.md) states **what's guaranteed**, guides walk you
 through **doing** something.
 

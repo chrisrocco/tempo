@@ -48,8 +48,8 @@ side effects is pushed across the line into an activity.
 ## The signal + `condition` + queue pattern
 
 The hotlist monitor receives the outside world as **signals** and reacts using
-`condition`. The discipline that makes this reliable — *handlers only enqueue; the
-loop acts* — is explained in
+`condition`. The discipline that makes this reliable — _handlers only enqueue; the
+loop acts_ — is explained in
 [conditions, signals & timers](../concepts/conditions-signals-timers.md):
 
 ```ts
@@ -82,7 +82,7 @@ const monitored = await handle.result();
 ```
 
 The spec drives exactly this sequence and asserts the guarantees — that the test
-*terminates at all* is itself proof cancellation works, since the child monitors
+_terminates at all_ is itself proof cancellation works, since the child monitors
 loop forever otherwise.
 
 ## Where to go next

@@ -42,59 +42,94 @@ export interface ServerCore {
   /** Build the task for an execution the worker has claimed (or undefined if gone/terminal). */
   buildWorkflowTask(workflowId: string): Promise<WorkflowTask | undefined>;
   /** Apply a worker's replay result: settle, continue-as-new, or dispatch its commands. */
-  applyWorkflowTaskResult(workflowId: string, result: WorkflowTaskResult): Promise<void>;
+  applyWorkflowTaskResult(
+    workflowId: string,
+    result: WorkflowTaskResult,
+  ): Promise<void>;
   /** The activity worker (in-proc) reports a finished activity: append + wake. */
-  reportActivityResult(workflowId: string, seq: number, result: ActivityResult): Promise<void>;
+  reportActivityResult(
+    workflowId: string,
+    seq: number,
+    result: ActivityResult,
+  ): Promise<void>;
   /** Append an externally injected signal, then wake. */
-  appendSignal(workflowId: string, signalName: string, payload: unknown): Promise<void>;
+  appendSignal(
+    workflowId: string,
+    signalName: string,
+    payload: unknown,
+  ): Promise<void>;
   /** Request cancellation, cascading to fire-and-forget children. */
   requestCancel(workflowId: string): Promise<void>;
   /** Rebuild correlation + re-dispatch pending work from persisted history (crash recovery). */
   resumeFromHistory(records: ExecutionRecord[]): Promise<void>;
   // ── worker-facing seam (for out-of-process workers; see WorkflowService) ──
   pollWorkflowTask(): Promise<WorkflowTask | undefined>;
-  completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void>;
+  completeWorkflowTask(
+    token: TaskToken,
+    result: WorkflowTaskResult,
+  ): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
 }
 
 function completedSeqs(history: HistoryEvent[]): {
-  activities: Set<number>; timers: Set<number>; children: Set<number>;
+  activities: Set<number>;
+  timers: Set<number>;
+  children: Set<number>;
 } {
   const activities = new Set<number>();
   const timers = new Set<number>();
   const children = new Set<number>();
   for (const ev of history) {
-    if (ev.type === 'activityCompleted' || ev.type === 'activityFailed') activities.add(ev.seq);
+    if (ev.type === 'activityCompleted' || ev.type === 'activityFailed')
+      activities.add(ev.seq);
     else if (ev.type === 'timerFired') timers.add(ev.seq);
-    else if (ev.type === 'childCompleted' || ev.type === 'childFailed') children.add(ev.seq);
+    else if (ev.type === 'childCompleted' || ev.type === 'childFailed')
+      children.add(ev.seq);
   }
   return { activities, timers, children };
 }
 
 export function createServerCore(deps: ServerCoreDeps): ServerCore {
   const {
-    historyStore, workflowTaskQueue, activityTaskQueue, timerService, launch,
-    kickWorkflowWorker, kickActivityWorker,
+    historyStore,
+    workflowTaskQueue,
+    activityTaskQueue,
+    timerService,
+    launch,
+    kickWorkflowWorker,
+    kickActivityWorker,
   } = deps;
 
   const childrenByParent = new Map<string, Map<number, string>>();
   const parentOfChild = new Map<string, { parentId: string; seq: number }>();
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
-  const activityLeases = new Map<TaskToken, { workflowId: string; seq: number }>();
-  const workflowLeases = new Map<TaskToken, { workflowId: string; version: number }>();
+  const activityLeases = new Map<
+    TaskToken,
+    { workflowId: string; seq: number }
+  >();
+  const workflowLeases = new Map<
+    TaskToken,
+    { workflowId: string; version: number }
+  >();
 
   function recordChild(parentId: string, seq: number, childId: string): void {
     let kids = childrenByParent.get(parentId);
-    if (!kids) { kids = new Map(); childrenByParent.set(parentId, kids); }
+    if (!kids) {
+      kids = new Map();
+      childrenByParent.set(parentId, kids);
+    }
     kids.set(seq, childId);
   }
 
-  const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+  const errorMessage = (e: unknown): string =>
+    e instanceof Error ? e.message : String(e);
 
-  const appendEvent = (workflowId: string, event: HistoryEvent): Promise<void> =>
-    historyStore.append(workflowId, [event]);
+  const appendEvent = (
+    workflowId: string,
+    event: HistoryEvent,
+  ): Promise<void> => historyStore.append(workflowId, [event]);
 
   // Wake an execution: it needs another workflow task. The queue coalesces, so a
   // wake during an in-flight task becomes exactly one more task.
@@ -111,9 +146,16 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (!parent || parent.status !== 'running') return;
     const child = await historyStore.get(childId);
     if (!child) return;
-    await appendEvent(link.parentId, child.status === 'completed'
-      ? { type: 'childCompleted', seq: link.seq, result: child.result }
-      : { type: 'childFailed', seq: link.seq, error: errorMessage(child.failure) });
+    await appendEvent(
+      link.parentId,
+      child.status === 'completed'
+        ? { type: 'childCompleted', seq: link.seq, result: child.result }
+        : {
+            type: 'childFailed',
+            seq: link.seq,
+            error: errorMessage(child.failure),
+          },
+    );
     wake(link.parentId);
   }
 
@@ -129,19 +171,37 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   async function applyCommand(workflowId: string, cmd: Command): Promise<void> {
     if (cmd.type === 'scheduleActivity') {
       await appendEvent(workflowId, {
-        type: 'activityScheduled', seq: cmd.seq, name: cmd.name, args: cmd.args, options: cmd.options,
+        type: 'activityScheduled',
+        seq: cmd.seq,
+        name: cmd.name,
+        args: cmd.args,
+        options: cmd.options,
       });
-      activityTaskQueue.enqueue({ workflowId, seq: cmd.seq, name: cmd.name, args: cmd.args, options: cmd.options });
+      activityTaskQueue.enqueue({
+        workflowId,
+        seq: cmd.seq,
+        name: cmd.name,
+        args: cmd.args,
+        options: cmd.options,
+      });
       kickActivityWorker();
     } else if (cmd.type === 'startTimer') {
       const fireAt = Date.now() + cmd.ms;
-      await appendEvent(workflowId, { type: 'timerStarted', seq: cmd.seq, fireAt });
+      await appendEvent(workflowId, {
+        type: 'timerStarted',
+        seq: cmd.seq,
+        fireAt,
+      });
       timerService.schedule(workflowId, cmd.seq, fireAt);
     } else if (cmd.type === 'startChild') {
       const childId = launch(cmd.childName, cmd.childArgs);
       recordChild(workflowId, cmd.seq, childId);
       if (!cmd.detached) {
-        await appendEvent(workflowId, { type: 'childStarted', seq: cmd.seq, childId });
+        await appendEvent(workflowId, {
+          type: 'childStarted',
+          seq: cmd.seq,
+          childId,
+        });
         parentOfChild.set(childId, { parentId: workflowId, seq: cmd.seq });
       }
     } else if (cmd.type === 'cancelChild') {
@@ -150,7 +210,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     }
   }
 
-  async function buildWorkflowTask(workflowId: string): Promise<WorkflowTask | undefined> {
+  async function buildWorkflowTask(
+    workflowId: string,
+  ): Promise<WorkflowTask | undefined> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return undefined;
     return {
@@ -159,24 +221,34 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       name: rec.name,
       args: rec.args,
       history: rec.history.slice(),
-      continueAsNewSuggested: rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+      continueAsNewSuggested:
+        rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
     };
   }
 
-  async function applyWorkflowTaskResult(workflowId: string, result: WorkflowTaskResult): Promise<void> {
+  async function applyWorkflowTaskResult(
+    workflowId: string,
+    result: WorkflowTaskResult,
+  ): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
     if (result.done) {
-      await historyStore.setStatus(workflowId, 'completed', { result: result.result });
+      await historyStore.setStatus(workflowId, 'completed', {
+        result: result.result,
+      });
       await notifyParentOfTerminal(workflowId);
       return;
     }
     if (result.failed) {
-      await historyStore.setStatus(workflowId, 'failed', { failure: result.failure });
+      await historyStore.setStatus(workflowId, 'failed', {
+        failure: result.failure,
+      });
       await notifyParentOfTerminal(workflowId);
       return;
     }
-    const caN = result.commands.find((c): c is ContinueAsNewCommand => c.type === 'continueAsNew');
+    const caN = result.commands.find(
+      (c): c is ContinueAsNewCommand => c.type === 'continueAsNew',
+    );
     if (caN) {
       await historyStore.resetForContinueAsNew(workflowId, caN.args);
       wake(workflowId); // drive the fresh run
@@ -186,17 +258,30 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     for (const cmd of result.commands) await applyCommand(workflowId, cmd);
   }
 
-  async function reportActivityResult(workflowId: string, seq: number, result: ActivityResult): Promise<void> {
+  async function reportActivityResult(
+    workflowId: string,
+    seq: number,
+    result: ActivityResult,
+  ): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
-    await appendEvent(workflowId, result.ok
-      ? { type: 'activityCompleted', seq, result: result.result }
-      : { type: 'activityFailed', seq, error: result.error });
+    await appendEvent(
+      workflowId,
+      result.ok
+        ? { type: 'activityCompleted', seq, result: result.result }
+        : { type: 'activityFailed', seq, error: result.error },
+    );
     wake(workflowId);
   }
 
-  async function appendSignal(workflowId: string, signalName: string, payload: unknown): Promise<void> {
-    await historyStore.append(workflowId, [{ type: 'signal', name: signalName, payload }]);
+  async function appendSignal(
+    workflowId: string,
+    signalName: string,
+    payload: unknown,
+  ): Promise<void> {
+    await historyStore.append(workflowId, [
+      { type: 'signal', name: signalName, payload },
+    ]);
     wake(workflowId);
   }
 
@@ -214,7 +299,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const byId = new Map(records.map((r) => [r.workflowId, r]));
     for (const rec of records) {
       for (const ev of rec.history) {
-        if (ev.type === 'childStarted') recordChild(rec.workflowId, ev.seq, ev.childId);
+        if (ev.type === 'childStarted')
+          recordChild(rec.workflowId, ev.seq, ev.childId);
       }
     }
     let anyActivity = false;
@@ -223,18 +309,34 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       const done = completedSeqs(rec.history);
       for (const ev of rec.history) {
         if (ev.type === 'activityScheduled' && !done.activities.has(ev.seq)) {
-          activityTaskQueue.enqueue({ workflowId: rec.workflowId, seq: ev.seq, name: ev.name, args: ev.args, options: ev.options });
+          activityTaskQueue.enqueue({
+            workflowId: rec.workflowId,
+            seq: ev.seq,
+            name: ev.name,
+            args: ev.args,
+            options: ev.options,
+          });
           anyActivity = true;
         } else if (ev.type === 'timerStarted' && !done.timers.has(ev.seq)) {
           timerService.schedule(rec.workflowId, ev.seq, ev.fireAt);
         } else if (ev.type === 'childStarted' && !done.children.has(ev.seq)) {
           const child = byId.get(ev.childId);
           if (child && child.status !== 'running') {
-            await appendEvent(rec.workflowId, child.status === 'completed'
-              ? { type: 'childCompleted', seq: ev.seq, result: child.result }
-              : { type: 'childFailed', seq: ev.seq, error: errorMessage(child.failure) });
+            await appendEvent(
+              rec.workflowId,
+              child.status === 'completed'
+                ? { type: 'childCompleted', seq: ev.seq, result: child.result }
+                : {
+                    type: 'childFailed',
+                    seq: ev.seq,
+                    error: errorMessage(child.failure),
+                  },
+            );
           } else {
-            parentOfChild.set(ev.childId, { parentId: rec.workflowId, seq: ev.seq });
+            parentOfChild.set(ev.childId, {
+              parentId: rec.workflowId,
+              seq: ev.seq,
+            });
           }
         }
       }
@@ -248,20 +350,30 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const leased = workflowTaskQueue.poll();
     if (!leased) return undefined;
     const rec = await historyStore.get(leased.workflowId);
-    if (!rec || rec.status !== 'running') { workflowTaskQueue.complete(leased.token); return undefined; }
+    if (!rec || rec.status !== 'running') {
+      workflowTaskQueue.complete(leased.token);
+      return undefined;
+    }
     // remember the version this task was built at, for the completion-time check
-    workflowLeases.set(leased.token, { workflowId: leased.workflowId, version: rec.version });
+    workflowLeases.set(leased.token, {
+      workflowId: leased.workflowId,
+      version: rec.version,
+    });
     return {
       token: leased.token,
       workflowId: leased.workflowId,
       name: rec.name,
       args: rec.args,
       history: rec.history.slice(),
-      continueAsNewSuggested: rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+      continueAsNewSuggested:
+        rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
     };
   }
 
-  async function completeWorkflowTask(token: TaskToken, result: WorkflowTaskResult): Promise<void> {
+  async function completeWorkflowTask(
+    token: TaskToken,
+    result: WorkflowTaskResult,
+  ): Promise<void> {
     const lease = workflowLeases.get(token);
     if (lease) {
       workflowLeases.delete(token);
@@ -279,11 +391,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   async function pollActivityTask(): Promise<LeasedActivityTask | undefined> {
     const task = activityTaskQueue.poll();
     if (!task) return undefined;
-    activityLeases.set(task.token, { workflowId: task.workflowId, seq: task.seq });
+    activityLeases.set(task.token, {
+      workflowId: task.workflowId,
+      seq: task.seq,
+    });
     return task;
   }
 
-  async function completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void> {
+  async function completeActivityTask(
+    token: TaskToken,
+    result: ActivityResult,
+  ): Promise<void> {
     const lease = activityLeases.get(token);
     activityTaskQueue.complete(token);
     if (!lease) return; // lease expired → task redelivered → this completer is stale
@@ -292,8 +410,15 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
 
   return {
-    buildWorkflowTask, applyWorkflowTaskResult, reportActivityResult,
-    appendSignal, requestCancel, resumeFromHistory,
-    pollWorkflowTask, completeWorkflowTask, pollActivityTask, completeActivityTask,
+    buildWorkflowTask,
+    applyWorkflowTaskResult,
+    reportActivityResult,
+    appendSignal,
+    requestCancel,
+    resumeFromHistory,
+    pollWorkflowTask,
+    completeWorkflowTask,
+    pollActivityTask,
+    completeActivityTask,
   };
 }

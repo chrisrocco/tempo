@@ -23,12 +23,16 @@ export class MemoryWorkflowTaskQueue implements WorkflowTaskQueue {
   constructor(private readonly leaseMs: number = DEFAULT_LEASE_MS) {}
 
   enqueue(workflowId: string): void {
-    if (this.inFlight.has(workflowId)) { this.rerun.add(workflowId); return; } // coalesce
+    if (this.inFlight.has(workflowId)) {
+      this.rerun.add(workflowId);
+      return;
+    } // coalesce
     if (!this.pending.includes(workflowId)) this.pending.push(workflowId);
   }
 
   poll(): { token: TaskToken; workflowId: string } | undefined {
-    for (const id of this.leases.reclaimExpired()) { // redeliver crashed workers' tasks
+    for (const id of this.leases.reclaimExpired()) {
+      // redeliver crashed workers' tasks
       this.inFlight.delete(id);
       this.enqueue(id);
     }

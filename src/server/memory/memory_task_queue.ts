@@ -7,7 +7,11 @@
  * idempotent against. Lease/expiry semantics come from the shared LeaseTable.
  */
 
-import type { ActivityTask, LeasedActivityTask, TaskToken } from '../../protocol';
+import type {
+  ActivityTask,
+  LeasedActivityTask,
+  TaskToken,
+} from '../../protocol';
 import type { TaskQueue } from '../ports/task_queue';
 import { LeaseTable } from '../lease';
 

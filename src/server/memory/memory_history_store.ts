@@ -14,10 +14,21 @@ import { VersionConflictError } from '../ports/history_store';
 export class MemoryHistoryStore implements HistoryStore {
   private readonly records = new Map<string, ExecutionRecord>();
 
-  async create(workflowId: string, name: string, args: unknown[]): Promise<void> {
-    if (this.records.has(workflowId)) throw new Error(`execution ${workflowId} already exists`);
+  async create(
+    workflowId: string,
+    name: string,
+    args: unknown[],
+  ): Promise<void> {
+    if (this.records.has(workflowId))
+      throw new Error(`execution ${workflowId} already exists`);
     this.records.set(workflowId, {
-      workflowId, runId: 0, name, args, history: [], version: 0, status: 'running',
+      workflowId,
+      runId: 0,
+      name,
+      args,
+      history: [],
+      version: 0,
+      status: 'running',
     });
   }
 
@@ -36,10 +47,15 @@ export class MemoryHistoryStore implements HistoryStore {
     rec.version += 1;
   }
 
-  async appendIfVersion(workflowId: string, events: HistoryEvent[], expectedVersion: number): Promise<void> {
+  async appendIfVersion(
+    workflowId: string,
+    events: HistoryEvent[],
+    expectedVersion: number,
+  ): Promise<void> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
-    if (rec.version !== expectedVersion) throw new VersionConflictError(workflowId, expectedVersion, rec.version);
+    if (rec.version !== expectedVersion)
+      throw new VersionConflictError(workflowId, expectedVersion, rec.version);
     rec.history.push(...events);
     rec.version += 1;
   }
@@ -56,7 +72,10 @@ export class MemoryHistoryStore implements HistoryStore {
     if (outcome && 'failure' in outcome) rec.failure = outcome.failure;
   }
 
-  async resetForContinueAsNew(workflowId: string, args: unknown[]): Promise<void> {
+  async resetForContinueAsNew(
+    workflowId: string,
+    args: unknown[],
+  ): Promise<void> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.history = [];

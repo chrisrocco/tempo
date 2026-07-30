@@ -18,7 +18,11 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     else ctx.bufferedSignals.push(ev);
     return;
   }
-  if (ev.type === 'activityScheduled' || ev.type === 'timerStarted' || ev.type === 'childStarted') {
+  if (
+    ev.type === 'activityScheduled' ||
+    ev.type === 'timerStarted' ||
+    ev.type === 'childStarted'
+  ) {
     // Markers only: the completion arrives later as its own event. Their presence
     // in history is what keeps replay from re-dispatching the command.
     return;
@@ -37,9 +41,11 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
   }
   // ev is now a CompletionEvent — guaranteed to carry a seq
   const waiter = ctx.completions.get(ev.seq);
-  if (!waiter) throw new Error(`nondeterminism: history event for unknown seq ${ev.seq}`);
+  if (!waiter)
+    throw new Error(`nondeterminism: history event for unknown seq ${ev.seq}`);
   ctx.completions.delete(ev.seq);
-  if (ev.type === 'activityFailed' || ev.type === 'childFailed') waiter.reject(new Error(ev.error));
+  if (ev.type === 'activityFailed' || ev.type === 'childFailed')
+    waiter.reject(new Error(ev.error));
   else if (ev.type === 'timerFired') waiter.resolve(undefined);
   else waiter.resolve(ev.result);
 }

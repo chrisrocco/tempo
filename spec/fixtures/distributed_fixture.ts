@@ -1,7 +1,11 @@
 // Workflow + activity definitions loaded by the worker process mains in the
 // distributed integration test (via WORKER_MODULE).
 import type { WorkflowFn } from '../../src/core';
-import type { ActivityFn, ActivityRegistry, WorkflowRegistry } from '../../src/worker';
+import type {
+  ActivityFn,
+  ActivityRegistry,
+  WorkflowRegistry,
+} from '../../src/worker';
 import { runActivity } from '../../src/workflow';
 
 const greeter: WorkflowFn = async () => runActivity<string>('greet', 'world');

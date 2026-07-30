@@ -1,7 +1,7 @@
 # PROJECT — status, map, and handoff
 
 The living "you are here" for this codebase. `README.md` is the design record and
-the target structure; the concept docs (`00`–`07`) explain the *ideas*; **this file
+the target structure; the concept docs (`00`–`07`) explain the _ideas_; **this file
 tracks what is actually built, how the code is laid out today, where the code has
 diverged from the docs, and what to do next.** Read this first on a fresh session.
 
@@ -23,10 +23,12 @@ Last updated: end of **Phase 5, Slice 4** (distribution core complete).
   3. **distributed** (server + workflow + activity worker processes over HTTP RPC), via the `bin/` mains.
 
 ### Commands
+
 ```bash
 npm test          # jasmine + tsx, all 51 specs
 npm run typecheck # tsc --noEmit
 ```
+
 Distributed (manual): `node --import tsx bin/server-main.ts` (prints `LISTENING <port>`),
 then the two worker mains with `SERVER_URL` + `WORKER_MODULE` env (see `bin/*-main.ts`).
 
@@ -37,15 +39,15 @@ then the two worker mains with `SERVER_URL` + `WORKER_MODULE` env (see `bin/*-ma
 1. **The determinism boundary.** `core/` turns `(history) -> (commands)` and
    touches nothing else — no I/O, clock, or randomness. Everything
    non-deterministic lives on the other side (`server`, `worker`, `services`).
-   This is *the* organizing principle (`01`). Not yet enforced by a lint rule.
+   This is _the_ organizing principle (`01`). Not yet enforced by a lint rule.
 2. **Event-sourced replay.** A workflow is re-run from its history on every task
    ("cold replay"). Commands it emits are matched against recorded events by a
    deterministic `seq`. History is an append-only log.
-3. **Dispatch-and-park (Phase 4).** *No operation holds an orchestration frame
-   while it runs.* Every dispatched op (activity, timer, child) writes a **marker
+3. **Dispatch-and-park (Phase 4).** _No operation holds an orchestration frame
+   while it runs._ Every dispatched op (activity, timer, child) writes a **marker
    event** and parks the workflow; its completion arrives later as its own event
    and wakes the workflow via a fresh task. Markers do double duty: they stop a
-   re-emitted command from re-dispatching *and* they are the crash-recovery
+   re-emitted command from re-dispatching _and_ they are the crash-recovery
    "scheduled before running" record.
 4. **Poll/respond (Phase 5).** Workers **poll** the server for tasks, do the work,
    and respond. Same worker code in-proc (`LocalService`) or over RPC
@@ -95,6 +97,7 @@ examples/              bug_hotlist_monitor.ts — the motivating spawn-and-cance
 ```
 
 ### The control-flow model (how a workflow advances now)
+
 1. A **wake** (start / signal / timer fire / activity report / child terminal /
    cancel) enqueues a **workflow task** for the execution.
 2. A **workflow worker** polls it, gets `{name, args, history}`, replays (core),
@@ -109,19 +112,19 @@ examples/              bug_hotlist_monitor.ts — the motivating spawn-and-cance
 
 ## 4. Concept docs vs. the implementation (READ THIS before trusting a doc)
 
-The `00`–`07` docs were written at **Phase 0** and describe the *target* and the
-*ideas*. The ideas are all intact; some mechanisms have moved. Where they differ,
+The `00`–`07` docs were written at **Phase 0** and describe the _target_ and the
+_ideas_. The ideas are all intact; some mechanisms have moved. Where they differ,
 **the code is the truth** and this table is the guide.
 
-| Doc | Still accurate? | Divergence to know |
-|-----|-----------------|--------------------|
-| `00` overview, `01` determinism boundary | ✅ Fully | The boundary holds; lint enforcement still TODO. |
-| `02` replay & execution | ✅ Core intact | `replay`/`settle`/`applyEvent`/ALS unchanged. `applyEvent` now also no-ops marker events (`activityScheduled`/`timerStarted`/`childStarted`) and handles `cancelRequested`. |
-| `03` condition/signals/timers | ⚠️ Timers changed | Timers are now **real wall-clock** and durable: a `timerStarted{fireAt}` event is recorded, a real `setTimeout` fires, `resume()` re-arms from history. `condition`/signals as described. |
-| `04` drive & pump | ❌ Superseded | The in-proc `drive` loop + `pump` are **gone**. Model is now **poll/respond**: `server_core.buildWorkflowTask`/`applyWorkflowTaskResult`; `pump`'s mutex+coalescing lives in `memory_workflow_task_queue.ts`; `LocalService` runs the in-proc drain loops. Read this doc for the *why* (the two bugs pump prevents), then map to the queue. |
-| `05` continue-as-new | ✅ As designed | Terminal primitive in `core`, `ContinueAsNewCommand`, server disposition in `applyWorkflowTaskResult` (reset + re-drive). `continueAsNewSuggested` from history length. |
-| `06` architecture & distribution | ⚠️ Mostly built | The tier split exists. **Not split out:** `workflow_task_handler.ts`/`activity_task_handler.ts` are folded into `server_core.ts`. **Added, not in the doc's tree:** `server/file/`, `services/{server_host,rpc_server,remote_service}.ts`, `worker/worker_loops.ts`, `server/lease.ts`, `server/ports/workflow_task_queue.ts`. **Not built:** `worker/sticky_cache.ts`. Retry is worker-side today, not server-decided. |
-| `07` type model | ⚠️ Grown | `protocol/` gained `activity_options`, `task_token`, `service`, `rpc`. `Command` gained `continueAsNew` + `cancelChild`; `StartChildCommand` gained `detached`. `HistoryEvent` gained the marker events + `cancelRequested`. Modeling style (per-variant interfaces, `Omit` spec) as described. |
+| Doc                                      | Still accurate?   | Divergence to know                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `00` overview, `01` determinism boundary | ✅ Fully          | The boundary holds; lint enforcement still TODO.                                                                                                                                                                                                                                                                                                                                                                        |
+| `02` replay & execution                  | ✅ Core intact    | `replay`/`settle`/`applyEvent`/ALS unchanged. `applyEvent` now also no-ops marker events (`activityScheduled`/`timerStarted`/`childStarted`) and handles `cancelRequested`.                                                                                                                                                                                                                                             |
+| `03` condition/signals/timers            | ⚠️ Timers changed | Timers are now **real wall-clock** and durable: a `timerStarted{fireAt}` event is recorded, a real `setTimeout` fires, `resume()` re-arms from history. `condition`/signals as described.                                                                                                                                                                                                                               |
+| `04` drive & pump                        | ❌ Superseded     | The in-proc `drive` loop + `pump` are **gone**. Model is now **poll/respond**: `server_core.buildWorkflowTask`/`applyWorkflowTaskResult`; `pump`'s mutex+coalescing lives in `memory_workflow_task_queue.ts`; `LocalService` runs the in-proc drain loops. Read this doc for the _why_ (the two bugs pump prevents), then map to the queue.                                                                             |
+| `05` continue-as-new                     | ✅ As designed    | Terminal primitive in `core`, `ContinueAsNewCommand`, server disposition in `applyWorkflowTaskResult` (reset + re-drive). `continueAsNewSuggested` from history length.                                                                                                                                                                                                                                                 |
+| `06` architecture & distribution         | ⚠️ Mostly built   | The tier split exists. **Not split out:** `workflow_task_handler.ts`/`activity_task_handler.ts` are folded into `server_core.ts`. **Added, not in the doc's tree:** `server/file/`, `services/{server_host,rpc_server,remote_service}.ts`, `worker/worker_loops.ts`, `server/lease.ts`, `server/ports/workflow_task_queue.ts`. **Not built:** `worker/sticky_cache.ts`. Retry is worker-side today, not server-decided. |
+| `07` type model                          | ⚠️ Grown          | `protocol/` gained `activity_options`, `task_token`, `service`, `rpc`. `Command` gained `continueAsNew` + `cancelChild`; `StartChildCommand` gained `detached`. `HistoryEvent` gained the marker events + `cancelRequested`. Modeling style (per-variant interfaces, `Omit` spec) as described.                                                                                                                         |
 
 `ROADMAP.md` phase plan is accurate; Phases 1–4 done, Phase 5 done through Slice 4.
 
@@ -129,23 +132,24 @@ The `00`–`07` docs were written at **Phase 0** and describe the *target* and t
 
 ## 5. Test map (the specs are the executable documentation)
 
-| Spec | Covers |
-|------|--------|
-| `spec/integration/local.spec.ts` (28) | The whole programming model against `createLocalRuntime` — activities, `proxyActivities`+retries, dispatch-and-park (async + FIFO), signals/`condition`, blocking + concurrent children, timers (duration ordering), `continueAsNew`, cancellation (+ cascade). **Start here to understand behavior.** |
-| `spec/examples/bug_hotlist_monitor.spec.ts` | The motivating spawn-and-cancel workflow end to end. |
-| `spec/server/retry_policy.spec.ts` | Retry arithmetic (attempts, exponential backoff cap). |
-| `spec/server/timer_service.spec.ts` | Durable timer fire / cancel / startup re-arm. |
-| `spec/server/file_history_store.spec.ts` | Durable persistence: behavior parity, reload-in-fresh-store round-trip, single-writer lockfile. |
-| `spec/server/concurrency.spec.ts` | Optimistic version CAS, lease-expiry redelivery (both queues), lease-race resolved by the version check (headless `server_core`). |
-| `spec/integration/resume.spec.ts` | Crash recovery: restart mid-flight on a timer / activity / blocking child and finish from history. |
-| `spec/integration/remote.spec.ts` | Client → `RemoteService` → HTTP → server → workers, in one process over loopback. |
-| `spec/integration/distributed.spec.ts` | **Real** spawned server + worker processes; worker-crash redelivery / at-least-once. |
+| Spec                                        | Covers                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `spec/integration/local.spec.ts` (28)       | The whole programming model against `createLocalRuntime` — activities, `proxyActivities`+retries, dispatch-and-park (async + FIFO), signals/`condition`, blocking + concurrent children, timers (duration ordering), `continueAsNew`, cancellation (+ cascade). **Start here to understand behavior.** |
+| `spec/examples/bug_hotlist_monitor.spec.ts` | The motivating spawn-and-cancel workflow end to end.                                                                                                                                                                                                                                                   |
+| `spec/server/retry_policy.spec.ts`          | Retry arithmetic (attempts, exponential backoff cap).                                                                                                                                                                                                                                                  |
+| `spec/server/timer_service.spec.ts`         | Durable timer fire / cancel / startup re-arm.                                                                                                                                                                                                                                                          |
+| `spec/server/file_history_store.spec.ts`    | Durable persistence: behavior parity, reload-in-fresh-store round-trip, single-writer lockfile.                                                                                                                                                                                                        |
+| `spec/server/concurrency.spec.ts`           | Optimistic version CAS, lease-expiry redelivery (both queues), lease-race resolved by the version check (headless `server_core`).                                                                                                                                                                      |
+| `spec/integration/resume.spec.ts`           | Crash recovery: restart mid-flight on a timer / activity / blocking child and finish from history.                                                                                                                                                                                                     |
+| `spec/integration/remote.spec.ts`           | Client → `RemoteService` → HTTP → server → workers, in one process over loopback.                                                                                                                                                                                                                      |
+| `spec/integration/distributed.spec.ts`      | **Real** spawned server + worker processes; worker-crash redelivery / at-least-once.                                                                                                                                                                                                                   |
 
 ---
 
 ## 6. What's next & what's deferred
 
 ### Phase 5, Slice 5 — refinements (the remaining slice)
+
 - **Activity heartbeats + start-to-close timeouts** (deferred since Phase 3; the
   activity worker does one attempt per delivery today, lease redelivers on crash).
 - **Sticky cache** in the workflow worker (`worker/sticky_cache.ts`) — warm
@@ -154,6 +158,7 @@ The `00`–`07` docs were written at **Phase 0** and describe the *target* and t
   but there is no cross-process sweep leader-election.
 
 ### Standalone TODOs (not blocking, good first tasks)
+
 - **Import-path lint rule** — finish Phase 1's enforcement of the determinism
   boundary (`core` may import only `protocol`; workflow code only `workflow.ts`).
 - **Counter-collision on resume** — `LocalService`/`ServerHost` id counters start
@@ -163,6 +168,7 @@ The `00`–`07` docs were written at **Phase 0** and describe the *target* and t
   decision (re-enqueue with backoff). Move it when heartbeats land.
 
 ### Known simplifications (intentional, documented)
+
 - The optimistic version check is a read-compare guard in `completeWorkflowTask`
   (seam path only); `appendIfVersion` is the store primitive a fully transactional
   backend would use for the whole batch. The in-proc happy path does **not**
@@ -181,7 +187,7 @@ The `00`–`07` docs were written at **Phase 0** and describe the *target* and t
   `timerStarted` / `childStarted`). Without it, a re-emitted command re-dispatches
   on replay (the concurrent case) and resume can't reconstruct it. See
   `server_core.applyCommand` + `core/apply_event`.
-- **In-proc drain loops must poll their queues *synchronously*** (no `await` in the
+- **In-proc drain loops must poll their queues _synchronously_** (no `await` in the
   loop condition), or a wake landing at the loop boundary is lost. See the sync
   `for (let leased = queue.poll(); ...)` in `local_service.ts`.
 - **Worker-process poll loops must `sleep` ref'd** (`worker_loops.ts`) — an
@@ -192,5 +198,5 @@ The `00`–`07` docs were written at **Phase 0** and describe the *target* and t
 - **Cancellation, signals, timers are recorded events** (deterministic replay),
   not side effects. Never make a decision from `Date.now()` inside `core`.
 - **Children:** blocking children park the parent and resume it via a
-  `childCompleted` event correlated by seq; fire-and-forget children carry *no*
+  `childCompleted` event correlated by seq; fire-and-forget children carry _no_
   completion event (that's why they need no result waiter).

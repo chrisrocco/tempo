@@ -23,7 +23,7 @@ real timers, signals, `condition`, blocking **and** fire-and-forget children,
 **On a fresh session, read [`PROJECT.md`](PROJECT.md) first** — it is the living
 "you are here": current status, the real code map, which of these concept docs have
 drifted from the implementation (with a divergence table), the test map, and what's
-next. The docs below explain the *ideas*; `PROJECT.md` tracks what is *built*.
+next. The docs below explain the _ideas_; `PROJECT.md` tracks what is _built_.
 
 Read in order the first time; they build on each other.
 
@@ -33,19 +33,19 @@ guaranteed, linked to the specs), **guides** (how-to), and **contributing**. The
 [docs index](docs/README.md) has the reading order and the four-bucket map. The
 core concept docs, in reading order:
 
-| Doc | What it covers | Status |
-|-----|----------------|--------|
-| [`PROJECT.md`](PROJECT.md) | **Handoff hub** — status, code map, doc-vs-code divergences, test map, TODO | current |
-| [concepts/overview](docs/concepts/overview.md) | Origin, the mental model, glossary | ✅ |
-| [concepts/determinism-boundary](docs/concepts/determinism-boundary.md) | **The** organizing principle — read this first if nothing else | ✅ |
-| [concepts/replay-and-execution](docs/concepts/replay-and-execution.md) | Replay vs activation, warm/cold paths, the core loop, ALS | ✅ |
-| [concepts/conditions-signals-timers](docs/concepts/conditions-signals-timers.md) | `condition` internals, signals, the queue pattern, timers | ⚠ timers now durable |
-| [concepts/continue-as-new](docs/concepts/continue-as-new.md) | The suggested flag, the primitive, the layer split | ✅ |
-| [concepts/type-model](docs/concepts/type-model.md) | The `protocol` types and the modeling decisions behind them | ⚠ grown; see `PROJECT.md §4` |
-| [architecture/structure-and-layers](docs/architecture/structure-and-layers.md) | File structure, entrypoints, the service seam | ⚠ mostly built; see `PROJECT.md §4` |
-| [architecture/distribution](docs/architecture/distribution.md) | Going distributed; the failure-semantics caveat | ⚠ mostly built; see `PROJECT.md §4` |
-| [architecture/task-execution-and-concurrency](docs/architecture/task-execution-and-concurrency.md) | `drive`, `pump`'s two jobs, `executeCommand` | ❌ superseded by the poll/queue model — read for the *why* |
-| [`ROADMAP.md`](ROADMAP.md) | Phased implementation plan with exit criteria | accurate; P1–4 + P5 core done |
+| Doc                                                                                                | What it covers                                                              | Status                                                     |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| [`PROJECT.md`](PROJECT.md)                                                                         | **Handoff hub** — status, code map, doc-vs-code divergences, test map, TODO | current                                                    |
+| [concepts/overview](docs/concepts/overview.md)                                                     | Origin, the mental model, glossary                                          | ✅                                                         |
+| [concepts/determinism-boundary](docs/concepts/determinism-boundary.md)                             | **The** organizing principle — read this first if nothing else              | ✅                                                         |
+| [concepts/replay-and-execution](docs/concepts/replay-and-execution.md)                             | Replay vs activation, warm/cold paths, the core loop, ALS                   | ✅                                                         |
+| [concepts/conditions-signals-timers](docs/concepts/conditions-signals-timers.md)                   | `condition` internals, signals, the queue pattern, timers                   | ⚠ timers now durable                                       |
+| [concepts/continue-as-new](docs/concepts/continue-as-new.md)                                       | The suggested flag, the primitive, the layer split                          | ✅                                                         |
+| [concepts/type-model](docs/concepts/type-model.md)                                                 | The `protocol` types and the modeling decisions behind them                 | ⚠ grown; see `PROJECT.md §4`                               |
+| [architecture/structure-and-layers](docs/architecture/structure-and-layers.md)                     | File structure, entrypoints, the service seam                               | ⚠ mostly built; see `PROJECT.md §4`                        |
+| [architecture/distribution](docs/architecture/distribution.md)                                     | Going distributed; the failure-semantics caveat                             | ⚠ mostly built; see `PROJECT.md §4`                        |
+| [architecture/task-execution-and-concurrency](docs/architecture/task-execution-and-concurrency.md) | `drive`, `pump`'s two jobs, `executeCommand`                                | ❌ superseded by the poll/queue model — read for the _why_ |
+| [`ROADMAP.md`](ROADMAP.md)                                                                         | Phased implementation plan with exit criteria                               | accurate; P1–4 + P5 core done                              |
 
 ## Design blueprint (the intended shape)
 
@@ -56,7 +56,7 @@ aren't built yet (the `workflow_task_handler` / `activity_task_handler` split,
 coalescing moved into the workflow-task queue); some built files aren't shown; and
 the `spec/` tree here is illustrative, not the real one. **For the actual current
 tree see [`PROJECT.md`](PROJECT.md) §3; for where the code diverged from this
-blueprint, §4.** The shape still earns its place: the layering *is* the determinism
+blueprint, §4.** The shape still earns its place: the layering _is_ the determinism
 boundary, and the dependency arrows only ever point down
 (`protocol <- core <- {server, services, worker, client} <- {entrypoints, bin}`).
 Bracketed notes point at the concept doc that owns each piece.

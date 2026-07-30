@@ -16,19 +16,35 @@ function scheduleCommand(spec: CommandSpec): Promise<unknown> {
   const seq = ctx.seq++;
   const command = { ...spec, seq } as Command;
   if (ctx.isLive) ctx.commands.push(command);
-  return new Promise<unknown>((resolve, reject) => ctx.completions.set(seq, { resolve, reject }));
+  return new Promise<unknown>((resolve, reject) =>
+    ctx.completions.set(seq, { resolve, reject }),
+  );
 }
 
-const scheduleActivity = (name: string, options: ActivityOptions, args: unknown[]): Promise<unknown> =>
+const scheduleActivity = (
+  name: string,
+  options: ActivityOptions,
+  args: unknown[],
+): Promise<unknown> =>
   scheduleCommand({ type: 'scheduleActivity', name, args, options });
 
-export const runActivity = <T = unknown>(name: string, ...args: unknown[]): Promise<T> =>
-  scheduleActivity(name, {}, args) as Promise<T>;
+export const runActivity = <T = unknown>(
+  name: string,
+  ...args: unknown[]
+): Promise<T> => scheduleActivity(name, {}, args) as Promise<T>;
 export const sleep = (ms: number): Promise<void> =>
   scheduleCommand({ type: 'startTimer', ms }) as Promise<void>;
 /** Blocking child: start a child workflow and await its result. */
-export const executeChild = <T = unknown>(name: string, ...args: unknown[]): Promise<T> =>
-  scheduleCommand({ type: 'startChild', childName: name, childArgs: args, detached: false }) as Promise<T>;
+export const executeChild = <T = unknown>(
+  name: string,
+  ...args: unknown[]
+): Promise<T> =>
+  scheduleCommand({
+    type: 'startChild',
+    childName: name,
+    childArgs: args,
+    detached: false,
+  }) as Promise<T>;
 
 /** A fire-and-forget child's handle: it can be cancelled, but its result is not awaited. */
 export interface ChildHandle {
@@ -45,7 +61,13 @@ export function startChild(name: string, ...args: unknown[]): ChildHandle {
   const ctx = getContext();
   if (ctx.cancelled) return { cancel() {} };
   const targetSeq = ctx.seq++;
-  const command: Command = { type: 'startChild', childName: name, childArgs: args, detached: true, seq: targetSeq };
+  const command: Command = {
+    type: 'startChild',
+    childName: name,
+    childArgs: args,
+    detached: true,
+    seq: targetSeq,
+  };
   if (ctx.isLive) ctx.commands.push(command);
   return {
     cancel() {
@@ -89,9 +111,17 @@ export type ActivityInterface = Record<string, (...args: any[]) => any>;
  */
 export function proxyActivities<A extends ActivityInterface>(
   options: ActivityOptions = {},
-): { [K in keyof A]: (...args: Parameters<A[K]>) => Promise<Awaited<ReturnType<A[K]>>> } {
+): {
+  [K in keyof A]: (
+    ...args: Parameters<A[K]>
+  ) => Promise<Awaited<ReturnType<A[K]>>>;
+} {
   return new Proxy(
-    {} as { [K in keyof A]: (...args: Parameters<A[K]>) => Promise<Awaited<ReturnType<A[K]>>> },
+    {} as {
+      [K in keyof A]: (
+        ...args: Parameters<A[K]>
+      ) => Promise<Awaited<ReturnType<A[K]>>>;
+    },
     {
       get(_target, prop) {
         const name = String(prop);

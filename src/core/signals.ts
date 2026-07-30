@@ -8,14 +8,21 @@
 
 import { getContext } from './context';
 
-export interface SignalDef { name: string }
+export interface SignalDef {
+  name: string;
+}
 
 export const defineSignal = (name: string): SignalDef => ({ name });
 
-export function setHandler(signalDef: SignalDef, fn: (payload: any) => void): void {
+export function setHandler(
+  signalDef: SignalDef,
+  fn: (payload: any) => void,
+): void {
   const ctx = getContext();
   ctx.signalHandlers.set(signalDef.name, fn);
   const ready = ctx.bufferedSignals.filter((s) => s.name === signalDef.name);
-  ctx.bufferedSignals = ctx.bufferedSignals.filter((s) => s.name !== signalDef.name);
+  ctx.bufferedSignals = ctx.bufferedSignals.filter(
+    (s) => s.name !== signalDef.name,
+  );
   for (const s of ready) fn(s.payload);
 }

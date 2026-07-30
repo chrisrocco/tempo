@@ -127,7 +127,7 @@ The working baseline this roadmap builds on.
 
 - Cancellation + fire-and-forget children (Phase 3) — required for the real
   monitor use case.
-- Timer *ordering/duration* fidelity (Phase 3) — currently fires immediately.
+- Timer _ordering/duration_ fidelity (Phase 3) — currently fires immediately.
 - `protocol` schema versioning/migration once persisted (Phase 4+).
 - Exactly-once activity effects are **out of scope by design** — the framework
   provides at-least-once; idempotency is the activity author's responsibility.

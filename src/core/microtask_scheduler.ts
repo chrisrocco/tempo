@@ -6,4 +6,5 @@
  * (why this is the acceptable exception to "no host coupling") lives in docs/concepts/replay-and-execution.md.
  */
 
-export const drainMicrotasks = (): Promise<void> => new Promise((r) => setImmediate(r));
+export const drainMicrotasks = (): Promise<void> =>
+  new Promise((r) => setImmediate(r));

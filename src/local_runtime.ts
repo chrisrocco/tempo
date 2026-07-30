@@ -22,7 +22,11 @@ import { createClient, type WorkflowHandle } from './client';
 export interface Runtime {
   registerWorkflow(name: string, fn: WorkflowFn): Runtime;
   registerActivity(name: string, fn: ActivityFn): Runtime;
-  start<T = unknown>(name: string, args?: unknown[], opts?: { workflowId?: string }): WorkflowHandle<T>;
+  start<T = unknown>(
+    name: string,
+    args?: unknown[],
+    opts?: { workflowId?: string },
+  ): WorkflowHandle<T>;
   /** A handle to an existing execution — e.g. one resumed from a durable store. */
   getHandle<T = unknown>(workflowId: string): WorkflowHandle<T>;
   /** Re-drive persisted executions after a restart. Call after registering types. */
@@ -43,14 +47,29 @@ export function createLocalRuntime(options: LocalRuntimeOptions = {}): Runtime {
   const workflowWorker = createWorkflowWorker(workflowRegistry);
   const activityWorker = createActivityWorker(activityRegistry);
 
-  const service = createLocalService(workflowWorker, activityWorker, options.historyStore);
+  const service = createLocalService(
+    workflowWorker,
+    activityWorker,
+    options.historyStore,
+  );
   const client = createClient(service);
 
   const runtime: Runtime = {
-    registerWorkflow(name, fn) { workflowRegistry.set(name, fn); return runtime; },
-    registerActivity(name, fn) { activityRegistry.set(name, fn); return runtime; },
-    start<T = unknown>(name: string, args: unknown[] = [], opts: { workflowId?: string } = {}): WorkflowHandle<T> {
-      if (!workflowWorker.has(name)) throw new Error(`no workflow registered as ${name}`);
+    registerWorkflow(name, fn) {
+      workflowRegistry.set(name, fn);
+      return runtime;
+    },
+    registerActivity(name, fn) {
+      activityRegistry.set(name, fn);
+      return runtime;
+    },
+    start<T = unknown>(
+      name: string,
+      args: unknown[] = [],
+      opts: { workflowId?: string } = {},
+    ): WorkflowHandle<T> {
+      if (!workflowWorker.has(name))
+        throw new Error(`no workflow registered as ${name}`);
       return client.start<T>(name, args, opts);
     },
     getHandle<T = unknown>(workflowId: string): WorkflowHandle<T> {

@@ -7,7 +7,11 @@
  * in `protocol` because they are the shared server/worker contract.
  */
 
-import type { ActivityTask, LeasedActivityTask, TaskToken } from '../../protocol';
+import type {
+  ActivityTask,
+  LeasedActivityTask,
+  TaskToken,
+} from '../../protocol';
 
 export interface TaskQueue {
   enqueue(task: ActivityTask): void;

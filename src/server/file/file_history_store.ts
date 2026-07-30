@@ -35,7 +35,8 @@ interface PersistedMeta {
   failureMessage?: string;
 }
 
-const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+const errorMessage = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e);
 
 // A filesystem-safe, collision-free directory name. The real id lives in meta.json,
 // so this need not be reversible — a readable prefix plus a hash is enough.
@@ -66,10 +67,21 @@ export class FileHistoryStore implements HistoryStore {
     await fs.rm(path.join(this.dir, 'lock'), { force: true });
   }
 
-  async create(workflowId: string, name: string, args: unknown[]): Promise<void> {
-    if (this.cache.has(workflowId)) throw new Error(`execution ${workflowId} already exists`);
+  async create(
+    workflowId: string,
+    name: string,
+    args: unknown[],
+  ): Promise<void> {
+    if (this.cache.has(workflowId))
+      throw new Error(`execution ${workflowId} already exists`);
     const rec: ExecutionRecord = {
-      workflowId, runId: 0, name, args, history: [], version: 0, status: 'running',
+      workflowId,
+      runId: 0,
+      name,
+      args,
+      history: [],
+      version: 0,
+      status: 'running',
     };
     this.cache.set(workflowId, rec); // synchronous → immediately visible to get()
     await this.enqueue(workflowId, async () => {
@@ -94,19 +106,29 @@ export class FileHistoryStore implements HistoryStore {
     await this.persistAppend(workflowId, rec, events);
   }
 
-  async appendIfVersion(workflowId: string, events: HistoryEvent[], expectedVersion: number): Promise<void> {
+  async appendIfVersion(
+    workflowId: string,
+    events: HistoryEvent[],
+    expectedVersion: number,
+  ): Promise<void> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
-    if (rec.version !== expectedVersion) throw new VersionConflictError(workflowId, expectedVersion, rec.version);
+    if (rec.version !== expectedVersion)
+      throw new VersionConflictError(workflowId, expectedVersion, rec.version);
     await this.persistAppend(workflowId, rec, events);
   }
 
-  private async persistAppend(workflowId: string, rec: ExecutionRecord, events: HistoryEvent[]): Promise<void> {
+  private async persistAppend(
+    workflowId: string,
+    rec: ExecutionRecord,
+    events: HistoryEvent[],
+  ): Promise<void> {
     rec.history.push(...events);
     rec.version += 1;
     const lines = events.map((e) => `${JSON.stringify(e)}\n`).join('');
     await this.enqueue(workflowId, () =>
-      fs.appendFile(path.join(this.execDir(workflowId), 'events.jsonl'), lines));
+      fs.appendFile(path.join(this.execDir(workflowId), 'events.jsonl'), lines),
+    );
   }
 
   async setStatus(
@@ -122,7 +144,10 @@ export class FileHistoryStore implements HistoryStore {
     await this.enqueue(workflowId, () => this.writeMeta(rec));
   }
 
-  async resetForContinueAsNew(workflowId: string, args: unknown[]): Promise<void> {
+  async resetForContinueAsNew(
+    workflowId: string,
+    args: unknown[],
+  ): Promise<void> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.history = [];
@@ -130,7 +155,10 @@ export class FileHistoryStore implements HistoryStore {
     rec.version = 0;
     rec.runId += 1;
     await this.enqueue(workflowId, async () => {
-      await fs.writeFile(path.join(this.execDir(workflowId), 'events.jsonl'), ''); // truncate old run
+      await fs.writeFile(
+        path.join(this.execDir(workflowId), 'events.jsonl'),
+        '',
+      ); // truncate old run
       await this.writeMeta(rec);
     });
   }
@@ -145,15 +173,26 @@ export class FileHistoryStore implements HistoryStore {
   private enqueue(id: string, op: () => Promise<unknown>): Promise<void> {
     const prev = this.writeChains.get(id) ?? Promise.resolve();
     const result = prev.then(op, op).then(() => undefined);
-    this.writeChains.set(id, result.then(() => {}, () => {}));
+    this.writeChains.set(
+      id,
+      result.then(
+        () => {},
+        () => {},
+      ),
+    );
     return result;
   }
 
   private async writeMeta(rec: ExecutionRecord): Promise<void> {
     const meta: PersistedMeta = {
-      workflowId: rec.workflowId, runId: rec.runId, name: rec.name, args: rec.args,
-      status: rec.status, result: rec.result,
-      failureMessage: rec.failure !== undefined ? errorMessage(rec.failure) : undefined,
+      workflowId: rec.workflowId,
+      runId: rec.runId,
+      name: rec.name,
+      args: rec.args,
+      status: rec.status,
+      result: rec.result,
+      failureMessage:
+        rec.failure !== undefined ? errorMessage(rec.failure) : undefined,
     };
     const metaPath = path.join(this.execDir(rec.workflowId), 'meta.json');
     const tmp = `${metaPath}.tmp`;
@@ -171,10 +210,14 @@ export class FileHistoryStore implements HistoryStore {
     }
     for (const entry of entries) {
       const d = path.join(execRoot, entry);
-      const metaRaw = await fs.readFile(path.join(d, 'meta.json'), 'utf8').catch(() => null);
+      const metaRaw = await fs
+        .readFile(path.join(d, 'meta.json'), 'utf8')
+        .catch(() => null);
       if (metaRaw === null) continue;
       const meta = JSON.parse(metaRaw) as PersistedMeta;
-      const eventsRaw = await fs.readFile(path.join(d, 'events.jsonl'), 'utf8').catch(() => '');
+      const eventsRaw = await fs
+        .readFile(path.join(d, 'events.jsonl'), 'utf8')
+        .catch(() => '');
       const history = parseEvents(eventsRaw);
       this.cache.set(meta.workflowId, {
         workflowId: meta.workflowId,
@@ -185,7 +228,10 @@ export class FileHistoryStore implements HistoryStore {
         version: history.length,
         status: meta.status,
         result: meta.result,
-        failure: meta.failureMessage !== undefined ? new Error(meta.failureMessage) : undefined,
+        failure:
+          meta.failureMessage !== undefined
+            ? new Error(meta.failureMessage)
+            : undefined,
       });
     }
   }
@@ -215,7 +261,9 @@ async function acquireLock(dir: string): Promise<void> {
     await fh.close();
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new Error(`data dir ${dir} is locked by another process (remove ${lockPath} if stale)`);
+      throw new Error(
+        `data dir ${dir} is locked by another process (remove ${lockPath} if stale)`,
+      );
     }
     throw e;
   }

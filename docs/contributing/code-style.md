@@ -1,6 +1,20 @@
 # Code Style Rules
 
-## Code Formatting 
+## Formatting
+
+Mechanical formatting — line width, indentation, quotes, trailing commas — is
+handled by **Prettier**, not by hand. The config is in `.prettierrc.json`
+(`printWidth: 80`, `singleQuote: true`); run it with:
+
+```bash
+npm run format        # format the whole repo in place
+npm run format:check  # verify formatting without writing
+```
+
+The rules below are the **conventions Prettier does not enforce** — apply them
+yourself.
+
+## Code Formatting
 
 ### Function Definitions
 
