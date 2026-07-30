@@ -1,8 +1,9 @@
-// The port the server persists executions through. In-memory today (the map from
-// the old runtime, promoted to an interface); a database with real optimistic
-// concurrency is the Phase-4 swap. `version` is carried now for interface
-// stability, but under single-process `pump` serialization it never actually
-// conflicts — enforcing it as the distributed replacement for `pump` is Phase 5.
+// The port the server persists executions through. Async, so a filesystem/db
+// adapter (Phase 4) slots in unchanged. `append` is atomic per call and the
+// adapter owns the version bump — under a single writer (drives serialized by
+// pump, external writes serialized by the adapter) that is sufficient. `version`
+// is retained on the record for the Phase-5 optimistic-CAS check, which is where
+// concurrent workers make it meaningful.
 import type { ExecutionStatus, HistoryEvent } from '../../protocol';
 
 /** One execution's durable state: its identity, history, and terminal outcome. */
@@ -20,25 +21,24 @@ export interface ExecutionRecord {
 }
 
 export interface HistoryStore {
-  /** Register a fresh execution. Throws if the id already exists. */
-  create(workflowId: string, name: string, args: unknown[]): void;
-  /** The live record, or undefined if unknown. */
-  get(workflowId: string): ExecutionRecord | undefined;
-  /**
-   * Append events, conditional on `expectedVersion` matching the current version
-   * (optimistic concurrency). Returns the new version; throws on mismatch.
-   */
-  append(workflowId: string, events: HistoryEvent[], expectedVersion: number): number;
+  /** Register a fresh execution. Rejects if the id already exists. */
+  create(workflowId: string, name: string, args: unknown[]): Promise<void>;
+  /** A snapshot of the record, or undefined if unknown. */
+  get(workflowId: string): Promise<ExecutionRecord | undefined>;
+  /** Every execution — used by the resume driver on boot to re-drive running ones. */
+  list(): Promise<ExecutionRecord[]>;
+  /** Append events atomically and bump the version. Rejects if the id is unknown. */
+  append(workflowId: string, events: HistoryEvent[]): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */
   setStatus(
     workflowId: string,
     status: ExecutionStatus,
     outcome?: { result?: unknown; failure?: unknown },
-  ): void;
+  ): Promise<void>;
   /**
    * Continue-as-new: close the current run and begin a fresh one on the SAME
    * workflowId — empty history seeded with `args`, bumped runId, version reset,
    * status stays 'running'. Not a real close, so the result waiter is untouched.
    */
-  resetForContinueAsNew(workflowId: string, args: unknown[]): void;
+  resetForContinueAsNew(workflowId: string, args: unknown[]): Promise<void>;
 }

@@ -14,9 +14,9 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     else ctx.bufferedSignals.push(ev);
     return;
   }
-  if (ev.type === 'activityScheduled') {
-    // Marker only: the activity's completion arrives later as a separate event.
-    // Its presence in history is what keeps replay from re-dispatching the command.
+  if (ev.type === 'activityScheduled' || ev.type === 'timerStarted' || ev.type === 'childStarted') {
+    // Markers only: the completion arrives later as its own event. Their presence
+    // in history is what keeps replay from re-dispatching the command.
     return;
   }
   if (ev.type === 'cancelRequested') {

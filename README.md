@@ -7,22 +7,29 @@ engine with a documented path to a distributed deployment.
 
 ## Current status
 
-- **Working in-memory runtime** behind the `WorkflowService` seam, with
-  activities (`proxyActivities` + retry policy), real wall-clock timers, signals,
+- **Working runtime** behind the `WorkflowService` seam, with activities
+  (`proxyActivities` + retry policy), real wall-clock timers, signals,
   `condition`, blocking **and** fire-and-forget child workflows, `continueAsNew`,
   and cancellation (`CancelledFailure`, cascading to children).
-- **Layered.** The determinism boundary is physical and the full tier split is in
-  place: `protocol/ <- core/ <- {server, services, worker, client} <-
+- **Dispatch-and-park.** No operation holds an orchestration frame while it runs —
+  activities, timers, and children all dispatch, park the workflow in history, and
+  resume on their completion event. The server keeps no per-execution memory
+  between tasks.
+- **Durable + crash-recoverable.** A filesystem `HistoryStore` (append-only event
+  log per execution, single-writer lockfile) persists state; `resume()` rebuilds
+  and re-drives running executions on restart — re-arming pending timers,
+  re-dispatching pending activities, and recovering parent/child links from
+  history. The `HistoryStore` port is async; in-memory stays the fast default.
+- **Layered.** `protocol/ <- core/ <- {server, services, worker, client} <-
   {local_runtime, entrypoints}`, plus the `workflow.ts` (author) and `index.ts`
-  (host) entrypoints. Ports (`HistoryStore`/`TaskQueue`/`TimerService`) have
-  in-memory adapters; `pump` is scoped inside `LocalService`.
+  (host) entrypoints. `pump` is scoped inside `LocalService`.
 - **Typed.** Full TypeScript, `tsc --noEmit` clean.
-- **Tested.** 34 specs passing under Jasmine + `tsx` (`npm test`), including the
-  end-to-end bug-hotlist monitor example.
-- **Phases 1–3 of `ROADMAP.md` are complete.**
-- **Not yet built:** the import-path lint rule, durable persistence (Phase 4 —
-  the first target is a filesystem adapter, single-binary), distribution
-  (Phase 5), and production hardening (Phase 6). See `ROADMAP.md`.
+- **Tested.** 43 specs passing under Jasmine + `tsx` (`npm test`), including the
+  bug-hotlist monitor example and end-to-end crash-recovery.
+- **Phases 1–4 of `ROADMAP.md` are complete.**
+- **Not yet built:** the import-path lint rule, distribution (Phase 5 — RPC,
+  `RemoteService`, leasing, the optimistic-CAS version check), and production
+  hardening (Phase 6). See `ROADMAP.md`.
 
 ## How to read these
 

@@ -237,6 +237,19 @@ describe('local runtime — child workflows', () => {
     await expectAsync(rt.start<number>('parent').result()).toBeResolvedTo(25);
   });
 
+  it('runs concurrent blocking children without double-dispatching them', async () => {
+    const worked: number[] = [];
+    const rt = createLocalRuntime()
+      .registerActivity('work', (n: number) => { worked.push(n); return n * 10; })
+      .registerWorkflow('child', async (n: number) => runActivity<number>('work', n))
+      .registerWorkflow('parent', async () =>
+        Promise.all([executeChild<number>('child', 1), executeChild<number>('child', 2)]));
+
+    const result = await rt.start<number[]>('parent').result();
+    expect(result).toEqual([10, 20]);       // Promise.all preserves order
+    expect(worked.sort()).toEqual([1, 2]);  // each child ran exactly once (marker prevents re-launch)
+  });
+
   it('propagates a child failure to the parent', async () => {
     const rt = createLocalRuntime()
       .registerActivity('boom', () => { throw new Error('child-boom'); })

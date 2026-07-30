@@ -5,5 +5,6 @@ export * from './ports/timer_service';
 export * from './memory/memory_history_store';
 export * from './memory/memory_task_queue';
 export * from './memory/memory_timer_service';
+export * from './file/file_history_store';
 export * from './retry_policy';
 export * from './server_core';

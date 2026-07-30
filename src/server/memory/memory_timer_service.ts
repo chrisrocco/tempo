@@ -25,11 +25,11 @@ export class MemoryTimerService implements TimerService {
     this.fireHandler = handler;
   }
 
-  schedule(workflowId: string, seq: number, ms: number): void {
+  schedule(workflowId: string, seq: number, fireAt: number): void {
     const key = this.key(workflowId, seq);
     if (this.timers.has(key)) return; // already scheduled — idempotent safety
-    const delay = Math.max(0, ms);
-    const entry: TimerEntry = { workflowId, seq, fireAt: Date.now() + delay };
+    const delay = Math.max(0, fireAt - Date.now()); // past-due => fire ASAP
+    const entry: TimerEntry = { workflowId, seq, fireAt };
     entry.handle = setTimeout(() => this.fire(key), delay);
     entry.handle.unref?.();
     this.timers.set(key, entry);

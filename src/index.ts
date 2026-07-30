@@ -3,7 +3,9 @@
 // The runtime factory, its handle/registration types, the service seam, and the
 // public protocol vocabulary. Workflow *authors* do not import from here; they
 // import from `workflow.ts`. See doc 01 / doc 06.
-export { createLocalRuntime, type Runtime } from './local_runtime';
+export { createLocalRuntime, type Runtime, type LocalRuntimeOptions } from './local_runtime';
+export { FileHistoryStore } from './server';
+export type { HistoryStore, ExecutionRecord } from './server';
 export type { WorkflowHandle, Client } from './client';
 export type { ActivityFn } from './worker';
 export type { WorkflowFn, WorkflowContext } from './core';

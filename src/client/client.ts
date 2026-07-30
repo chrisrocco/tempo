@@ -16,20 +16,27 @@ export interface WorkflowHandle<T = unknown> {
 
 export interface Client {
   start<T = unknown>(name: string, args?: unknown[], opts?: { workflowId?: string }): WorkflowHandle<T>;
+  /** A handle to an existing execution (e.g. one picked up by resume). */
+  getHandle<T = unknown>(workflowId: string): WorkflowHandle<T>;
 }
 
 export function createClient(service: WorkflowService): Client {
+  const handle = <T>(workflowId: string): WorkflowHandle<T> => ({
+    workflowId,
+    result: () => service.getResult(workflowId) as Promise<T>,
+    status: () => service.getStatus(workflowId),
+    signal: (signalDef, payload) =>
+      service.signal(workflowId, typeof signalDef === 'string' ? signalDef : signalDef.name, payload),
+    cancel: () => service.cancel(workflowId),
+  });
+
   return {
     start<T = unknown>(name: string, args: unknown[] = [], opts: { workflowId?: string } = {}): WorkflowHandle<T> {
       const { workflowId } = service.start(name, args, opts);
-      return {
-        workflowId,
-        result: () => service.getResult(workflowId) as Promise<T>,
-        status: () => service.getStatus(workflowId),
-        signal: (signalDef, payload) =>
-          service.signal(workflowId, typeof signalDef === 'string' ? signalDef : signalDef.name, payload),
-        cancel: () => service.cancel(workflowId),
-      };
+      return handle<T>(workflowId);
+    },
+    getHandle<T = unknown>(workflowId: string): WorkflowHandle<T> {
+      return handle<T>(workflowId);
     },
   };
 }

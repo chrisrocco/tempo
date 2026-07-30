@@ -9,8 +9,8 @@
 export interface TimerService {
   /** Wire the sweep's fire callback. Called once at server startup. */
   onFire(handler: (workflowId: string, seq: number) => void): void;
-  /** Record + arm a durable timer for (workflowId, seq) firing `ms` from now. */
-  schedule(workflowId: string, seq: number, ms: number): void;
+  /** Arm a timer for (workflowId, seq) to fire at absolute epoch-ms `fireAt` (past-due => now). */
+  schedule(workflowId: string, seq: number, fireAt: number): void;
   /** Remove a scheduled timer that has not yet fired. */
   cancel(workflowId: string, seq: number): void;
   /** Startup sweep: re-arm (or immediately fire past-due) timers in the table. */
