@@ -1,7 +1,11 @@
-// The WorkflowContext is the mutable per-task state the deterministic engine
-// threads through a single replay: where we are in history, the command-id
-// counters, the parked promises, and the terminal result. `als` carries it into
-// user workflow code without an explicit parameter (see docs/concepts/replay-and-execution.md, the ALS caveat).
+/**
+ * @fileoverview
+ * The WorkflowContext is the mutable per-task state the deterministic engine
+ * threads through a single replay: where we are in history, the command-id
+ * counters, the parked promises, and the terminal result. `als` carries it into
+ * user workflow code without an explicit parameter (see docs/concepts/replay-and-execution.md, the ALS caveat).
+ */
+
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Command, HistoryEvent, SignalEvent } from '../protocol';
 

@@ -1,9 +1,13 @@
-// The port the server persists executions through. Async, so a filesystem/db
-// adapter (Phase 4) slots in unchanged. `append` is atomic per call and the
-// adapter owns the version bump — under a single writer (drives serialized by
-// pump, external writes serialized by the adapter) that is sufficient. `version`
-// is retained on the record for the Phase-5 optimistic-CAS check, which is where
-// concurrent workers make it meaningful.
+/**
+ * @fileoverview
+ * The port the server persists executions through. Async, so a filesystem/db
+ * adapter (Phase 4) slots in unchanged. `append` is atomic per call and the
+ * adapter owns the version bump — under a single writer (drives serialized by
+ * pump, external writes serialized by the adapter) that is sufficient. `version`
+ * is retained on the record for the Phase-5 optimistic-CAS check, which is where
+ * concurrent workers make it meaningful.
+ */
+
 import type { ExecutionStatus, HistoryEvent } from '../../protocol';
 
 /** One execution's durable state: its identity, history, and terminal outcome. */

@@ -1,8 +1,12 @@
-// `applyEvent` routes one recorded history event back into the in-memory promise
-// it belongs to. Signals fan out to their handler (or buffer if none is
-// registered yet); every other event completes the parked promise keyed by its
-// `seq`. A completion event for an unknown seq means history and code diverged —
-// that is the nondeterminism check.
+/**
+ * @fileoverview
+ * `applyEvent` routes one recorded history event back into the in-memory promise
+ * it belongs to. Signals fan out to their handler (or buffer if none is
+ * registered yet); every other event completes the parked promise keyed by its
+ * `seq`. A completion event for an unknown seq means history and code diverged —
+ * that is the nondeterminism check.
+ */
+
 import type { HistoryEvent } from '../protocol';
 import type { WorkflowContext } from './context';
 import { CancelledFailure } from './errors';

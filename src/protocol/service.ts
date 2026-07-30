@@ -1,8 +1,12 @@
-// The service contract: what a host/client calls to drive workflows, plus the
-// task payloads the server hands to workers and gets back. These are pure data +
-// signatures — the seam that `LocalService` (in-proc) and, later, `RemoteService`
-// (RPC) both satisfy. Living in `protocol/` is what lets `server` and `worker`
-// share the task shapes without importing each other (see docs/architecture/structure-and-layers.md).
+/**
+ * @fileoverview
+ * The service contract: what a host/client calls to drive workflows, plus the
+ * task payloads the server hands to workers and gets back. These are pure data +
+ * signatures — the seam that `LocalService` (in-proc) and, later, `RemoteService`
+ * (RPC) both satisfy. Living in `protocol/` is what lets `server` and `worker`
+ * share the task shapes without importing each other (see docs/architecture/structure-and-layers.md).
+ */
+
 import type { ActivityOptions } from './activity_options';
 import type { Command } from './commands';
 import type { HistoryEvent } from './history_events';

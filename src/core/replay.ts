@@ -1,8 +1,12 @@
-// The core loop: run the workflow function under the ALS context, then feed
-// recorded history back into it one event at a time, settling between each. When
-// the last event is applied the context goes `isLive`, so any further commands
-// the workflow emits are new work. `settle` drives microtasks + condition
-// unblocking to a fixpoint. See docs/concepts/replay-and-execution.md.
+/**
+ * @fileoverview
+ * The core loop: run the workflow function under the ALS context, then feed
+ * recorded history back into it one event at a time, settling between each. When
+ * the last event is applied the context goes `isLive`, so any further commands
+ * the workflow emits are new work. `settle` drives microtasks + condition
+ * unblocking to a fixpoint. See docs/concepts/replay-and-execution.md.
+ */
+
 import { als, type WorkflowContext, type WorkflowFn } from './context';
 import { applyEvent } from './apply_event';
 import { tryUnblockConditions } from './condition';

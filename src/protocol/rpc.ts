@@ -1,6 +1,10 @@
-// The networked transport's wire format: one request envelope per service method,
-// and a generic response envelope. This is what `RemoteService` (client) sends and
-// the RPC server dispatches to a server host. Pure data, like the rest of protocol.
+/**
+ * @fileoverview
+ * The networked transport's wire format: one request envelope per service method,
+ * and a generic response envelope. This is what `RemoteService` (client) sends and
+ * the RPC server dispatches to a server host. Pure data, like the rest of protocol.
+ */
+
 import type { ActivityResult, ExecutionStatus, WorkflowTaskResult } from './service';
 import type { StartWorkflowOptions } from './service';
 import type { TaskToken } from './task_token';

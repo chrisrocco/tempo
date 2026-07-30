@@ -1,8 +1,12 @@
-// The client: turns the flat `WorkflowService` surface into ergonomic handles
-// (start -> a handle with result()/status()/signal()). Written once against the
-// service seam, so it is identical for local and remote. The `SignalDef`
-// convenience (accepting a defined signal or a bare name) lives here rather than
-// in `protocol`, keeping the wire contract free of any `core` dependency.
+/**
+ * @fileoverview
+ * The client: turns the flat `WorkflowService` surface into ergonomic handles
+ * (start -> a handle with result()/status()/signal()). Written once against the
+ * service seam, so it is identical for local and remote. The `SignalDef`
+ * convenience (accepting a defined signal or a bare name) lives here rather than
+ * in `protocol`, keeping the wire contract free of any `core` dependency.
+ */
+
 import type { ExecutionStatus, WorkflowService } from '../protocol';
 import type { SignalDef } from '../core';
 

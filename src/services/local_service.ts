@@ -1,16 +1,20 @@
-// LocalService: the whole server in-process. It composes `server_core` with the
-// in-memory ports and runs the two worker poll loops in-proc — a workflow-worker
-// loop that drains the workflow-task queue (replacing the old `pump`+`kick`) and
-// an activity-worker loop that drains the activity-task queue. Distributed mode
-// runs those same loops in separate processes against `RemoteService`.
-//
-// The drain loops poll their queues *synchronously* (no await in the loop
-// condition) so there is no lost-wakeup window at the loop boundary: a wake that
-// lands mid-task is coalesced by the queue and picked up by the next poll.
-//
-// In-proc bookkeeping stays synchronous: `statusMirror` backs the sync `getStatus`
-// (updated after each task), and `waiters` back `getResult`. Both are rebuilt by
-// `resume`, not persisted.
+/**
+ * @fileoverview
+ * LocalService: the whole server in-process. It composes `server_core` with the
+ * in-memory ports and runs the two worker poll loops in-proc — a workflow-worker
+ * loop that drains the workflow-task queue (replacing the old `pump`+`kick`) and
+ * an activity-worker loop that drains the activity-task queue. Distributed mode
+ * runs those same loops in separate processes against `RemoteService`.
+ *
+ * The drain loops poll their queues *synchronously* (no await in the loop
+ * condition) so there is no lost-wakeup window at the loop boundary: a wake that
+ * lands mid-task is coalesced by the queue and picked up by the next poll.
+ *
+ * In-proc bookkeeping stays synchronous: `statusMirror` backs the sync `getStatus`
+ * (updated after each task), and `waiters` back `getResult`. Both are rebuilt by
+ * `resume`, not persisted.
+ */
+
 import type {
   ActivityResult,
   ActivityTask,

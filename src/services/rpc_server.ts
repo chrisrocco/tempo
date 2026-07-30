@@ -1,7 +1,11 @@
-// The HTTP+JSON transport, server side: one POST endpoint that decodes an
-// RpcRequest, dispatches it to a ServerHost, and returns an RpcResponse. A
-// polled task that came back `undefined` is sent as JSON `null` (undefined is not
-// valid JSON); the client maps it back. `bin/server-main` wraps this in a process.
+/**
+ * @fileoverview
+ * The HTTP+JSON transport, server side: one POST endpoint that decodes an
+ * RpcRequest, dispatches it to a ServerHost, and returns an RpcResponse. A
+ * polled task that came back `undefined` is sent as JSON `null` (undefined is not
+ * valid JSON); the client maps it back. `bin/server-main` wraps this in a process.
+ */
+
 import * as http from 'node:http';
 import type { RpcRequest, RpcResponse } from '../protocol';
 import type { ServerHost } from './server_host';

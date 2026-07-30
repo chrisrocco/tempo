@@ -1,8 +1,12 @@
-// createLocalRuntime(): the single-call composition of a LocalService with
-// in-process workers and a client. This is the wiring seam — the one place that
-// knows all the tiers exist and how they connect in single-node mode. Going
-// distributed swaps this file's guts (RemoteService + real worker processes) for
-// the same public shape (docs/architecture/structure-and-layers.md).
+/**
+ * @fileoverview
+ * createLocalRuntime(): the single-call composition of a LocalService with
+ * in-process workers and a client. This is the wiring seam — the one place that
+ * knows all the tiers exist and how they connect in single-node mode. Going
+ * distributed swaps this file's guts (RemoteService + real worker processes) for
+ * the same public shape (docs/architecture/structure-and-layers.md).
+ */
+
 import type { WorkflowFn } from './core';
 import type { HistoryStore } from './server';
 import {

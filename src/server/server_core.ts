@@ -1,9 +1,13 @@
-// The orchestration brain. It runs NO user code: workflow replay and activity
-// execution happen in workers that POLL it. The server hands out tasks
-// (buildWorkflowTask / pollActivityTask), applies what workers report back
-// (applyWorkflowTaskResult / reportActivityResult), and owns everything durable
-// via the ports. Waking an execution = enqueuing a workflow task; that queue's
-// coalescing is the distributed replacement for `pump` (docs/architecture/task-execution-and-concurrency.md, distribution.md).
+/**
+ * @fileoverview
+ * The orchestration brain. It runs NO user code: workflow replay and activity
+ * execution happen in workers that POLL it. The server hands out tasks
+ * (buildWorkflowTask / pollActivityTask), applies what workers report back
+ * (applyWorkflowTaskResult / reportActivityResult), and owns everything durable
+ * via the ports. Waking an execution = enqueuing a workflow task; that queue's
+ * coalescing is the distributed replacement for `pump` (docs/architecture/task-execution-and-concurrency.md, distribution.md).
+ */
+
 import type {
   ActivityResult,
   Command,

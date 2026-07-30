@@ -1,8 +1,12 @@
-// In-memory TaskQueue: a FIFO with leasing. `poll` leases the next task with a
-// token + timeout; `complete` acks it. On each poll, tasks whose leases expired
-// are redelivered (unshifted to the front) — a crashed activity worker's task
-// runs again, which is the at-least-once behavior activity authors must be
-// idempotent against. Lease/expiry semantics come from the shared LeaseTable.
+/**
+ * @fileoverview
+ * In-memory TaskQueue: a FIFO with leasing. `poll` leases the next task with a
+ * token + timeout; `complete` acks it. On each poll, tasks whose leases expired
+ * are redelivered (unshifted to the front) — a crashed activity worker's task
+ * runs again, which is the at-least-once behavior activity authors must be
+ * idempotent against. Lease/expiry semantics come from the shared LeaseTable.
+ */
+
 import type { ActivityTask, LeasedActivityTask, TaskToken } from '../../protocol';
 import type { TaskQueue } from '../ports/task_queue';
 import { LeaseTable } from '../lease';

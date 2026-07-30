@@ -1,7 +1,11 @@
-// Commands are what workflow code produces during a task: a request for the
-// runtime to do something durable (run an activity, start a timer, start a
-// child). The framework stamps each command with a deterministic `seq` in call
-// order; that seq is how the matching completion event is later routed back.
+/**
+ * @fileoverview
+ * Commands are what workflow code produces during a task: a request for the
+ * runtime to do something durable (run an activity, start a timer, start a
+ * child). The framework stamps each command with a deterministic `seq` in call
+ * order; that seq is how the matching completion event is later routed back.
+ */
+
 import type { ActivityOptions } from './activity_options';
 
 /** Fields common to every command. */

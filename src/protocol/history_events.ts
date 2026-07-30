@@ -1,8 +1,12 @@
-// Recorded history is the durable log a workflow is replayed against. Every
-// event either completes a command (and is keyed by that command's `seq`) or is
-// an externally injected signal (which is not tied to a command, so has no seq).
-// Keeping those two families in separate unions lets `applyEvent` narrow with a
-// single `type === 'signal'` check instead of hunting for the seq-bearing ones.
+/**
+ * @fileoverview
+ * Recorded history is the durable log a workflow is replayed against. Every
+ * event either completes a command (and is keyed by that command's `seq`) or is
+ * an externally injected signal (which is not tied to a command, so has no seq).
+ * Keeping those two families in separate unions lets `applyEvent` narrow with a
+ * single `type === 'signal'` check instead of hunting for the seq-bearing ones.
+ */
+
 import type { ActivityOptions } from './activity_options';
 
 /** Fields common to events that complete a specific command. */

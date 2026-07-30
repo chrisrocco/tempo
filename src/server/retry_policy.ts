@@ -1,7 +1,11 @@
-// Retry decisions, read off the activity's `RetryPolicy`. Pure functions: given
-// how many attempts have already been made, decide whether to try again and how
-// long to wait first. The server (activity dispatch) owns this; the core never
-// sees it. Extracted from `server_core` so the policy is unit-testable on its own.
+/**
+ * @fileoverview
+ * Retry decisions, read off the activity's `RetryPolicy`. Pure functions: given
+ * how many attempts have already been made, decide whether to try again and how
+ * long to wait first. The server (activity dispatch) owns this; the core never
+ * sees it. Extracted from `server_core` so the policy is unit-testable on its own.
+ */
+
 import type { RetryPolicy } from '../protocol';
 
 /** Total attempts to make. Defaults to 1 (no retry) when unset — see ActivityOptions. */

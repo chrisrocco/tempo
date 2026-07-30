@@ -1,10 +1,14 @@
-// `condition(fn)` parks the caller until `fn()` becomes true. It is checked
-// eagerly on the way in, then re-evaluated by `tryUnblockConditions` after every
-// microtask drain until it holds. `condSeq` ids these blocks WITHOUT touching the
-// command `seq` counter, so a condition never perturbs command numbering. Doc 03.
-//
-// A parked condition also rejects with CancelledFailure if the run is cancelled
-// (see apply_event); and calling `condition` after cancellation rejects at once.
+/**
+ * @fileoverview
+ * `condition(fn)` parks the caller until `fn()` becomes true. It is checked
+ * eagerly on the way in, then re-evaluated by `tryUnblockConditions` after every
+ * microtask drain until it holds. `condSeq` ids these blocks WITHOUT touching the
+ * command `seq` counter, so a condition never perturbs command numbering. Doc 03.
+ *
+ * A parked condition also rejects with CancelledFailure if the run is cancelled
+ * (see apply_event); and calling `condition` after cancellation rejects at once.
+ */
+
 import { getContext, type WorkflowContext } from './context';
 import { CancelledFailure } from './errors';
 

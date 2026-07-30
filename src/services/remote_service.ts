@@ -1,10 +1,14 @@
-// The networked WorkflowService: an HTTP+JSON client to a server host. Workers
-// poll it (pollWorkflowTask/pollActivityTask over the wire); clients start + await
-// results through it. `bin/*-worker-main` and networked clients use this.
-//
-// The client-facing sync methods can't block on a round trip, so writes are fire-
-// and-forget (errors surface via getResult) and getStatus returns a cached value;
-// getResult is the authoritative await — it polls `getOutcome` until terminal.
+/**
+ * @fileoverview
+ * The networked WorkflowService: an HTTP+JSON client to a server host. Workers
+ * poll it (pollWorkflowTask/pollActivityTask over the wire); clients start + await
+ * results through it. `bin/*-worker-main` and networked clients use this.
+ *
+ * The client-facing sync methods can't block on a round trip, so writes are fire-
+ * and-forget (errors surface via getResult) and getStatus returns a cached value;
+ * getResult is the authoritative await — it polls `getOutcome` until terminal.
+ */
+
 import type {
   ActivityResult,
   ExecutionStatus,

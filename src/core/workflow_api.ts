@@ -1,7 +1,11 @@
-// The deterministic primitives workflow code calls. Each one records a command
-// (stamped with the next `seq`) and hands back a promise that stays parked until
-// the matching completion event is applied during replay. Only the workflow
-// entrypoint (`workflow.ts`) re-exports these; see docs/concepts/determinism-boundary.md.
+/**
+ * @fileoverview
+ * The deterministic primitives workflow code calls. Each one records a command
+ * (stamped with the next `seq`) and hands back a promise that stays parked until
+ * the matching completion event is applied during replay. Only the workflow
+ * entrypoint (`workflow.ts`) re-exports these; see docs/concepts/determinism-boundary.md.
+ */
+
 import type { ActivityOptions, Command, CommandSpec } from '../protocol';
 import { getContext } from './context';
 import { CancelledFailure } from './errors';

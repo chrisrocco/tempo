@@ -1,4 +1,8 @@
-// ORCHESTRATION BRAIN. stateful, runs NO user code. shared by local + remote.
+/**
+ * @fileoverview
+ * ORCHESTRATION BRAIN. stateful, runs NO user code. shared by local + remote.
+ */
+
 export * from './ports/history_store';
 export * from './ports/task_queue';
 export * from './ports/workflow_task_queue';

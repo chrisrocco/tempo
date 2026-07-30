@@ -15,14 +15,16 @@ export const sleep = (ms: number): Promise<void> =>
 ```
 
 ```ts{.good}
-export const runActivity<T = unknown>(name: string, ...args: unknown[]): Promise<T> {
-    return scheduleActivity(name, {}, args) as Promise<T>;
+export function runActivity<T = unknown>(name: string, ...args: unknown[]): Promise<T> {
+  return scheduleActivity(name, {}, args) as Promise<T>;
 }
 
-export const sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return scheduleCommand({ type: 'startTimer', ms }) as Promise<void>;
 }
 ```
+
+(One-line inline expressions are exempt — e.g. `export const drainMicrotasks = (): Promise<void> => new Promise((r) => setImmediate(r));` stays an arrow.)
 
 ### @fileoverview comments
 

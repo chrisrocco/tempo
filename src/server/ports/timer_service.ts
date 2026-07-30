@@ -1,11 +1,15 @@
-// The port timers are scheduled through. Unlike the fire-immediately stub it
-// replaces, this models a durable timer: `schedule` records + arms a timer that
-// fires after its delay, and `onFire` is the sweep's callback back into the
-// server (append `timerFired`, wake the execution). `recover` is the startup
-// sweep — after a restart the in-memory `setTimeout` handles are gone, so the
-// server re-arms (or immediately fires past-due) every timer still in the table.
-// The durable adapter (a DB-backed table + a crash-tolerant sweep with failover)
-// is the Phase 4/5 swap; the server logic here does not change. See docs/concepts/conditions-signals-timers.md and docs/architecture/distribution.md.
+/**
+ * @fileoverview
+ * The port timers are scheduled through. Unlike the fire-immediately stub it
+ * replaces, this models a durable timer: `schedule` records + arms a timer that
+ * fires after its delay, and `onFire` is the sweep's callback back into the
+ * server (append `timerFired`, wake the execution). `recover` is the startup
+ * sweep — after a restart the in-memory `setTimeout` handles are gone, so the
+ * server re-arms (or immediately fires past-due) every timer still in the table.
+ * The durable adapter (a DB-backed table + a crash-tolerant sweep with failover)
+ * is the Phase 4/5 swap; the server logic here does not change. See docs/concepts/conditions-signals-timers.md and docs/architecture/distribution.md.
+ */
+
 export interface TimerService {
   /** Wire the sweep's fire callback. Called once at server startup. */
   onFire(handler: (workflowId: string, seq: number) => void): void;

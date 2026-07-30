@@ -1,7 +1,11 @@
-// The worker run-loops: poll a service for a task, do the work, report back,
-// repeat. Written once against `WorkflowService`, so they run against `LocalService`
-// in-proc or a `RemoteService` over RPC — the same worker code either way (docs/architecture/structure-and-layers.md).
-// `bin/*-worker-main` runs these against a RemoteService.
+/**
+ * @fileoverview
+ * The worker run-loops: poll a service for a task, do the work, report back,
+ * repeat. Written once against `WorkflowService`, so they run against `LocalService`
+ * in-proc or a `RemoteService` over RPC — the same worker code either way (docs/architecture/structure-and-layers.md).
+ * `bin/*-worker-main` runs these against a RemoteService.
+ */
+
 import type { WorkflowService } from '../protocol';
 import type { ActivityWorker } from './activity_worker';
 import type { WorkflowWorker } from './workflow_worker';

@@ -1,8 +1,12 @@
-// In-memory HistoryStore: a Map of execution records. This is the old runtime's
-// `executions` map, promoted behind the async port. The methods are async to
-// satisfy the interface, but their bodies are synchronous (Map access), so each
-// is atomic — a filesystem/db adapter is the Phase-4 swap and serializes its own
-// writes. Powers LocalService and the fast test path.
+/**
+ * @fileoverview
+ * In-memory HistoryStore: a Map of execution records. This is the old runtime's
+ * `executions` map, promoted behind the async port. The methods are async to
+ * satisfy the interface, but their bodies are synchronous (Map access), so each
+ * is atomic — a filesystem/db adapter is the Phase-4 swap and serializes its own
+ * writes. Powers LocalService and the fast test path.
+ */
+
 import type { ExecutionStatus, HistoryEvent } from '../../protocol';
 import type { ExecutionRecord, HistoryStore } from '../ports/history_store';
 import { VersionConflictError } from '../ports/history_store';

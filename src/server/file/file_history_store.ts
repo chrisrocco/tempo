@@ -1,19 +1,23 @@
-// A durable HistoryStore backed by the local filesystem — the first real
-// persistence adapter (ROADMAP Phase 4), aimed at single-binary, single-writer
-// deployments on a developer's workstation.
-//
-// Layout under <dir>:
-//   lock                       — single-writer guard (this process's pid)
-//   executions/<enc-id>/
-//     meta.json                — {workflowId, runId, name, args, status, result, failure}
-//     events.jsonl             — the history, one JSON event per line (append-only)
-//
-// The event-sourced history maps almost 1:1 onto an append-only log: `append` is
-// an O(1) line append; `meta.json` is rewritten (atomically, temp+rename) only on
-// create / setStatus / continue-as-new. A write-through in-memory cache is the
-// working copy — it makes reads synchronous-visible (so a signal fired right after
-// start finds the record) and is what a fresh process rebuilds from disk via
-// `load()`. Per-execution write chains serialize concurrent writes.
+/**
+ * @fileoverview
+ * A durable HistoryStore backed by the local filesystem — the first real
+ * persistence adapter (ROADMAP Phase 4), aimed at single-binary, single-writer
+ * deployments on a developer's workstation.
+ *
+ * Layout under <dir>:
+ *   lock                       — single-writer guard (this process's pid)
+ *   executions/<enc-id>/
+ *     meta.json                — {workflowId, runId, name, args, status, result, failure}
+ *     events.jsonl             — the history, one JSON event per line (append-only)
+ *
+ * The event-sourced history maps almost 1:1 onto an append-only log: `append` is
+ * an O(1) line append; `meta.json` is rewritten (atomically, temp+rename) only on
+ * create / setStatus / continue-as-new. A write-through in-memory cache is the
+ * working copy — it makes reads synchronous-visible (so a signal fired right after
+ * start finds the record) and is what a fresh process rebuilds from disk via
+ * `load()`. Per-execution write chains serialize concurrent writes.
+ */
+
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';

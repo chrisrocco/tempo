@@ -1,9 +1,13 @@
-// In-memory WorkflowTaskQueue with `pump`'s coalescing plus leasing.
-// `pending`/`inFlight`/`rerun` are the queue form of pump's running/rerun flags;
-// the LeaseTable adds a timeout so a task claimed by a crashed worker redelivers.
-// `poll` first sweeps expired leases back to pending (redelivery), so the two
-// mechanisms compose: a lease-race redelivers the task, and the losing worker's
-// version-checked append is then rejected by the server (see server_core).
+/**
+ * @fileoverview
+ * In-memory WorkflowTaskQueue with `pump`'s coalescing plus leasing.
+ * `pending`/`inFlight`/`rerun` are the queue form of pump's running/rerun flags;
+ * the LeaseTable adds a timeout so a task claimed by a crashed worker redelivers.
+ * `poll` first sweeps expired leases back to pending (redelivery), so the two
+ * mechanisms compose: a lease-race redelivers the task, and the losing worker's
+ * version-checked append is then rejected by the server (see server_core).
+ */
+
 import type { TaskToken } from '../../protocol';
 import type { WorkflowTaskQueue } from '../ports/workflow_task_queue';
 import { LeaseTable } from '../lease';

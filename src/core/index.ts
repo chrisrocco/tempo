@@ -1,4 +1,8 @@
-// DETERMINISTIC ENGINE. (history) -> (commands). no I/O, clock, or random.
+/**
+ * @fileoverview
+ * DETERMINISTIC ENGINE. (history) -> (commands). no I/O, clock, or random.
+ */
+
 export * from './errors';
 export * from './context';
 export * from './workflow_api';

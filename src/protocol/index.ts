@@ -1,4 +1,8 @@
-// PURE DATA + CONTRACTS. no logic, no deps. the wire format.
+/**
+ * @fileoverview
+ * PURE DATA + CONTRACTS. no logic, no deps. the wire format.
+ */
+
 export * from './commands';
 export * from './activity_options';
 export * from './history_events';

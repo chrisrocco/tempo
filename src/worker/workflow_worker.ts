@@ -1,7 +1,11 @@
-// Stateless workflow worker: build a context from the supplied history, `replay`
-// the registered workflow function (this is where `core` runs), and return the
-// commands + terminal state. Workflow *types* register HERE. The sticky cache of
-// warm executions is a Phase-5 optimization; today every task is a cold replay.
+/**
+ * @fileoverview
+ * Stateless workflow worker: build a context from the supplied history, `replay`
+ * the registered workflow function (this is where `core` runs), and return the
+ * commands + terminal state. Workflow *types* register HERE. The sticky cache of
+ * warm executions is a Phase-5 optimization; today every task is a cold replay.
+ */
+
 import { createContext, replay, type WorkflowFn } from '../core';
 import type { HistoryEvent, WorkflowTaskResult } from '../protocol';
 

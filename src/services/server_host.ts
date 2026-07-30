@@ -1,9 +1,13 @@
-// The distributed server, headless: `server_core` + the in-memory ports + the
-// timer service, exposing the operations the RPC layer serves. It runs NO
-// workers and NO user code — workflow + activity workers poll it from other
-// processes. Client writes (start/signal/cancel) mutate the store + enqueue
-// tasks; `getOutcome` reads the store (the client polls it). This is what
-// `bin/server-main` will host over RPC.
+/**
+ * @fileoverview
+ * The distributed server, headless: `server_core` + the in-memory ports + the
+ * timer service, exposing the operations the RPC layer serves. It runs NO
+ * workers and NO user code — workflow + activity workers poll it from other
+ * processes. Client writes (start/signal/cancel) mutate the store + enqueue
+ * tasks; `getOutcome` reads the store (the client polls it). This is what
+ * `bin/server-main` will host over RPC.
+ */
+
 import type {
   ActivityResult,
   LeasedActivityTask,

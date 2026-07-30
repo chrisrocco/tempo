@@ -1,9 +1,13 @@
-// In-memory TimerService: a table of pending timers, each armed with a real
-// `setTimeout`, so durations and firing *order* are honored (a 10ms timer fires
-// before a 40ms one). The table stands in for the durable store a real adapter
-// would persist; `recover()` re-arms it the way a server would sweep persisted
-// timers on boot. Handles are `unref`'d so a stray timer can never keep the
-// process alive.
+/**
+ * @fileoverview
+ * In-memory TimerService: a table of pending timers, each armed with a real
+ * `setTimeout`, so durations and firing *order* are honored (a 10ms timer fires
+ * before a 40ms one). The table stands in for the durable store a real adapter
+ * would persist; `recover()` re-arms it the way a server would sweep persisted
+ * timers on boot. Handles are `unref`'d so a stray timer can never keep the
+ * process alive.
+ */
+
 import type { TimerService } from '../ports/timer_service';
 
 interface TimerEntry {
