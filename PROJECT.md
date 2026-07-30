@@ -31,6 +31,12 @@ npm run typecheck # tsc --noEmit
 
 Distributed (manual): `node --import tsx bin/server-main.ts` (prints `LISTENING <port>`),
 then the two worker mains with `SERVER_URL` + `WORKER_MODULE` env (see `bin/*-main.ts`).
+Set `DATA_DIR` on the server for **durable** mode (filesystem store + boot `resume()`);
+unset = in-memory (the test default). Deploy on one VM: server + N of each worker
+under a supervisor (`Restart=always`); workers scale horizontally, the server is the
+single stateful tier. The data-dir lockfile **self-heals** — a crashed server's stale
+lock is reclaimed on restart (same-host pid liveness check), so `Restart=always` won't
+deadlock. Clients drive it via `createRemoteService(url)`.
 
 ---
 
@@ -190,9 +196,11 @@ _ideas_. The ideas are all intact; some mechanisms have moved. Where they differ
 - **In-proc drain loops must poll their queues _synchronously_** (no `await` in the
   loop condition), or a wake landing at the loop boundary is lost. See the sync
   `for (let leased = queue.poll(); ...)` in `local_service.ts`.
-- **Worker-process poll loops must `sleep` ref'd** (`worker_loops.ts`) — an
-  `unref`'d idle sleep lets a spawned worker exit its own event loop. (This was a
-  real bug; see the Slice-4 fix.)
+- **Any poll-loop `sleep` in a standalone process must be ref'd** — `worker_loops.ts`
+  (worker mains) _and_ `remote_service.ts` (`getResult` polling in a client). An
+  `unref`'d backoff lets the process exit mid-poll (a worker dies idle; a client
+  exits with code 13, "unsettled top-level await"). Bit us twice; in-process tests
+  mask it because the test runner keeps the loop alive.
 - **`getStatus` is a sync in-proc mirror** (`statusMirror`), not a store read —
   the store is async. Keep it updated when an execution settles.
 - **Cancellation, signals, timers are recorded events** (deterministic replay),

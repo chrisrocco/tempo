@@ -23,9 +23,12 @@ import type {
   WorkflowTaskResult,
 } from '../protocol';
 
+// Ref'd on purpose: when a standalone client is awaiting getResult, this poll
+// backoff is often the only thing keeping the process alive — an unref'd timer
+// would let the process exit mid-poll (an unsettled top-level await, exit code 13).
 const sleep = (ms: number): Promise<void> =>
   new Promise((r) => {
-    setTimeout(r, ms).unref?.();
+    setTimeout(r, ms);
   });
 
 export interface RemoteServiceOptions {

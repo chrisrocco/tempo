@@ -16,8 +16,10 @@ The task surface splits along the same line as the two entrypoints — which is 
   itself (`index.ts` / `core` / `server`): add a durable adapter, add a primitive,
   deploy distributed.
 
-Plus one on-ramp for everyone:
+Plus on-ramps for everyone:
 
+- **[Quickstart](quickstart.md)** — define a workflow, run it locally, then deploy
+  it across server + worker processes over RPC.
 - **[Getting Started](getting-started.md)** — build and run your first workflow,
   end to end, using the motivating example.
 

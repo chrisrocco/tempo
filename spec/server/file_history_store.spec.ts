@@ -75,4 +75,18 @@ describe('FileHistoryStore', () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('reclaims a stale lock left by a dead process (crash restart)', async () => {
+    const dir = await tmpDir();
+    try {
+      // A crash leaves a lock file naming a pid that is no longer running.
+      await fs.writeFile(path.join(dir, 'lock'), '999999999');
+      // Open must reclaim it rather than refuse forever (else Restart=always loops).
+      const store = await FileHistoryStore.open(dir);
+      expect(await store.list()).toEqual([]);
+      await store.close();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 });

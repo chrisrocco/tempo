@@ -253,18 +253,34 @@ function parseEvents(raw: string): HistoryEvent[] {
   return out;
 }
 
+// Is a process still running? Signal 0 checks existence without killing; ESRCH
+// means gone, EPERM means alive-but-not-ours. Same-host only (a pid is meaningless
+// across machines), which matches the single-writer, single-box assumption.
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 async function acquireLock(dir: string): Promise<void> {
   const lockPath = path.join(dir, 'lock');
   try {
     const fh = await fs.open(lockPath, 'wx'); // exclusive create — fails if held
     await fh.writeFile(String(process.pid));
     await fh.close();
+    return;
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new Error(
-        `data dir ${dir} is locked by another process (remove ${lockPath} if stale)`,
-      );
-    }
-    throw e;
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
   }
+  // A lock file exists. If its holder is still alive, refuse; if the holder is
+  // dead (a crash left a stale lock), reclaim it so a restart can proceed. (A live
+  // holder includes this same process — a genuine double-open is a bug.)
+  const holder = Number((await fs.readFile(lockPath, 'utf8').catch(() => '')).trim());
+  if (holder && isProcessAlive(holder)) {
+    throw new Error(`data dir ${dir} is locked by a live process (pid ${holder})`);
+  }
+  await fs.writeFile(lockPath, String(process.pid)); // stale → take it over
 }
