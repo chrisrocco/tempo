@@ -1,0 +1,201 @@
+/**
+ * @fileoverview
+ * `applyEvent` routing, tested directly against a hand-built context: which
+ * events resolve a parked promise, which deliberately do nothing, and which
+ * unwind the whole run. Internals specs, for contributors.
+ */
+
+import {
+  als,
+  applyEvent,
+  CancelledFailure,
+  createContext,
+  defineSignal,
+  setHandler,
+} from '../../src/core';
+import type { WorkflowContext } from '../../src/core';
+
+/** Park a fake waiter at `seq` and report how it settles. */
+function parkWaiter(ctx: WorkflowContext, seq: number) {
+  const settled: { value?: unknown; error?: unknown; done: boolean } = {
+    done: false,
+  };
+  ctx.completions.set(seq, {
+    resolve: (v) => {
+      settled.value = v;
+      settled.done = true;
+    },
+    reject: (e) => {
+      settled.error = e;
+      settled.done = true;
+    },
+  });
+  return settled;
+}
+
+describe('core applyEvent — completions', () => {
+  it('routes a completion to the promise parked at its seq', () => {
+    const ctx = createContext([], []);
+    const waiter = parkWaiter(ctx, 0);
+
+    applyEvent(ctx, { type: 'activityCompleted', seq: 0, result: 'x' });
+
+    expect(waiter.value).toBe('x');
+    expect(ctx.completions.has(0)).toBeFalse();
+  });
+
+  it('routes each completion to its own seq, not to call order', () => {
+    const ctx = createContext([], []);
+    const first = parkWaiter(ctx, 0);
+    const second = parkWaiter(ctx, 1);
+
+    applyEvent(ctx, { type: 'activityCompleted', seq: 1, result: 'second' });
+
+    expect(second.value).toBe('second');
+    expect(first.done).toBeFalse();
+  });
+
+  it('rejects the parked promise when the activity failed', () => {
+    const ctx = createContext([], []);
+    const waiter = parkWaiter(ctx, 0);
+
+    applyEvent(ctx, { type: 'activityFailed', seq: 0, error: 'nope' });
+
+    expect((waiter.error as Error).message).toBe('nope');
+  });
+
+  it('resolves a fired timer with no value', () => {
+    const ctx = createContext([], []);
+    const waiter = parkWaiter(ctx, 0);
+
+    applyEvent(ctx, { type: 'timerFired', seq: 0 });
+
+    expect(waiter.done).toBeTrue();
+    expect(waiter.value).toBeUndefined();
+  });
+
+  /**
+   * The nondeterminism check. A completion for a seq nothing is waiting on means
+   * the workflow code no longer matches the history it is being replayed against
+   * — fail loudly rather than silently diverge.
+   */
+  it('throws a nondeterminism error for a completion with no matching seq', () => {
+    const ctx = createContext([], []);
+
+    expect(() =>
+      applyEvent(ctx, { type: 'activityCompleted', seq: 7, result: 1 }),
+    ).toThrowError(/nondeterminism.*seq 7/);
+  });
+});
+
+describe('core applyEvent — markers', () => {
+  /**
+   * Markers record that work was dispatched. They resolve nothing: the real
+   * completion arrives later as its own event under the same seq.
+   */
+  it('leaves the parked promise untouched for a scheduled-activity marker', () => {
+    const ctx = createContext([], []);
+    const waiter = parkWaiter(ctx, 0);
+
+    applyEvent(ctx, {
+      type: 'activityScheduled',
+      seq: 0,
+      name: 'a',
+      args: [],
+      options: {},
+    });
+
+    expect(waiter.done).toBeFalse();
+    expect(ctx.completions.has(0)).toBeTrue();
+  });
+
+  it('leaves the parked promise untouched for timer and child markers', () => {
+    const ctx = createContext([], []);
+    const timer = parkWaiter(ctx, 0);
+    const child = parkWaiter(ctx, 1);
+
+    applyEvent(ctx, { type: 'timerStarted', seq: 0, fireAt: 123 });
+    applyEvent(ctx, { type: 'childStarted', seq: 1, childId: 'c-1' });
+
+    expect(timer.done).toBeFalse();
+    expect(child.done).toBeFalse();
+  });
+});
+
+describe('core applyEvent — signals', () => {
+  it('delivers a signal to its registered handler', () => {
+    const ctx = createContext([], []);
+    const received: unknown[] = [];
+    als.run(ctx, () => {
+      setHandler(defineSignal('ping'), (p) => received.push(p));
+    });
+
+    applyEvent(ctx, { type: 'signal', name: 'ping', payload: 42 });
+
+    expect(received).toEqual([42]);
+  });
+
+  /**
+   * Signals are external, so one can land before the workflow has registered its
+   * handler. Buffering makes delivery order-independent instead of lossy.
+   */
+  it('buffers a signal that arrives before its handler is registered', () => {
+    const ctx = createContext([], []);
+    applyEvent(ctx, { type: 'signal', name: 'ping', payload: 'early' });
+    expect(ctx.bufferedSignals.length).toBe(1);
+
+    const received: unknown[] = [];
+    als.run(ctx, () => {
+      setHandler(defineSignal('ping'), (p) => received.push(p));
+    });
+
+    expect(received).toEqual(['early']);
+    expect(ctx.bufferedSignals.length).toBe(0);
+  });
+
+  it('leaves buffered signals for other names alone when one handler registers', () => {
+    const ctx = createContext([], []);
+    applyEvent(ctx, { type: 'signal', name: 'ping', payload: 1 });
+    applyEvent(ctx, { type: 'signal', name: 'pong', payload: 2 });
+
+    als.run(ctx, () => setHandler(defineSignal('ping'), () => {}));
+
+    expect(ctx.bufferedSignals.map((s) => s.name)).toEqual(['pong']);
+  });
+});
+
+describe('core applyEvent — cancellation', () => {
+  /**
+   * Cancellation is a recorded event, not a side effect, so the cancel point is
+   * fixed in history and replay stays deterministic. Applying it rejects
+   * everything the run is currently awaiting.
+   */
+  it('rejects every outstanding operation with CancelledFailure', () => {
+    const ctx = createContext([], []);
+    const activity = parkWaiter(ctx, 0);
+    let conditionError: unknown;
+    ctx.blockedConditions.set(0, {
+      fn: () => false,
+      resolve: () => {},
+      reject: (e) => {
+        conditionError = e;
+      },
+    });
+
+    applyEvent(ctx, { type: 'cancelRequested' });
+
+    expect(activity.error).toBeInstanceOf(CancelledFailure);
+    expect(conditionError).toBeInstanceOf(CancelledFailure);
+  });
+
+  it('marks the run cancelled and clears what it was waiting on', () => {
+    const ctx = createContext([], []);
+    parkWaiter(ctx, 0);
+
+    applyEvent(ctx, { type: 'cancelRequested' });
+
+    expect(ctx.cancelled).toBeTrue();
+    expect(ctx.completions.size).toBe(0);
+    expect(ctx.blockedConditions.size).toBe(0);
+  });
+});

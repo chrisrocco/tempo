@@ -111,6 +111,60 @@ Everything else is an elaboration of that loop. The single organizing idea:
 If a change respects that line it is probably in the right place. If it blurs it,
 stop.
 
+### Following a signal, end to end
+
+Design documentation lives in each module, so the one thing no single module can
+tell you is the path _between_ them. Here is a signal's, which exercises most of
+the engine:
+
+1. **Client** calls `signal(workflowId, name, payload)` —
+   [`client/client.ts`](src/client/client.ts). Against `RemoteService` this is an
+   HTTP POST; against `LocalService` it is a direct call. Same seam either way.
+2. **Server** appends a `signal` history event, then _wakes_ the execution —
+   [`server_core.appendSignal`](src/server/server_core.ts). Waking is nothing more
+   than enqueuing a workflow task.
+3. **The workflow-task queue** absorbs the wake —
+   [`ports/workflow_task_queue.ts`](src/server/ports/workflow_task_queue.ts). At
+   most one task per execution is in flight; a wake landing mid-task coalesces
+   into exactly one more. This is where the two concurrency bugs are prevented.
+4. **A workflow worker polls** and gets `{name, args, history}` plus a lease —
+   [`worker/worker_loops.ts`](src/worker/worker_loops.ts). It holds no state
+   between tasks, so any worker can serve any execution.
+5. **Replay** builds a fresh context and re-runs the workflow function against the
+   whole history — [`core/replay.ts`](src/core/replay.ts). Commands are suppressed
+   while catching up; once the last event is consumed the context goes live.
+6. **`applyEvent`** routes the signal to its registered handler, or buffers it if
+   the handler is not set up yet — [`core/apply_event.ts`](src/core/apply_event.ts).
+7. **`settle`** drains microtasks and runs the condition unblock pass to a
+   fixpoint. A workflow parked on `condition(() => queue.length > 0)` wakes here,
+   _after_ the handler pushed to the queue — that ordering is why the queue
+   pattern never misses an item.
+8. **The workflow runs on** past the live edge and emits new commands; the worker
+   responds with them.
+9. **The server applies the result** —
+   [`applyWorkflowTaskResult`](src/server/server_core.ts) — behind a version check
+   that discards a lease-race loser. Each command is dispatched: a marker event is
+   recorded and the work is queued. Dispatched work parks the workflow.
+10. **Completion is another wake.** An activity worker runs the activity, reports
+    back, the server appends the completion — and the loop returns to step 3.
+
+Cold replay from step 5 happens on _every_ task today; a sticky cache that keeps
+warm executions on the worker is planned but not built.
+
+### Terms
+
+| Term              | Meaning                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| **Command**       | A request emitted by workflow code during a task, carrying a deterministic `seq`            |
+| **History event** | The durable record of something that happened; history is the source of truth               |
+| **seq**           | Sequence number assigned to each command in call order — how a completion finds its promise |
+| **Activation**    | One batch of new events applied to advance a workflow (a "workflow task")                   |
+| **Replay**        | Re-running the workflow from the top against recorded history to rebuild lost state         |
+| **Live edge**     | The boundary between catching up and producing new commands                                 |
+| **Marker event**  | A record that work was _dispatched_; resolves nothing, but stops re-dispatch on replay      |
+| **Wake**          | Enqueuing a workflow task for an execution                                                  |
+| **Execution**     | One running instance of a workflow (a `workflowId`, plus a `runId` per run)                 |
+
 ## Project layout
 
 Dependencies point strictly down:
@@ -172,6 +226,10 @@ understand what the engine does.
 | Spec                                                                  | Covers                                                        |
 | --------------------------------------------------------------------- | ------------------------------------------------------------- |
 | [`integration/local`](spec/integration/local.spec.ts)                 | The whole programming model against `createLocalRuntime`      |
+| [`core/replay`](spec/core/replay.spec.ts)                             | The live edge, command suppression, terminal outcomes         |
+| [`core/apply_event`](spec/core/apply_event.spec.ts)                   | Event routing, markers, buffering, the nondeterminism check   |
+| [`core/condition`](spec/core/condition.spec.ts)                       | Parking, the unblock fixpoint, the condSeq invariant          |
+| [`core/workflow_api`](spec/core/workflow_api.spec.ts)                 | seq allocation and command payloads                           |
 | [`integration/resume`](spec/integration/resume.spec.ts)               | Crash recovery: restart mid-flight and finish from history    |
 | [`integration/remote`](spec/integration/remote.spec.ts)               | Client → RemoteService → HTTP → server → workers, one process |
 | [`integration/distributed`](spec/integration/distributed.spec.ts)     | Real spawned processes; crash redelivery / at-least-once      |
@@ -192,7 +250,7 @@ npm run typecheck
 
 ## Status
 
-Working and green: 64 specs, `tsc --noEmit` clean. The full programming model
+Working and green: 107 specs, `tsc --noEmit` clean. The full programming model
 runs in all three modes above.
 
 Not built: server HA, activity heartbeats and start-to-close timeouts, the

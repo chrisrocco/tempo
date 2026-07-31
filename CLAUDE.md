@@ -125,8 +125,10 @@ commas (`.prettierrc.json`: `printWidth: 80`, `singleQuote: true`). Run
 
 ## Testing
 
-Tests go in `/spec`, structured like documentation — a file per "chapter". They
-should exhaustively cover features and functionality.
+Tests go in `/spec`, structured like documentation — a file per "chapter", laid
+out to mirror `src/`. Every capability should be covered somewhere, and the
+deterministic core in particular has unit specs (`spec/core/`) because integration
+tests alone will not catch a replay bug that only shows on an unusual history.
 
 ### Two kinds of spec, on purpose
 
@@ -158,10 +160,11 @@ Not every test is documentation, and forcing it to be makes both worse.
    mutable fixtures.
 5. **Order simple → advanced** within a `describe`, so reading straight down
    teaches the capability.
-6. Put a multi-line comment above each test case explaining, tutorial-style, how
-   to use the thing and how it works.
+6. **Comment a test only where the mechanism isn't obvious from reading it** —
+   why this case exists, or what would break without it. A well-named test over a
+   minimal example needs no preamble; a comment restating the title is noise.
 
-`spec/integration/local.spec.ts` is the reference example of all six.
+`spec/integration/local.spec.ts` is the reference for all six.
 
 ### Examples must be spec-covered
 
