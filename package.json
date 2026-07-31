@@ -5,6 +5,7 @@
   "type": "module",
   "description": "A minimal-but-correct durable workflow engine (a small Temporal-shaped system).",
   "scripts": {
+    "tempo": "tsx bin/tempo.ts",
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",

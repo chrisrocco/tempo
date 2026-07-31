@@ -127,7 +127,8 @@ workflow-engine/
 │   └── index.ts                     # ★ HOST ENTRYPOINT — createLocalRuntime, Tempo, client, public types
 │
 ├── bin/                             # ── deployable process mains (distributed mode)
-│   └── server-main.ts               #    boots server_core with DURABLE adapters + RPC transport
+│   ├── server-main.ts               #    boots server_core with DURABLE adapters + RPC transport
+│   └── tempo.ts                     #    the `tempo` CLI entry (logic in src/cli/)
 │                                    #    (workers are built from user code — see examples/greeter/)
 │
 ├── examples/

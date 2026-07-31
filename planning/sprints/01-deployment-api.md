@@ -1,21 +1,20 @@
-
 ## Objective
 
 I want to hash out the developer jounrney for bundling and deploying the workflows.
 
 ## Assumptions / Constraints
 
- - The workflows will be deployed on developers' Linux workstation machines (maybe container VMs later)
- - The build system we'll ultimately be using is Blaze
+- The workflows will be deployed on developers' Linux workstation machines (maybe container VMs later)
+- The build system we'll ultimately be using is Blaze
 
 ## Requirements
 
 The build & deploy user journey should look like this:
 
- 1. Import the 'tempo' library in a TypeScript project
- 2. Define their workflows
- 3. Write a single, simple entrypoint file like 'deploy.ts' or 'worker.ts' (doesn't matter what they name it)
- 4. They use the Tempo CLI to deploy and re-deploy the workers (maybe need to build the binaries again)
+1.  Import the 'tempo' library in a TypeScript project
+2.  Define their workflows
+3.  Write a single, simple entrypoint file like 'deploy.ts' or 'worker.ts' (doesn't matter what they name it)
+4.  They use the Tempo CLI to deploy and re-deploy the workers (maybe need to build the binaries again)
 
 QUESTION: Can the CLI also `blaze build` the entrypoint for them, or do they have to do that separately?
 
@@ -46,15 +45,15 @@ QUESTION: What are our options? Do we need an installation script to generate th
 
 Here are some CLI methods we probably will need:
 
- - [ ] tempo deploy --worker=???  // also will re-deploy a new version
- - [ ] tempo status  // shows the full status of the services (server, workers)
- - [ ] tempo start <workflow-id> <args> [--wait]  // Starts a new workflow
- - [ ] tempo cancel <workflow-id>
- - [ ] ...leave your suggestions here
+- [ ] tempo deploy --worker=??? // also will re-deploy a new version
+- [ ] tempo status // shows the full status of the services (server, workers)
+- [ ] tempo start <workflow-id> <args> [--wait] // Starts a new workflow
+- [ ] tempo cancel <workflow-id>
+- [ ] ...leave your suggestions here
 
 Open Questions:
 
- - [ ] Can the CLI also handle the installation script?
+- [ ] Can the CLI also handle the installation script?
 
 ## Output
 

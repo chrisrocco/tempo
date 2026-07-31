@@ -25,9 +25,16 @@ Last updated: end of **Phase 5, Slice 4** (distribution core complete).
 ### Commands
 
 ```bash
-npm test          # jasmine + tsx, all 55 specs
+npm test          # jasmine + tsx, all 59 specs
 npm run typecheck # tsc --noEmit
+npm run tempo -- help   # the tempo CLI
 ```
+
+The CLI (`bin/tempo.ts`, logic in `src/cli/`) covers the dev loop and the client
+surface today: `tempo up <entry>` runs a server + worker in the foreground, and
+`tempo start|result|signal|cancel` drive workflows through it. The deployment
+commands (`server install`, `deploy`, `status`, `logs`, `rollback`) are not built
+yet — see [the build-and-deploy guide](docs/guides/build-and-deploy.md).
 
 Distributed (manual): `node --import tsx bin/server-main.ts` (prints `LISTENING <port>`),
 then the worker binary built from user code — `Tempo.startWorker({name, workflows,
@@ -102,7 +109,8 @@ src/
   workflow.ts          ★ AUTHOR ENTRYPOINT — deterministic primitives only
   index.ts             ★ HOST ENTRYPOINT — createLocalRuntime, FileHistoryStore, types
   tempo.ts             ★ WORKER ENTRYPOINT — Tempo.startWorker() for deployable workers
-bin/                   server-main (the framework server; workers come from user code)
+  cli/                 the `tempo` CLI: process.ts · describe.ts · up.ts · client.ts · cli.ts
+bin/                   server-main (the framework server) · tempo (the CLI entry)
 examples/              bug_hotlist_monitor.ts — the motivating spawn-and-cancel workflow
                        greeter/ — activities + workflows + worker.ts, the deploy shape
 ```
