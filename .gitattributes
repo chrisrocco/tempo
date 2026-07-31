@@ -1,0 +1,8 @@
+# Line endings are LF everywhere, in the repo and in the working tree.
+#
+# Without this, a contributor with core.autocrlf=true gets CRLF working-tree
+# files while Prettier writes LF, so every `npm run format` leaves the whole
+# tree flagged as modified even though the content is identical. Pinning it
+# here makes the policy a property of the repo rather than of each machine's
+# global git config.
+* text=auto eol=lf
