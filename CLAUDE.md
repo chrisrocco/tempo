@@ -1,7 +1,7 @@
 # Working in this repo
 
-Read [`PROJECT.md`](PROJECT.md) first — it is the living "you are here": status,
-the annotated code map, the test map, and what's next.
+Read [`README.md`](README.md) first — what the project is, how it's laid out, and
+the reading order through the code.
 
 ## Structuring the code
 
@@ -82,9 +82,10 @@ Find the module that owns the idea and put it there. If genuinely no module owns
 it, that is a signal about what kind of thing it actually is — and it belongs in
 one of the few places that legitimately sit outside the code:
 
-- **[`PROJECT.md`](PROJECT.md)** — status, the live code map, what's next. Tracks
-  the _moving_ state, which no single module owns.
-- **[`ROADMAP.md`](ROADMAP.md)** — the phased plan and exit criteria.
+- **[`README.md`](README.md)** — what the project is, the layout, current status,
+  and the reading order. The front door, for someone who has read nothing.
+- **[`ROADMAP.md`](ROADMAP.md)** — what is not built yet, and the invariants that
+  hold while building it.
 - **[`planning/`](planning/)** — in-flight design work, sprints, and tickets:
   proposals for code that doesn't exist yet, so there's no module to host them.
 - **This file** — contributor conventions: process, not implementation.

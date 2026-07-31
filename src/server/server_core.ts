@@ -12,6 +12,21 @@
  * batch it appends events, creates downstream tasks, and closes the task —
  * conditional on a version check, so a lease-race loser is discarded.
  *
+ * ## Dispatch-and-park, and the marker invariant
+ *
+ * No operation holds an orchestration frame while it runs. Dispatching an
+ * activity, timer, or child writes a **marker event** (`activityScheduled` /
+ * `timerStarted` / `childStarted`) and parks the workflow; the completion arrives
+ * later as its own event and wakes it via a fresh task.
+ *
+ * **Every dispatched op must leave its marker** — this is the invariant to
+ * respect when adding a command type. Markers do double duty: on replay their
+ * presence is what stops a re-emitted command from dispatching a second time
+ * (see `core/apply_event`, which no-ops them), and on restart they are the
+ * "scheduled before running" record `resume` rebuilds pending work from. Skip the
+ * marker and you get a double-dispatch under concurrency and an operation that
+ * silently vanishes across a crash.
+ *
  * ## `continueAsNew` is a terminal disposition here, not in the core
  *
  * When a command batch contains `continueAsNew`, this is where it becomes real:

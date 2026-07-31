@@ -47,7 +47,12 @@ export function sleep(ms: number): Promise<void> {
   return scheduleCommand({ type: 'startTimer', ms }) as Promise<void>;
 }
 
-/** Blocking child: start a child workflow and await its result. */
+/**
+ * Blocking child: start a child workflow and await its result. The parent parks
+ * and is resumed by a `childCompleted` event correlated back by `seq` — the same
+ * dispatch-and-park path an activity takes. Contrast `startChild`, whose detached
+ * children carry no completion event at all, which is why they need no waiter.
+ */
 export function executeChild<T = unknown>(
   name: string,
   ...args: unknown[]
