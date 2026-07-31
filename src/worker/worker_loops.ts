@@ -12,10 +12,11 @@ import type { WorkflowWorker } from './workflow_worker';
 
 // Ref'd on purpose: a worker process must stay alive between polls. The loops are
 // bounded by an explicit stop(), so this never keeps a process alive spuriously.
-const sleep = (ms: number): Promise<void> =>
-  new Promise((r) => {
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => {
     setTimeout(r, ms);
   });
+}
 
 export interface WorkerLoop {
   /** Stop polling and wait for the in-flight iteration to finish. */

@@ -35,8 +35,9 @@ interface PersistedMeta {
   failureMessage?: string;
 }
 
-const errorMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : String(e);
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 // A filesystem-safe, collision-free directory name. The real id lives in meta.json,
 // so this need not be reversible — a readable prefix plus a hash is enough.
@@ -278,9 +279,13 @@ async function acquireLock(dir: string): Promise<void> {
   // A lock file exists. If its holder is still alive, refuse; if the holder is
   // dead (a crash left a stale lock), reclaim it so a restart can proceed. (A live
   // holder includes this same process — a genuine double-open is a bug.)
-  const holder = Number((await fs.readFile(lockPath, 'utf8').catch(() => '')).trim());
+  const holder = Number(
+    (await fs.readFile(lockPath, 'utf8').catch(() => '')).trim(),
+  );
   if (holder && isProcessAlive(holder)) {
-    throw new Error(`data dir ${dir} is locked by a live process (pid ${holder})`);
+    throw new Error(
+      `data dir ${dir} is locked by a live process (pid ${holder})`,
+    );
   }
   await fs.writeFile(lockPath, String(process.pid)); // stale → take it over
 }

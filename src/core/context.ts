@@ -46,11 +46,11 @@ export interface WorkflowContext {
 // ── context propagation ────────────────────────────────────────────────
 export const als = new AsyncLocalStorage<WorkflowContext>();
 
-export const getContext = (): WorkflowContext => {
+export function getContext(): WorkflowContext {
   const ctx = als.getStore();
   if (!ctx) throw new Error('workflow API called outside a workflow context');
   return ctx;
-};
+}
 
 export function createContext(
   args: unknown[],

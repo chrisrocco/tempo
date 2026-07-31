@@ -25,7 +25,7 @@ export const stopSignal = defineSignal('stop');
 
 // A per-bug monitor: "checks" the bug periodically until it is cancelled.
 export async function bugMonitor(bugId: string): Promise<void> {
-  for (;;) {
+  while (true) {
     await runActivity('checkBug', bugId);
     await sleep(5);
   }
@@ -45,7 +45,7 @@ export async function hotlistMonitor(): Promise<string[]> {
     stopped = true;
   });
 
-  for (;;) {
+  while (true) {
     await condition(() => queue.length > 0 || stopped);
 
     while (queue.length > 0) {

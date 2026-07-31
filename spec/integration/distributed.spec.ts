@@ -84,7 +84,7 @@ async function pollUntil<T>(
   timeoutMs = 5000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
-  for (;;) {
+  while (true) {
     const v = await fn();
     if (v !== undefined) return v;
     if (Date.now() > deadline) throw new Error('pollUntil timed out');

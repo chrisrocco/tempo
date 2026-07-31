@@ -29,18 +29,20 @@ export interface Client {
 }
 
 export function createClient(service: WorkflowService): Client {
-  const handle = <T>(workflowId: string): WorkflowHandle<T> => ({
-    workflowId,
-    result: () => service.getResult(workflowId) as Promise<T>,
-    status: () => service.getStatus(workflowId),
-    signal: (signalDef, payload) =>
-      service.signal(
-        workflowId,
-        typeof signalDef === 'string' ? signalDef : signalDef.name,
-        payload,
-      ),
-    cancel: () => service.cancel(workflowId),
-  });
+  function handle<T>(workflowId: string): WorkflowHandle<T> {
+    return {
+      workflowId,
+      result: () => service.getResult(workflowId) as Promise<T>,
+      status: () => service.getStatus(workflowId),
+      signal: (signalDef, payload) =>
+        service.signal(
+          workflowId,
+          typeof signalDef === 'string' ? signalDef : signalDef.name,
+          payload,
+        ),
+      cancel: () => service.cancel(workflowId),
+    };
+  }
 
   return {
     start<T = unknown>(

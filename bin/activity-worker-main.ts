@@ -32,10 +32,10 @@ async function main(): Promise<void> {
   const loop = runActivityWorker(service, createActivityWorker(registry));
   console.log('ACTIVITY_WORKER_READY');
 
-  const stop = async (): Promise<void> => {
+  async function stop(): Promise<void> {
     await loop.stop();
     process.exit(0);
-  };
+  }
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
 }

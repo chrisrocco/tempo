@@ -21,8 +21,9 @@ export interface WorkflowWorker {
   ): Promise<WorkflowTaskResult>;
 }
 
-export const createWorkflowRegistry = (): WorkflowRegistry =>
-  new Map<string, WorkflowFn>();
+export function createWorkflowRegistry(): WorkflowRegistry {
+  return new Map<string, WorkflowFn>();
+}
 
 export function createWorkflowWorker(
   registry: WorkflowRegistry,

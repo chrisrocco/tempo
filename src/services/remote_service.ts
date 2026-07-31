@@ -26,10 +26,11 @@ import type {
 // Ref'd on purpose: when a standalone client is awaiting getResult, this poll
 // backoff is often the only thing keeping the process alive — an unref'd timer
 // would let the process exit mid-poll (an unsettled top-level await, exit code 13).
-const sleep = (ms: number): Promise<void> =>
-  new Promise((r) => {
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => {
     setTimeout(r, ms);
   });
+}
 
 export interface RemoteServiceOptions {
   /** How often getResult/pollers back off when there's nothing yet. */
@@ -77,7 +78,7 @@ export function createRemoteService(
       return statusCache.get(workflowId) ?? 'running';
     },
     async getResult(workflowId) {
-      for (;;) {
+      while (true) {
         const outcome = (await call({
           method: 'getOutcome',
           workflowId,

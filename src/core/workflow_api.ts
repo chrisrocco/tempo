@@ -21,30 +21,37 @@ function scheduleCommand(spec: CommandSpec): Promise<unknown> {
   );
 }
 
-const scheduleActivity = (
+function scheduleActivity(
   name: string,
   options: ActivityOptions,
   args: unknown[],
-): Promise<unknown> =>
-  scheduleCommand({ type: 'scheduleActivity', name, args, options });
+): Promise<unknown> {
+  return scheduleCommand({ type: 'scheduleActivity', name, args, options });
+}
 
-export const runActivity = <T = unknown>(
+export function runActivity<T = unknown>(
   name: string,
   ...args: unknown[]
-): Promise<T> => scheduleActivity(name, {}, args) as Promise<T>;
-export const sleep = (ms: number): Promise<void> =>
-  scheduleCommand({ type: 'startTimer', ms }) as Promise<void>;
+): Promise<T> {
+  return scheduleActivity(name, {}, args) as Promise<T>;
+}
+
+export function sleep(ms: number): Promise<void> {
+  return scheduleCommand({ type: 'startTimer', ms }) as Promise<void>;
+}
+
 /** Blocking child: start a child workflow and await its result. */
-export const executeChild = <T = unknown>(
+export function executeChild<T = unknown>(
   name: string,
   ...args: unknown[]
-): Promise<T> =>
-  scheduleCommand({
+): Promise<T> {
+  return scheduleCommand({
     type: 'startChild',
     childName: name,
     childArgs: args,
     detached: false,
   }) as Promise<T>;
+}
 
 /** A fire-and-forget child's handle: it can be cancelled, but its result is not awaited. */
 export interface ChildHandle {
@@ -86,8 +93,9 @@ export function startChild(name: string, ...args: unknown[]): ChildHandle {
  * runs after it — `return continueAsNew(...)` (or `await` it) halts the run. The
  * actual close-and-restart is the server's job (docs/concepts/continue-as-new.md); the core just stops here.
  */
-export const continueAsNew = (...args: unknown[]): Promise<never> =>
-  scheduleCommand({ type: 'continueAsNew', args }) as Promise<never>;
+export function continueAsNew(...args: unknown[]): Promise<never> {
+  return scheduleCommand({ type: 'continueAsNew', args }) as Promise<never>;
+}
 
 export interface WorkflowInfo {
   /** True when the server hints that history has grown enough to roll over. */
@@ -95,10 +103,10 @@ export interface WorkflowInfo {
 }
 
 /** Read server-provided facts about the current run off the context. */
-export const workflowInfo = (): WorkflowInfo => {
+export function workflowInfo(): WorkflowInfo {
   const ctx = getContext();
   return { continueAsNewSuggested: ctx.continueAsNewSuggested };
-};
+}
 
 type AnyFn = (...args: any[]) => any;
 

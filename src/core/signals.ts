@@ -12,7 +12,9 @@ export interface SignalDef {
   name: string;
 }
 
-export const defineSignal = (name: string): SignalDef => ({ name });
+export function defineSignal(name: string): SignalDef {
+  return { name };
+}
 
 export function setHandler(
   signalDef: SignalDef,

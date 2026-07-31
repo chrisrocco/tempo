@@ -123,13 +123,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     kids.set(seq, childId);
   }
 
-  const errorMessage = (e: unknown): string =>
-    e instanceof Error ? e.message : String(e);
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : String(e);
+  }
 
-  const appendEvent = (
-    workflowId: string,
-    event: HistoryEvent,
-  ): Promise<void> => historyStore.append(workflowId, [event]);
+  function appendEvent(workflowId: string, event: HistoryEvent): Promise<void> {
+    return historyStore.append(workflowId, [event]);
+  }
 
   // Wake an execution: it needs another workflow task. The queue coalesces, so a
   // wake during an in-flight task becomes exactly one more task.

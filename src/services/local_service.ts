@@ -40,12 +40,13 @@ import type { ActivityWorker, WorkflowWorker } from '../worker';
 
 // A plain server-side wait between activity attempts. Distinct from TimerService
 // (durable, workflow-facing): retry backoff never touches history.
-const sleepMs = (ms: number): Promise<void> =>
-  ms > 0
+function sleepMs(ms: number): Promise<void> {
+  return ms > 0
     ? new Promise((r) => {
         setTimeout(r, ms).unref?.();
       })
     : Promise.resolve();
+}
 
 interface ResultWaiter {
   promise: Promise<unknown>;
@@ -152,7 +153,7 @@ export function createLocalService(
     task: ActivityTask,
   ): Promise<ActivityResult> {
     let attemptsMade = 0;
-    for (;;) {
+    while (true) {
       const result = await activityWorker.runTask(task);
       attemptsMade += 1;
       if (result.ok || !shouldRetry(task.options.retry, attemptsMade))

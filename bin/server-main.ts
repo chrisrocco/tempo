@@ -12,7 +12,9 @@ import { FileHistoryStore } from '../src';
 import { createRpcServer, createServerHost } from '../src/services';
 
 const port = process.env.PORT ? Number(process.env.PORT) : 0;
-const activityLeaseMs = process.env.ACTIVITY_LEASE_MS ? Number(process.env.ACTIVITY_LEASE_MS) : undefined;
+const activityLeaseMs = process.env.ACTIVITY_LEASE_MS
+  ? Number(process.env.ACTIVITY_LEASE_MS)
+  : undefined;
 const dataDir = process.env.DATA_DIR;
 
 async function main(): Promise<void> {
@@ -29,13 +31,13 @@ async function main(): Promise<void> {
     console.log(`LISTENING ${addr.port}`);
   });
 
-  const shutdown = (): void => {
+  function shutdown(): void {
     host.shutdown();
     (server as { closeAllConnections?: () => void }).closeAllConnections?.();
     server.close(() => {
       void Promise.resolve(store?.close()).finally(() => process.exit(0)); // release the lockfile
     });
-  };
+  }
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 }

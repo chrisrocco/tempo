@@ -8,5 +8,6 @@ export type ActivityFn = (...args: any[]) => unknown | Promise<unknown>;
 
 export type ActivityRegistry = Map<string, ActivityFn>;
 
-export const createActivityRegistry = (): ActivityRegistry =>
-  new Map<string, ActivityFn>();
+export function createActivityRegistry(): ActivityRegistry {
+  return new Map<string, ActivityFn>();
+}

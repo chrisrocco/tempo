@@ -26,8 +26,9 @@ import {
   type HistoryStore,
 } from '../server';
 
-const errorMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : String(e);
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 export interface ServerHost {
   start(

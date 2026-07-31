@@ -389,7 +389,7 @@ describe('local runtime — cancellation', () => {
       })
       // loops forever until cancelled — if cancel is broken, this never terminates
       .registerWorkflow('ticker', async (id: string) => {
-        for (;;) {
+        while (true) {
           await runActivity('tick', id);
           await sleep(2);
         }
@@ -410,7 +410,7 @@ describe('local runtime — cancellation', () => {
   it('cascades cancellation from a parent to its fire-and-forget children', async () => {
     const rt = createLocalRuntime()
       .registerWorkflow('ticker', async () => {
-        for (;;) {
+        while (true) {
           await sleep(2);
         }
       })

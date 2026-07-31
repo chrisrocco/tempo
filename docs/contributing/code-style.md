@@ -38,8 +38,6 @@ export function sleep(ms: number): Promise<void> {
 }
 ```
 
-(One-line inline expressions are exempt — e.g. `export const drainMicrotasks = (): Promise<void> => new Promise((r) => setImmediate(r));` stays an arrow.)
-
 ### @fileoverview comments
 
 Use JS-Doc style multi-line comments with a @fileoverview annotation at the top of the file to explain each module. Prefer this over plain single-line `//` comments. Leave a space after the fileoverview comment.
@@ -63,6 +61,14 @@ export const drainMicrotasks = (): Promise<void> => new Promise((r) => setImmedi
 
 export const drainMicrotasks = (): Promise<void> => new Promise((r) => setImmediate(r));
 ```
+
+### for (;;)
+
+Don't use `for (;;)` - use `while (true)`. Do you think you're cool?
+
+### Names on Exported Symbols
+
+All exported symbols (variables, functions, classes), must have a multi-line js-doc style comment explaining it.
 
 ## Testing
 
