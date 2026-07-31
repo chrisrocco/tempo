@@ -2,7 +2,7 @@
  * @fileoverview
  * The worker run-loops: poll a service for a task, do the work, report back,
  * repeat. Written once against `WorkflowService`, so they run against `LocalService`
- * in-proc or a `RemoteService` over RPC — the same worker code either way (docs/architecture/structure-and-layers.md).
+ * in-proc or a `RemoteService` over RPC — the same worker code either way.
  * A deployable worker (`Tempo.startWorker`) runs these against a RemoteService.
  *
  * Failures are **reported and backed off**, never swallowed. A worker that cannot

@@ -1,9 +1,10 @@
 # PROJECT — status, map, and handoff
 
 The living "you are here" for this codebase. `README.md` is the design record and
-the target structure; the concept docs (`00`–`07`) explain the _ideas_; **this file
-tracks what is actually built, how the code is laid out today, where the code has
-diverged from the docs, and what to do next.** Read this first on a fresh session.
+the target structure; the `@fileoverview` comment on each module explains the
+_ideas_ behind it; **this file tracks what is actually built, how the code is laid
+out today, and what to do next.** Read this first on a fresh session, then
+`CLAUDE.md` for the conventions.
 
 Last updated: end of **Phase 5, Slice 4** (distribution core complete).
 
@@ -11,7 +12,7 @@ Last updated: end of **Phase 5, Slice 4** (distribution core complete).
 
 ## 1. Status at a glance
 
-- **58 specs green** under Jasmine + `tsx` (`npm test`), `tsc --noEmit` clean.
+- **64 specs green** under Jasmine + `tsx` (`npm test`), `tsc --noEmit` clean.
 - **Phases 1–4 complete. Phase 5 (distribution) core complete** — its exit
   criterion passes (a real spawned server process, worker-crash redelivery /
   at-least-once, and lease-race version rejection).
@@ -25,7 +26,7 @@ Last updated: end of **Phase 5, Slice 4** (distribution core complete).
 ### Commands
 
 ```bash
-npm test          # jasmine + tsx, all 58 specs
+npm test          # jasmine + tsx, all 64 specs
 npm run typecheck # tsc --noEmit
 npm run tempo -- help   # the tempo CLI
 ```
@@ -34,7 +35,8 @@ The CLI (`bin/tempo.ts`, logic in `src/cli/`) covers the dev loop and the client
 surface today: `tempo up <entry>` runs a server + worker in the foreground, and
 `tempo start|result|signal|cancel` drive workflows through it. The deployment
 commands (`server install`, `deploy`, `status`, `logs`, `rollback`) are not built
-yet — see [the build-and-deploy guide](docs/guides/build-and-deploy.md).
+yet — the target surface is documented in [`src/cli/cli.ts`](src/cli/cli.ts) and
+designed in [`planning/sprints/01-deployment-api.md`](planning/sprints/01-deployment-api.md).
 
 Distributed (manual): `node --import tsx bin/server-main.ts` (prints `LISTENING <port>`),
 then the worker binary built from user code — `Tempo.startWorker({name, workflows,
@@ -55,7 +57,7 @@ deadlock. Clients drive it via `createRemoteService(url)`.
 1. **The determinism boundary.** `core/` turns `(history) -> (commands)` and
    touches nothing else — no I/O, clock, or randomness. Everything
    non-deterministic lives on the other side (`server`, `worker`, `services`).
-   This is _the_ organizing principle (`01`). Not yet enforced by a lint rule.
+   This is _the_ organizing principle (see `src/workflow.ts`). Not yet enforced by a lint rule.
 2. **Event-sourced replay.** A workflow is re-run from its history on every task
    ("cold replay"). Commands it emits are matched against recorded events by a
    deterministic `seq`. History is an append-only log.
@@ -128,23 +130,32 @@ examples/              greeter.ts — the deployable worker: activity + workflow
 
 ---
 
-## 4. Concept docs vs. the implementation (READ THIS before trusting a doc)
+## 4. Where the design documentation lives
 
-The `00`–`07` docs were written at **Phase 0** and describe the _target_ and the
-_ideas_. The ideas are all intact; some mechanisms have moved. Where they differ,
-**the code is the truth** and this table is the guide.
+**In the code.** Each module's `@fileoverview` owns the ideas behind that module —
+rationale, caveats, and the invariants a reader has to know. There is no `docs/`
+tree; the old `00`–`07` concept docs described a Phase-0 target that the code had
+moved past in several places, and keeping a parallel prose copy in sync was the
+thing that kept failing. Where you need the _why_, read the module.
 
-| Doc                                      | Still accurate?   | Divergence to know                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `00` overview, `01` determinism boundary | ✅ Fully          | The boundary holds; lint enforcement still TODO.                                                                                                                                                                                                                                                                                                                                                                        |
-| `02` replay & execution                  | ✅ Core intact    | `replay`/`settle`/`applyEvent`/ALS unchanged. `applyEvent` now also no-ops marker events (`activityScheduled`/`timerStarted`/`childStarted`) and handles `cancelRequested`.                                                                                                                                                                                                                                             |
-| `03` condition/signals/timers            | ⚠️ Timers changed | Timers are now **real wall-clock** and durable: a `timerStarted{fireAt}` event is recorded, a real `setTimeout` fires, `resume()` re-arms from history. `condition`/signals as described.                                                                                                                                                                                                                               |
-| `04` drive & pump                        | ❌ Superseded     | The in-proc `drive` loop + `pump` are **gone**. Model is now **poll/respond**: `server_core.buildWorkflowTask`/`applyWorkflowTaskResult`; `pump`'s mutex+coalescing lives in `memory_workflow_task_queue.ts`; `LocalService` runs the in-proc drain loops. Read this doc for the _why_ (the two bugs pump prevents), then map to the queue.                                                                             |
-| `05` continue-as-new                     | ✅ As designed    | Terminal primitive in `core`, `ContinueAsNewCommand`, server disposition in `applyWorkflowTaskResult` (reset + re-drive). `continueAsNewSuggested` from history length.                                                                                                                                                                                                                                                 |
-| `06` architecture & distribution         | ⚠️ Mostly built   | The tier split exists. **Not split out:** `workflow_task_handler.ts`/`activity_task_handler.ts` are folded into `server_core.ts`. **Added, not in the doc's tree:** `server/file/`, `services/{server_host,rpc_server,remote_service}.ts`, `worker/worker_loops.ts`, `server/lease.ts`, `server/ports/workflow_task_queue.ts`. **Not built:** `worker/sticky_cache.ts`. Retry is worker-side today, not server-decided. |
-| `07` type model                          | ⚠️ Grown          | `protocol/` gained `activity_options`, `task_token`, `service`, `rpc`. `Command` gained `continueAsNew` + `cancelChild`; `StartChildCommand` gained `detached`. `HistoryEvent` gained the marker events + `cancelRequested`. Modeling style (per-variant interfaces, `Omit` spec) as described.                                                                                                                         |
+The entry points, in reading order:
 
-`ROADMAP.md` phase plan is accurate; Phases 1–4 done, Phase 5 done through Slice 4.
+| Read                                                | For                                                                        |
+| --------------------------------------------------- | -------------------------------------------------------------------------- |
+| `src/workflow.ts`                                   | The determinism boundary, why it exists, and the rules workflow code obeys |
+| `src/core/replay.ts`                                | Activation vs. replay, the live edge, `settle`, observe-don't-await        |
+| `src/core/context.ts`                               | Per-task state and the AsyncLocalStorage propagation caveat                |
+| `src/core/condition.ts`, `signals.ts`               | How a workflow waits; the handler-only-enqueues queue pattern              |
+| `src/core/workflow_api.ts`                          | The primitives, `proxyActivities`, `continueAsNew`'s layer split           |
+| `src/protocol/*`                                    | The wire format and the modeling decisions behind it                       |
+| `src/server/ports/workflow_task_queue.ts`           | The two concurrency bugs the design prevents                               |
+| `src/server/server_core.ts`                         | The transactional heart, and continue-as-new's terminal disposition        |
+| `src/services/local_service.ts`                     | Local vs. distributed, and the failure-semantics caveat                    |
+| `src/services/server_host.ts`, `bin/server-main.ts` | The tier split and the operational caveats                                 |
+
+Behavior is documented by the specs (§5) — executable, and run in CI.
+Conventions for changing the code are in `CLAUDE.md`. `ROADMAP.md`'s phase plan is
+accurate; Phases 1–4 done, Phase 5 done through Slice 4.
 
 ---
 
@@ -182,7 +193,7 @@ _ideas_. The ideas are all intact; some mechanisms have moved. Where they differ
 - **Counter-collision on resume** — `LocalService`/`ServerHost` id counters start
   at 0 after a restart, so a new generated id could collide with a resumed one.
   Fine with explicit `workflowId`s; seed the counter past resumed ids to harden.
-- **Server-decided retry** — retry is worker-side; doc 06 wants it as a server
+- **Server-decided retry** — retry is worker-side; the design wants it as a server
   decision (re-enqueue with backoff). Move it when heartbeats land.
 
 ### Known simplifications (intentional, documented)

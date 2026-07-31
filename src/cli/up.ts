@@ -6,7 +6,8 @@
  *
  * `TEMPO_ROLE` is deliberately left unset, so one worker process serves both
  * roles — fewer moving parts while iterating. Installed deployments split the
- * roles into separate services instead; see docs/guides/build-and-deploy.md.
+ * roles into separate services instead (one supervised service per role, scaled
+ * independently); see the target surface in cli.ts.
  */
 
 import type { ChildProcess } from 'node:child_process';

@@ -4,7 +4,10 @@
  * in-process workers and a client. This is the wiring seam — the one place that
  * knows all the tiers exist and how they connect in single-node mode. Going
  * distributed swaps this file's guts (RemoteService + real worker processes) for
- * the same public shape (docs/architecture/structure-and-layers.md).
+ * the same public shape — the move is not inventing new components, it is
+ * promoting these function-call boundaries to process boundaries. Note that
+ * `core/` does not move in that promotion; it runs inside the workflow worker
+ * either way.
  */
 
 import type { WorkflowFn } from './core';

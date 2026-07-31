@@ -36,11 +36,14 @@ needs to be shared).
 
 Place it in:
 
-- [`docs/guides/build-and-deploy.md`](../../docs/guides/build-and-deploy.md) — at
-  step 1, where activities are introduced.
-- [`docs/concepts/determinism-boundary.md`](../../docs/concepts/determinism-boundary.md)
-  — if it fits the existing framing; the boundary doc already governs where I/O
-  is allowed, and this is a statement about _when_ it happens.
+- [`src/tempo.ts`](../../src/tempo.ts) — the `startWorker` fileoverview, since it
+  is that call's value-import of both namespaces that causes the problem.
+- [`examples/greeter.ts`](../../examples/greeter.ts) — beside the existing note
+  about splitting activities and workflows into separate modules, which is where
+  an author writing their first activity is looking.
+- [`src/worker/activity_registry.ts`](../../src/worker/activity_registry.ts) — if
+  it fits; that module already states activities register there and nowhere else,
+  and this is a statement about _when_ their module-scope code runs.
 
 ## Acceptance criteria
 

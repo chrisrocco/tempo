@@ -5,7 +5,13 @@
  * workers and NO user code — workflow + activity workers poll it from other
  * processes. Client writes (start/signal/cancel) mutate the store + enqueue
  * tasks; `getOutcome` reads the store (the client polls it). This is what
- * `bin/server-main` will host over RPC.
+ * `bin/server-main` hosts over RPC.
+ *
+ * This is the only stateful tier, and the split is what makes the system scale:
+ * workers are stateless and scale horizontally against one of these, while the
+ * server owns history, queues, and timers. It is correspondingly the single
+ * writer and a single point of failure — server HA (failover, multi-writer) is
+ * Phase 6 and not built.
  */
 
 import type {

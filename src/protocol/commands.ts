@@ -4,6 +4,12 @@
  * runtime to do something durable (run an activity, start a timer, start a
  * child). The framework stamps each command with a deterministic `seq` in call
  * order; that seq is how the matching completion event is later routed back.
+ *
+ * Modeled as a `CommandBase` plus one named interface per variant rather than an
+ * inline discriminated union: `CommandBase` documents the shared `seq` once, and
+ * naming each variant lets other modules refer to a specific command type
+ * directly. It is more verbose than a helper-type encoding, deliberately — there
+ * is no conditional-type machinery here to decode.
  */
 
 import type { ActivityOptions } from './activity_options';
@@ -44,7 +50,8 @@ export interface CancelChildCommand extends CommandBase {
 /**
  * Terminal command: end the current run and start a fresh one carrying `args`.
  * The core only emits it and halts; the close-and-restart is a server disposition
- * (docs/concepts/continue-as-new.md). Not something the core ever acts on itself.
+ * (`server_core.applyWorkflowTaskResult`). Not something the core ever acts on
+ * itself.
  */
 export interface ContinueAsNewCommand extends CommandBase {
   type: 'continueAsNew';

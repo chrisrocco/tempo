@@ -92,5 +92,5 @@ stats. Largest change: touches `protocol`, `server_host`, and `worker_loops`.
 
 Until Tier 3 lands, `tempo status` can only report **systemd process state** per
 replica plus a server ping — not whether workers are actually working. The
-[build-and-deploy guide](../../docs/guides/build-and-deploy.md) should not promise
-more than that.
+documented CLI surface in [`src/cli/cli.ts`](../../src/cli/cli.ts) should not
+promise more than that.

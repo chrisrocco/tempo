@@ -9,8 +9,16 @@
  * the registered name, so there is no registration boilerplate.
  *
  * Deployment config is read from the environment, never passed in code, so the
- * same binary is deployable anywhere: `TEMPO_SERVER_URL` picks the server and
- * `TEMPO_ROLE` picks which poll loop(s) to run. See docs/guides/build-and-deploy.md.
+ * same binary is deployable anywhere. The worker binary's full input surface:
+ *
+ *   TEMPO_SERVER_URL  server to connect to (default http://127.0.0.1:7233)
+ *   TEMPO_ROLE        `workflow` | `activity` | unset (unset runs both loops)
+ *   --describe        print {name, workflows, activities} as JSON and exit
+ *
+ * Running the *same* binary twice with a different `TEMPO_ROLE` is how the two
+ * worker tiers are deployed: workflow workers replay workflow code, activity
+ * workers run activities (the only I/O in the system), and each scales
+ * independently against one server.
  */
 
 import type { WorkflowFn } from './core';

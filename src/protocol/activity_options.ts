@@ -4,7 +4,8 @@
  * Declared here in `protocol` because it is part of the wire format, but the core
  * only *emits* it — it is **interpreted only by the server** when a command is
  * turned into activity work (retry decisions, later timeouts/task-queue routing).
- * See docs/concepts/type-model.md and docs/architecture/distribution.md.
+ * Declared in one layer and enforced in another, each touching it only as much as
+ * the determinism boundary allows.
  */
 
 export interface RetryPolicy {

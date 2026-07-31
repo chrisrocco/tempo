@@ -2,8 +2,18 @@
  * @fileoverview
  * The WorkflowContext is the mutable per-task state the deterministic engine
  * threads through a single replay: where we are in history, the command-id
- * counters, the parked promises, and the terminal result. `als` carries it into
- * user workflow code without an explicit parameter (see docs/concepts/replay-and-execution.md, the ALS caveat).
+ * counters, the parked promises, and the terminal result.
+ *
+ * `als` carries it into user workflow code without an explicit parameter —
+ * workflow code calls a bare `runActivity(...)` and the primitive recovers the
+ * context from AsyncLocalStorage. The subtle, load-bearing property: an `await`
+ * continuation is bound to the context that was active **when the await
+ * suspended**, not when the promise is later resolved. So when the engine
+ * resolves a parked promise from *outside* the `als.run(...)` scope (in the
+ * replay driver), the workflow's resumed code still re-enters with the right
+ * context. That is why context is not threaded through every call — and why a
+ * naive module-level global would break the instant two workflows interleave on
+ * one worker.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';

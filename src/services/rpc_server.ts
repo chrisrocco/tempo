@@ -4,6 +4,10 @@
  * RpcRequest, dispatches it to a ServerHost, and returns an RpcResponse. A
  * polled task that came back `undefined` is sent as JSON `null` (undefined is not
  * valid JSON); the client maps it back. `bin/server-main` wraps this in a process.
+ *
+ * **There is no auth and no TLS on this transport** — it is plain HTTP+JSON.
+ * `bin/server-main` binds loopback for that reason. Expose it only on loopback or
+ * a trusted private network; never put the port on the public internet.
  */
 
 import * as http from 'node:http';

@@ -7,6 +7,11 @@
  * The client-facing sync methods can't block on a round trip, so writes are fire-
  * and-forget (errors surface via getResult) and getStatus returns a cached value;
  * getResult is the authoritative await — it polls `getOutcome` until terminal.
+ *
+ * Unlike `LocalService` this path is **at-least-once**: a crashed worker's leased
+ * task redelivers, so an activity's side effect can run more than once. Activities
+ * driven through here must be idempotent (use an idempotency key). The seam is the
+ * same; the failure semantics are not.
  */
 
 import type {

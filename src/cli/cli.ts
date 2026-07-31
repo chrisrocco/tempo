@@ -4,8 +4,26 @@
  * modules; this file owns only the surface: which words map to which call, and
  * turning a thrown error into an exit code.
  *
- * Deployment commands (`server install`, `deploy`, `status`, `logs`, `rollback`)
- * are not here yet — see docs/guides/build-and-deploy.md for the target surface.
+ * Built today: `up <entry>` (run server + worker in the foreground) and the
+ * workflow-driving commands `start` / `result` / `signal` / `cancel`.
+ *
+ * The deployment half of the surface is designed but not built (tracked in
+ * planning/sprints/01-deployment-api.md). The target:
+ *
+ *   tempo build <entry>              build an entrypoint into a binary
+ *   tempo server install             install + start the server
+ *                                      --port=N       (default 7233)
+ *                                      --data-dir=PATH (unset = in-memory)
+ *   tempo deploy <binary>            install/update a worker, roll its replicas
+ *                                      --workflow-replicas=N (default 1)
+ *                                      --activity-replicas=N (default 2)
+ *   tempo status                     health of the server + each worker role
+ *   tempo logs <name> [--role=]      tail a worker role's logs
+ *   tempo rollback <name>            revert to the previous version
+ *
+ * `deploy` is meant to interrogate the artifact via `--describe` (see
+ * describe.ts) rather than be handed a config file, so deployment config lives in
+ * the environment and never in code.
  */
 
 import {

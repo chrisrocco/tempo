@@ -1,9 +1,20 @@
-// Characterization suite for the in-memory runtime. Locks the observable
-// behavior of `createLocalRuntime` (activities, condition, signals, blocking
-// children, timers) so the layered restructure and the service-seam introduction
-// can each be verified as behavior-preserving. `createLocalRuntime` comes from the host entrypoint; the workflow
-// primitives come from the author entrypoint — mirroring how real host and
-// workflow code import them across the determinism boundary (doc 01).
+/**
+ * @fileoverview
+ * The canonical behavior spec: the whole author-facing programming model against
+ * `createLocalRuntime`. **Start here to understand what the engine does** — these
+ * tests are the executable documentation for behavior, so each `describe` names
+ * one capability and each `it` states one guarantee as a sentence.
+ *
+ * It doubles as the characterization suite that locked the observable behavior
+ * (activities, condition, signals, blocking children, timers) through the layered
+ * restructure and the service-seam introduction, so each could be verified as
+ * behavior-preserving.
+ *
+ * `createLocalRuntime` comes from the host entrypoint; the workflow primitives
+ * come from the author entrypoint — mirroring how real host and workflow code
+ * import them across the determinism boundary (see `src/workflow.ts`).
+ */
+
 import { createLocalRuntime } from '../../src';
 import {
   runActivity,

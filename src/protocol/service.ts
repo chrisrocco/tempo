@@ -2,9 +2,14 @@
  * @fileoverview
  * The service contract: what a host/client calls to drive workflows, plus the
  * task payloads the server hands to workers and gets back. These are pure data +
- * signatures — the seam that `LocalService` (in-proc) and, later, `RemoteService`
- * (RPC) both satisfy. Living in `protocol/` is what lets `server` and `worker`
- * share the task shapes without importing each other (see docs/architecture/structure-and-layers.md).
+ * signatures — the seam that `LocalService` (in-proc) and `RemoteService` (RPC)
+ * both satisfy. Living in `protocol/` is what lets `server` and `worker` share the
+ * task shapes without importing each other.
+ *
+ * This seam is why local vs. distributed is a *choice of implementation* rather
+ * than a fork of the runtime: workers and the client are written once against it,
+ * and the integration suite runs unchanged against either side. It unifies the
+ * code path, not the failure semantics — see the caveat on `LocalService`.
  */
 
 import type { ActivityOptions } from './activity_options';
@@ -23,7 +28,7 @@ export interface StartWorkflowOptions {
  * It has two faces: the client-facing methods (start/signal/cancel/get*) and the
  * worker-facing poll/respond methods. Workers are written once against the latter
  * — the in-proc workers poll a local implementation; distributed workers poll a
- * remote one over RPC (docs/architecture/structure-and-layers.md).
+ * remote one over RPC.
  */
 export interface WorkflowService {
   // ── client-facing ──

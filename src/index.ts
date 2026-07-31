@@ -4,7 +4,14 @@
  *
  * The runtime factory, its handle/registration types, the service seam, and the
  * public protocol vocabulary. Workflow *authors* do not import from here; they
- * import from `workflow.ts`. See docs/concepts/determinism-boundary.md and docs/architecture/structure-and-layers.md.
+ * import from `workflow.ts`.
+ *
+ * The two entrypoints are what turn the determinism boundary into a structural
+ * fact rather than a convention: everything reachable from `workflow.ts` is
+ * deterministic, everything reachable from here is host-side. Dependencies point
+ * strictly downward — `protocol <- core <- {server, services, worker, client} <-
+ * {local_runtime, entrypoints, bin}` — and nothing in `core/` imports from below
+ * it.
  */
 
 export {

@@ -4,7 +4,8 @@
  * (completes) before the deadline, the task is done; if it doesn't (the worker
  * crashed or stalled), the lease expires and the task is redelivered to another
  * worker. This is what makes worker crashes survivable — the distributed form of
- * `pump`'s Job 1 (docs/architecture/task-execution-and-concurrency.md, distribution.md). `ack` returns the leased item so the queue can
+ * the per-execution exclusion the workflow-task queue provides in one process
+ * (see `ports/workflow_task_queue.ts`). `ack` returns the leased item so the queue can
  * release it; a token whose lease already expired acks to `undefined` (its task
  * was redelivered, so this late completer is ignored).
  */

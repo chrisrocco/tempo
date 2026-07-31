@@ -13,6 +13,17 @@
  * In-proc bookkeeping stays synchronous: `statusMirror` backs the sync `getStatus`
  * (updated after each task), and `waiters` back `getResult`. Both are rebuilt by
  * `resume`, not persisted.
+ *
+ * ## The caveat that keeps the abstraction honest
+ *
+ * `LocalService` and `RemoteService` are **not** behaviorally identical. Local is
+ * effectively exactly-once and synchronous-ish; remote is at-least-once, with
+ * redelivery, retries, and latency. The service seam unifies the *code path*, not
+ * the *failure semantics*. Keep this one for the fast inner loop, but run a subset
+ * of integration tests against a real server (`spec/integration/remote.spec.ts`,
+ * `spec/integration/distributed.spec.ts`) to exercise duplicate execution and
+ * non-idempotent effects. Pretending the two are the same is how you ship an
+ * activity that double-charges a card.
  */
 
 import type {

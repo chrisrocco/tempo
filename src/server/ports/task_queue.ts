@@ -5,6 +5,11 @@
  * lease expires is redelivered — which is why activities are at-least-once and
  * their side effects must be idempotent. `ActivityTask`/`LeasedActivityTask` live
  * in `protocol` because they are the shared server/worker contract.
+ *
+ * The workflow side dedups redelivery naturally: a duplicate completion for a seq
+ * that is already resolved is discarded on replay. Activity **side effects** are
+ * the author's problem — use an idempotency key. The framework guarantees
+ * at-least-once; exactly-once effects are out of scope by design.
  */
 
 import type {

@@ -7,7 +7,14 @@
  * sweep — after a restart the in-memory `setTimeout` handles are gone, so the
  * server re-arms (or immediately fires past-due) every timer still in the table.
  * The durable adapter (a DB-backed table + a crash-tolerant sweep with failover)
- * is the Phase 4/5 swap; the server logic here does not change. See docs/concepts/conditions-signals-timers.md and docs/architecture/distribution.md.
+ * is the Phase 4/5 swap; the server logic here does not change. Cross-process
+ * sweep leader-election is still TODO.
+ *
+ * A timer is otherwise the *same mechanism as an activity*: `sleep(ms)` allocates
+ * a seq, registers a completion promise, and emits a `startTimer` command that a
+ * `timerFired` event resolves. The only differences are the command payload and
+ * that the "worker" is this service. The fire-time is recorded in history rather
+ * than read from the clock at replay, which is what keeps time deterministic.
  */
 
 export interface TimerService {

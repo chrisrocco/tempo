@@ -4,8 +4,30 @@
  * execution happen in workers that POLL it. The server hands out tasks
  * (buildWorkflowTask / pollActivityTask), applies what workers report back
  * (applyWorkflowTaskResult / reportActivityResult), and owns everything durable
- * via the ports. Waking an execution = enqueuing a workflow task; that queue's
- * coalescing is the distributed replacement for `pump` (docs/architecture/task-execution-and-concurrency.md, distribution.md).
+ * via the ports. Waking an execution = enqueuing a workflow task; that queue
+ * carries the per-execution exclusion and wake-coalescing guarantees (see
+ * `ports/workflow_task_queue.ts`).
+ *
+ * `applyWorkflowTaskResult` is the transactional heart: on receiving a command
+ * batch it appends events, creates downstream tasks, and closes the task —
+ * conditional on a version check, so a lease-race loser is discarded.
+ *
+ * ## `continueAsNew` is a terminal disposition here, not in the core
+ *
+ * When a command batch contains `continueAsNew`, this is where it becomes real:
+ * close the current run, then start a **new run** of the same workflow — same
+ * workflowId, new runId, fresh empty history seeded with the carried args — and
+ * enqueue a workflow task for it, atomically. Two behaviors live specifically
+ * here:
+ *
+ * - **Children survive.** Continue-as-new is not a real close, so parent-close
+ *   policy must not fire — child workflows carry into the new run. Teardown must
+ *   not cascade cancellation the way a genuine completion or termination does.
+ * - **History accounting resets.** The new run starts empty (the whole point), so
+ *   `continueAsNewSuggested` goes back to false on it.
+ *
+ * Because this threads through the service seam, local mode gets it for free:
+ * `LocalService` runs the same close-and-restart against the in-memory store.
  */
 
 import type {
@@ -380,7 +402,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       const rec = await historyStore.get(lease.workflowId);
       // Optimistic version check: apply only if nothing advanced this execution
       // since the task was built. A lease-race loser sees a bumped version and is
-      // discarded — safe, because replay commits no external effects (docs/architecture/distribution.md).
+      // discarded — safe, because replay commits no external effects.
       if (rec && rec.status === 'running' && rec.version === lease.version) {
         await applyWorkflowTaskResult(lease.workflowId, result);
       }

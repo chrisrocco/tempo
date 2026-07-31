@@ -6,14 +6,11 @@ in-memory implementation first, keep the test suite green, then swap one
 implementation at a time.** Each process boundary should be a substitution behind
 a tested interface, never a rewrite.
 
-Legend: **Goal** · **Deliverables** · **Exit criteria** · **Docs**
+Legend: **Goal** · **Deliverables** · **Exit criteria** · **Where it's documented**
 
-> Doc references below use the original `0N` shorthand. Those docs now live under
-> [`docs/`](docs/README.md) with semantic names: `00`→concepts/overview,
-> `01`→concepts/determinism-boundary, `02`→concepts/replay-and-execution,
-> `03`→concepts/conditions-signals-timers, `04`→architecture/task-execution-and-concurrency,
-> `05`→concepts/continue-as-new, `06`→architecture/{structure-and-layers, distribution},
-> `07`→concepts/type-model. See the [docs index](docs/README.md).
+> Design documentation lives in the `@fileoverview` comment of the module that
+> owns each idea; the historical `0N` doc shorthand below has been replaced with
+> the module to read. See [`README.md`](README.md) for the reading order.
 
 ---
 
@@ -26,7 +23,7 @@ The working baseline this roadmap builds on.
   blocking children).
 - Fully typed (`tsc --noEmit` clean); 28 specs green under Jasmine + `tsx`.
 
-**Docs:** `02`, `03`, `04`, `07`.
+**Read:** `src/core/replay.ts`, `src/core/condition.ts`, `src/core/signals.ts`, `src/protocol/`.
 
 ---
 
@@ -35,12 +32,13 @@ The working baseline this roadmap builds on.
 - **Goal:** make the determinism boundary physical and enforced before adding
   features.
 - **Deliverables:** split the monolith into `protocol/`, `core/`, `runtime`
-  pieces per `06`; add the two entrypoints (`workflow.ts`, `index.ts`); add the
+  pieces per the layered layout; add the two entrypoints (`workflow.ts`,
+  `index.ts`); add the
   import-path lint rule (`core` may import only `protocol`; workflow code may
   import only `workflow.ts`). Move the standalone `replay.ts` to `examples/`.
 - **Exit criteria:** identical behavior; all Phase 0 specs still pass; the lint
   rule fails a deliberately-planted `Date.now()` in a workflow file.
-- **Docs:** `01`, `06`.
+- **Read:** `src/workflow.ts`, `src/index.ts`.
 
 ## Phase 2 — Introduce the ports and the service seam (still in-memory)
 
@@ -52,19 +50,19 @@ The working baseline this roadmap builds on.
   against `WorkflowService`.
 - **Exit criteria:** the whole suite runs against `LocalService` unchanged;
   `pump` is now scoped inside `LocalService`.
-- **Docs:** `04`, `06`.
+- **Read:** `src/server/ports/workflow_task_queue.ts`, `src/protocol/service.ts`.
 
 ## Phase 3 — Feature completeness in local mode
 
 - **Goal:** finish the programming model against the fast in-memory service.
 - **Deliverables:**
-  - **`proxyActivities`** + `ActivityOptions` on the command (`07`).
+  - **`proxyActivities`** + `ActivityOptions` on the command (`src/protocol/activity_options.ts`).
   - **`continueAsNew`** end to end: primitive (core), command (protocol), handler
     behavior incl. sparing children + resetting history accounting (server);
-    `continueAsNewSuggested` populated by the (in-memory) server (`05`).
+    `continueAsNewSuggested` populated by the (in-memory) server (`src/core/workflow_api.ts`).
   - **Real timers:** durable fire-time recorded in history + a sweep loop, instead
-    of firing immediately (`03`).
-  - **Retry policy & heartbeats** semantics in the activity task handler (`06`).
+    of firing immediately (`src/server/ports/timer_service.ts`).
+  - **Retry policy & heartbeats** semantics in the activity task handler (`src/server/retry_policy.ts`).
   - **Cancellation + fire-and-forget children** — the deferred pieces. This is
     what finally lets the original **bug-hotlist monitor** run for real
     (spawn-and-cancel), rather than the blocking child model. Needs cancellation
@@ -73,7 +71,7 @@ The working baseline this roadmap builds on.
   new specs cover continue-as-new (incl. children surviving), timer ordering,
   retries, and cancellation. _(Met. The example itself was later retired pending
   a rework, so the primitives are covered by `spec/integration/local.spec.ts`.)_
-- **Docs:** `03`, `05`, `06`, `07`.
+- **Read:** `src/core/workflow_api.ts`, `src/server/server_core.ts`.
 
 ## Phase 4 — Durable persistence
 
@@ -83,7 +81,7 @@ The working baseline this roadmap builds on.
   boundary); "record scheduled before running" for crash-recovery idempotency.
 - **Exit criteria:** kill the process mid-workflow and have it resume correctly on
   restart; concurrent appends with a stale version are rejected.
-- **Docs:** `06` (ports, resilience).
+- **Read:** `src/server/ports/`, `src/server/file/file_history_store.ts`.
 
 ## Phase 5 — Distribution
 
@@ -97,7 +95,7 @@ The working baseline this roadmap builds on.
 - **Exit criteria:** `integration/remote.spec.ts` passes against a real server
   process, including: a killed worker's task redelivers; a lease-race loser's
   append is rejected; a retried activity surfaces at-least-once behavior.
-- **Docs:** `06`.
+- **Read:** `src/services/`, `src/server/lease.ts`.
 
 ## Phase 6 — Production hardening
 
@@ -108,21 +106,22 @@ The working baseline this roadmap builds on.
 - **Exit criteria:** documented, tested behavior under worker loss, server
   failover, and DB failover; dashboards for queue depth, task latency, and
   history size (feeding continue-as-new tuning).
-- **Docs:** `06`.
+- **Read:** `src/services/server_host.ts`, `bin/server-main.ts` (the operational
+  caveats this phase has to close out).
 
 ---
 
 ## Cross-cutting invariants (hold in every phase)
 
 1. **The determinism boundary is never crossed.** `core/` stays pure; features are
-   placed by asking "deterministic or not?" (`01`).
+   placed by asking "deterministic or not?" (`src/workflow.ts`).
 2. **The suite stays green.** `LocalService` is the always-on fast regression net;
    `RemoteService` integration tests are added from Phase 5 to catch the failure
-   semantics the local path can't (`06`).
+   semantics the local path can't (`src/services/local_service.ts`).
 3. **New seams are interfaces first.** In-memory implementation, then swap.
 4. **`protocol/` types are the wire format.** Additions there are additions to the
    durable/serialized contract — treat them with versioning care from Phase 4 on
-   (`07`).
+   (`src/protocol/`).
 
 ## Known deferred items (tracked so they aren't lost)
 

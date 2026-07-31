@@ -13,53 +13,54 @@ workers over RPC). Programming model: activities (`proxyActivities` + retries),
 real timers, signals, `condition`, blocking **and** fire-and-forget children,
 `continueAsNew`, cancellation. `tsc --noEmit` clean; full suite green via `npm test`.
 
-> **Live status, the real code map, the doc-vs-implementation divergence table,
-> the test map, and what's next all live in [`PROJECT.md`](PROJECT.md)** — the
-> single source of truth for "what's built." This README is the stable design
-> front-door: the ideas, the concept-doc index, and the destination structure.
+> **Live status, the real code map, the test map, and what's next all live in
+> [`PROJECT.md`](PROJECT.md)** — the single source of truth for "what's built."
+> This README is the stable design front-door: the origin, the one idea, and the
+> destination structure.
 
-## How to read these
+## Where the documentation lives
 
-**On a fresh session, read [`PROJECT.md`](PROJECT.md) first** — it is the living
-"you are here": current status, the real code map, which of these concept docs have
-drifted from the implementation (with a divergence table), the test map, and what's
-next. The docs below explain the _ideas_; `PROJECT.md` tracks what is _built_.
+**Architectural and design documentation lives in the code**, in the
+`@fileoverview` comment of the module each idea belongs to. There is no separate
+`docs/` tree to drift out of sync with the implementation.
 
-Read in order the first time; they build on each other.
+**On a fresh session, read [`PROJECT.md`](PROJECT.md) first** — the living "you
+are here": current status, the real code map, the test map, and what's next. Then
+[`CLAUDE.md`](CLAUDE.md) for the conventions to work by.
 
-The full documentation set lives under [`docs/`](docs/README.md), organized into
-**concepts** (why), **architecture** (how it's built), **behavior** (what's
-guaranteed, linked to the specs), **guides** (how-to), and **contributing**. The
-[docs index](docs/README.md) has the reading order and the four-bucket map. The
-core concept docs, in reading order:
+Read the code in this order the first time; each builds on the last:
 
-| Doc                                                                                                | What it covers                                                              | Status                                                     |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| [`PROJECT.md`](PROJECT.md)                                                                         | **Handoff hub** — status, code map, doc-vs-code divergences, test map, TODO | current                                                    |
-| [concepts/overview](docs/concepts/overview.md)                                                     | Origin, the mental model, glossary                                          | ✅                                                         |
-| [concepts/determinism-boundary](docs/concepts/determinism-boundary.md)                             | **The** organizing principle — read this first if nothing else              | ✅                                                         |
-| [concepts/replay-and-execution](docs/concepts/replay-and-execution.md)                             | Replay vs activation, warm/cold paths, the core loop, ALS                   | ✅                                                         |
-| [concepts/conditions-signals-timers](docs/concepts/conditions-signals-timers.md)                   | `condition` internals, signals, the queue pattern, timers                   | ⚠ timers now durable                                       |
-| [concepts/continue-as-new](docs/concepts/continue-as-new.md)                                       | The suggested flag, the primitive, the layer split                          | ✅                                                         |
-| [concepts/type-model](docs/concepts/type-model.md)                                                 | The `protocol` types and the modeling decisions behind them                 | ⚠ grown; see `PROJECT.md §4`                               |
-| [architecture/structure-and-layers](docs/architecture/structure-and-layers.md)                     | File structure, entrypoints, the service seam                               | ⚠ mostly built; see `PROJECT.md §4`                        |
-| [architecture/distribution](docs/architecture/distribution.md)                                     | Going distributed; the failure-semantics caveat                             | ⚠ mostly built; see `PROJECT.md §4`                        |
-| [architecture/task-execution-and-concurrency](docs/architecture/task-execution-and-concurrency.md) | `drive`, `pump`'s two jobs, `executeCommand`                                | ❌ superseded by the poll/queue model — read for the _why_ |
-| [`ROADMAP.md`](ROADMAP.md)                                                                         | Phased implementation plan with exit criteria                               | accurate; P1–4 + P5 core done                              |
+| Read                                                                                                                                                              | What it covers                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [`src/workflow.ts`](src/workflow.ts)                                                                                                                              | **The determinism boundary** — the organizing principle, and the rules workflow code obeys |
+| [`src/core/replay.ts`](src/core/replay.ts)                                                                                                                        | Activation vs. replay, the live edge, `settle`, observe-don't-await                        |
+| [`src/core/context.ts`](src/core/context.ts)                                                                                                                      | The per-task state, and the AsyncLocalStorage propagation caveat                           |
+| [`src/core/condition.ts`](src/core/condition.ts) · [`signals.ts`](src/core/signals.ts) · [`src/server/ports/timer_service.ts`](src/server/ports/timer_service.ts) | The three ways a workflow waits, and the queue pattern                                     |
+| [`src/core/workflow_api.ts`](src/core/workflow_api.ts)                                                                                                            | The primitives, `proxyActivities`, and `continueAsNew`'s layer split                       |
+| [`src/protocol/`](src/protocol/)                                                                                                                                  | The wire format both sides of the boundary speak                                           |
+| [`src/index.ts`](src/index.ts)                                                                                                                                    | The host entrypoint, the layering, and the dependency direction                            |
+| [`src/services/local_service.ts`](src/services/local_service.ts)                                                                                                  | Local vs. distributed, and the failure-semantics caveat                                    |
+| [`src/server/ports/workflow_task_queue.ts`](src/server/ports/workflow_task_queue.ts)                                                                              | The two concurrency bugs the design prevents                                               |
+| [`src/services/server_host.ts`](src/services/server_host.ts) · [`bin/server-main.ts`](bin/server-main.ts)                                                         | The three tiers, and the operational caveats                                               |
+
+**Behavior is documented by the specs**, which are executable and run in CI.
+[`spec/integration/local.spec.ts`](spec/integration/local.spec.ts) is the
+canonical one — the whole author-facing programming model. Start there to
+understand what the engine does; [`PROJECT.md`](PROJECT.md) §5 maps the rest.
+
+[`ROADMAP.md`](ROADMAP.md) has the phased implementation plan and exit criteria.
 
 ## Design blueprint (the intended shape)
 
-This is the **original design target**, annotated with which concept doc owns each
-piece — the blueprint, **not an inventory of what exists today**. Some pieces shown
-aren't built yet (the `workflow_task_handler` / `activity_task_handler` split,
-`worker/sticky_cache.ts`); some were superseded (`services/pump.ts` — its mutex +
-coalescing moved into the workflow-task queue); some built files aren't shown; and
-the `spec/` tree here is illustrative, not the real one. **For the actual current
-tree see [`PROJECT.md`](PROJECT.md) §3; for where the code diverged from this
-blueprint, §4.** The shape still earns its place: the layering _is_ the determinism
-boundary, and the dependency arrows only ever point down
+This is the **original design target** — the blueprint, **not an inventory of what
+exists today**. Some pieces shown aren't built yet (the `workflow_task_handler` /
+`activity_task_handler` split, `worker/sticky_cache.ts`); some were superseded
+(`services/pump.ts` — its mutex + coalescing moved into the workflow-task queue);
+some built files aren't shown; and the `spec/` tree here is illustrative, not the
+real one. **For the actual current tree see [`PROJECT.md`](PROJECT.md) §3.** The
+shape still earns its place: the layering _is_ the determinism boundary, and the
+dependency arrows only ever point down
 (`protocol <- core <- {server, services, worker, client} <- {entrypoints, bin}`).
-Bracketed notes point at the concept doc that owns each piece.
 
 ```
 workflow-engine/
@@ -79,17 +80,17 @@ workflow-engine/
 │   │   └── index.ts
 │   │
 │   ├── core/                        # ══ DETERMINISTIC ENGINE. (history) -> (commands). no I/O, clock, or random.
-│   │   ├── context.ts               #    WorkflowContext, createContext, als, getContext  [ALS explainer, doc 02]
+│   │   ├── context.ts               #    WorkflowContext, createContext, als, getContext  [ALS explainer]
 │   │   ├── workflow_api.ts          #    runActivity, proxyActivities, sleep, executeChild, continueAsNew
-│   │   ├── signals.ts               #    defineSignal, setHandler + pre-registration buffering  [doc 03]
-│   │   ├── condition.ts             #    condition() + tryUnblockConditions()  [unblock-pass explainer, doc 03]
+│   │   ├── signals.ts               #    defineSignal, setHandler + pre-registration buffering
+│   │   ├── condition.ts             #    condition() + tryUnblockConditions()  [unblock-pass explainer]
 │   │   ├── apply_event.ts           #    route recorded events into parked promises; nondeterminism check
-│   │   ├── microtask_scheduler.ts   #    drainMicrotasks — the host-coupled yield  [caveat lives here, doc 02]
-│   │   ├── replay.ts                #    settle() + replay() — live-edge detection, observe-don't-await  [doc 02]
+│   │   ├── microtask_scheduler.ts   #    drainMicrotasks — the host-coupled yield  [caveat lives here]
+│   │   ├── replay.ts                #    settle() + replay() — live-edge detection, observe-don't-await
 │   │   └── index.ts
 │   │
 │   ├── server/                      # ── ORCHESTRATION BRAIN. stateful, runs NO user code. shared by local+remote.
-│   │   ├── ports/                   #    ports-and-adapters interfaces  [doc 06]
+│   │   ├── ports/                   #    ports-and-adapters interfaces
 │   │   │   ├── history_store.ts     #      load/append with optimistic version
 │   │   │   ├── task_queue.ts        #      enqueue / poll / lease / ack / expire-and-requeue
 │   │   │   └── timer_service.ts     #      durable schedule + crash-tolerant sweep (recorded fire-time)
@@ -100,17 +101,17 @@ workflow-engine/
 │   │   ├── workflow_task_handler.ts #    transactional apply: commands -> events + downstream tasks (version-checked)
 │   │   ├── activity_task_handler.ts #    apply activity result/failure -> event + retry decision
 │   │   ├── retry_policy.ts          #    backoff / retry-vs-surface (reads ActivityOptions)
-│   │   ├── lease.ts                 #    lease timeout + redelivery loop  [pump Job-1, distributed form, doc 04]
+│   │   ├── lease.ts                 #    lease timeout + redelivery loop  [pump Job-1, distributed form]
 │   │   ├── server_core.ts           #    composes handlers + ports into the WorkflowService methods
 │   │   └── index.ts
 │   │
 │   ├── services/                    # ── the two WorkflowService implementations workers talk to
-│   │   ├── pump.ts                  #    concurrency guard — SCOPED to LocalService  [@fileoverview, doc 04]
+│   │   ├── pump.ts                  #    concurrency guard — SCOPED to LocalService  [@fileoverview]
 │   │   ├── local_service.ts         #    server_core + memory adapters + pump, all in-process
 │   │   ├── remote_service.ts        #    RPC client over rpc.ts -> a networked server_core
 │   │   └── index.ts
 │   │
-│   ├── worker/                      # ── STATELESS workers. written once, against WorkflowService.  [doc 06]
+│   ├── worker/                      # ── STATELESS workers. written once, against WorkflowService.
 │   │   ├── workflow_worker.ts       #    poll -> replay(core) -> respond
 │   │   ├── sticky_cache.ts          #    warm suspended executions; cold-replay fallback on miss
 │   │   ├── activity_worker.ts       #    poll -> run activity fn -> report, with heartbeat  [only I/O in the system]
@@ -123,7 +124,7 @@ workflow-engine/
 │   │
 │   ├── local_runtime.ts             #    createLocalRuntime(): LocalService + in-proc workers + client, one call
 │   ├── tempo.ts                     # ★ WORKER ENTRYPOINT — Tempo.startWorker(): RemoteService + poll loops
-│   ├── workflow.ts                  # ★ AUTHOR ENTRYPOINT — exports ONLY deterministic primitives  [doc 01]
+│   ├── workflow.ts                  # ★ AUTHOR ENTRYPOINT — exports ONLY deterministic primitives
 │   └── index.ts                     # ★ HOST ENTRYPOINT — createLocalRuntime, Tempo, client, public types
 │
 ├── bin/                             # ── deployable process mains (distributed mode)
@@ -160,7 +161,7 @@ workflow-engine/
 
 The `★` entrypoints and the top-of-file layer banners are the load-bearing part:
 they're what a lint rule keys on to keep the determinism boundary enforced rather
-than merely documented (`01`).
+than merely documented (see `src/workflow.ts`).
 
 ## The one idea to keep
 
