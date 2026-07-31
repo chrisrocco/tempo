@@ -100,33 +100,42 @@ export const workflowInfo = (): WorkflowInfo => {
   return { continueAsNewSuggested: ctx.continueAsNewSuggested };
 };
 
-/** A record of activity signatures, keyed by activity name. */
-export type ActivityInterface = Record<string, (...args: any[]) => any>;
+type AnyFn = (...args: any[]) => any;
+
+/**
+ * A record of activity signatures, keyed by activity name — the shape to write
+ * when declaring an activity interface by hand. `proxyActivities` does not
+ * require it: it takes any object type and proxies the function-valued members.
+ */
+export type ActivityInterface = Record<string, AnyFn>;
+
+/**
+ * What `proxyActivities<A>` hands back: `A`'s function-valued members, each as an
+ * async call. Non-function members are dropped rather than rejected, which is what
+ * lets a whole module namespace be the type argument — an activities module is
+ * free to export constants alongside its activities.
+ */
+export type ActivityProxy<A> = {
+  [K in keyof A as A[K] extends AnyFn ? K : never]: A[K] extends AnyFn
+    ? (...args: Parameters<A[K]>) => Promise<Awaited<ReturnType<A[K]>>>
+    : never;
+};
 
 /**
  * A typed façade over `runActivity`: `proxyActivities<A>(options)` returns a proxy
  * whose methods forward to the activity of the same name, carrying `options` on
  * the command. Pure sugar living in the core (re-exported from `workflow.ts`);
- * `A` drives the compile-time argument/return types. See docs/architecture/distribution.md and docs/concepts/type-model.md.
+ * `A` drives the compile-time argument/return types — typically
+ * `proxyActivities<typeof activities>()` against an imported activities module.
+ * See docs/architecture/distribution.md and docs/concepts/type-model.md.
  */
-export function proxyActivities<A extends ActivityInterface>(
+export function proxyActivities<A extends object>(
   options: ActivityOptions = {},
-): {
-  [K in keyof A]: (
-    ...args: Parameters<A[K]>
-  ) => Promise<Awaited<ReturnType<A[K]>>>;
-} {
-  return new Proxy(
-    {} as {
-      [K in keyof A]: (
-        ...args: Parameters<A[K]>
-      ) => Promise<Awaited<ReturnType<A[K]>>>;
+): ActivityProxy<A> {
+  return new Proxy({} as ActivityProxy<A>, {
+    get(_target, prop) {
+      const name = String(prop);
+      return (...args: unknown[]) => scheduleActivity(name, options, args);
     },
-    {
-      get(_target, prop) {
-        const name = String(prop);
-        return (...args: unknown[]) => scheduleActivity(name, options, args);
-      },
-    },
-  );
+  });
 }

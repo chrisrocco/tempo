@@ -159,6 +159,27 @@ describe('local runtime — proxyActivities & retries', () => {
     await expectAsync(rt.start<number>('sum').result()).toBeResolvedTo(5);
   });
 
+  it('proxies an activities module that also exports non-functions', async () => {
+    // A real activities module exports constants alongside its activities; the
+    // proxy takes the whole namespace and keeps only what it can call.
+    const activities = {
+      GREETING: 'Hello',
+      greet: (name: string) => `Hello, ${name}!`,
+    };
+    const rt = createLocalRuntime()
+      .registerActivity('greet', activities.greet)
+      .registerWorkflow('wf', async () => {
+        const proxy = proxyActivities<typeof activities>();
+        // @ts-expect-error constants are not callable, so they are not proxied
+        proxy.GREETING;
+        return proxy.greet('world');
+      });
+
+    await expectAsync(rt.start<string>('wf').result()).toBeResolvedTo(
+      'Hello, world!',
+    );
+  });
+
   it('does not retry by default (maximumAttempts defaults to 1)', async () => {
     let attempts = 0;
     const activities = {
