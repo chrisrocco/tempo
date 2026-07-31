@@ -71,16 +71,23 @@ export interface TimerStartedEvent {
 }
 
 /**
- * Marker: a blocking child workflow has been started (before it completes). Same
- * role as `activityScheduled` — records the dispatch for recovery and advances
- * history past the `startChild` command so replay doesn't re-launch it. The
- * matching completion is a normal `childCompleted` / `childFailed` event keyed by
- * the same seq. (Fire-and-forget children carry no such completion.)
+ * Marker: a child workflow has been started. Same role as `activityScheduled` —
+ * records the dispatch for recovery and advances history past the `startChild`
+ * command so replay doesn't re-launch it.
+ *
+ * Recorded for **both** kinds of child, because both are dispatched work and the
+ * marker invariant is about dispatch, not about completion (see `server_core`).
+ * `detached` says which kind, and that is the only thing downstream needs it for:
+ * a blocking child's completion arrives later as a `childCompleted` /
+ * `childFailed` keyed by the same seq, while a detached child never reports back
+ * at all. Recovery must not synthesize a completion for one that is never coming.
  */
 export interface ChildStartedEvent {
   type: 'childStarted';
   seq: number;
   childId: string;
+  /** true = fire-and-forget (`startChild`); false = blocking (`executeChild`). */
+  detached: boolean;
 }
 
 /** Externally injected; not tied to a command, so it carries no seq. */

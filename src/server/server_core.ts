@@ -27,6 +27,20 @@
  * marker and you get a double-dispatch under concurrency and an operation that
  * silently vanishes across a crash.
  *
+ * The invariant is about **dispatch, not completion**, which is easy to get
+ * backwards. A fire-and-forget child reports nothing back, so it is tempting to
+ * record nothing for it — but it was still dispatched, and without the marker the
+ * `startChild` command sits in front of the live edge forever: a resumed parent
+ * re-emits it and launches a second child, and `childrenByParent` never rebuilds,
+ * so `cancelChild` and the cancellation cascade quietly resolve to nothing. Hence
+ * `childStarted.detached`: the marker is unconditional, and the flag tells the
+ * recovery path which children have a completion coming.
+ *
+ * `cancelChild` is the one command that legitimately writes no marker of its own.
+ * Its effect *is* a durable record — the `cancelRequested` event it appends to the
+ * child's history — and `requestCancel` short-circuits on finding one, so a
+ * re-dispatched cancel is idempotent rather than a second cancellation.
+ *
  * ## `continueAsNew` is a terminal disposition here, not in the core
  *
  * When a command batch contains `continueAsNew`, this is where it becomes real:
@@ -233,14 +247,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     } else if (cmd.type === 'startChild') {
       const childId = launch(cmd.childName, cmd.childArgs);
       recordChild(workflowId, cmd.seq, childId);
-      if (!cmd.detached) {
-        await appendEvent(workflowId, {
-          type: 'childStarted',
-          seq: cmd.seq,
-          childId,
-        });
+      // Both kinds leave the marker — it is what stops replay re-launching the
+      // child, and detached children need that as much as blocking ones do.
+      await appendEvent(workflowId, {
+        type: 'childStarted',
+        seq: cmd.seq,
+        childId,
+        detached: cmd.detached,
+      });
+      // Only a blocking child threads a completion back to its parent.
+      if (!cmd.detached)
         parentOfChild.set(childId, { parentId: workflowId, seq: cmd.seq });
-      }
     } else if (cmd.type === 'cancelChild') {
       const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
       if (childId) await requestCancel(childId);
@@ -334,6 +351,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
 
   async function resumeFromHistory(records: ExecutionRecord[]): Promise<void> {
     const byId = new Map(records.map((r) => [r.workflowId, r]));
+    // Both kinds of child go back into childrenByParent: that map is what
+    // `cancelChild` and the cancellation cascade resolve through, and a detached
+    // child is precisely the one a parent expects to be able to cancel later.
     for (const rec of records) {
       for (const ev of rec.history) {
         if (ev.type === 'childStarted')
@@ -356,7 +376,14 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           anyActivity = true;
         } else if (ev.type === 'timerStarted' && !done.timers.has(ev.seq)) {
           timerService.schedule(rec.workflowId, ev.seq, ev.fireAt);
-        } else if (ev.type === 'childStarted' && !done.children.has(ev.seq)) {
+        } else if (
+          ev.type === 'childStarted' &&
+          // A detached child reports nothing back, so there is no completion to
+          // synthesize and no parent to reconnect — it resumes as its own
+          // execution like any other. Only blocking children are correlated here.
+          !ev.detached &&
+          !done.children.has(ev.seq)
+        ) {
           const child = byId.get(ev.childId);
           if (child && child.status !== 'running') {
             await appendEvent(

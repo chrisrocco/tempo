@@ -225,23 +225,24 @@ Read in this order the first time; each builds on the last:
 canonical one: the whole author-facing programming model. Start there to
 understand what the engine does.
 
-| Spec                                                                  | Covers                                                            |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`integration/local`](spec/integration/local.spec.ts)                 | The whole programming model against `createLocalRuntime`          |
-| [`core/replay`](spec/core/replay.spec.ts)                             | The live edge, command suppression, terminal outcomes             |
-| [`core/apply_event`](spec/core/apply_event.spec.ts)                   | Event routing, markers, buffering, the nondeterminism check       |
-| [`core/condition`](spec/core/condition.spec.ts)                       | Parking, the unblock fixpoint, the condSeq invariant              |
-| [`core/workflow_api`](spec/core/workflow_api.spec.ts)                 | seq allocation and command payloads                               |
-| [`architecture`](spec/architecture.spec.ts)                           | The determinism boundary, enforced — and proven to catch breakage |
-| [`integration/resume`](spec/integration/resume.spec.ts)               | Crash recovery: restart mid-flight and finish from history        |
-| [`integration/remote`](spec/integration/remote.spec.ts)               | Client → RemoteService → HTTP → server → workers, one process     |
-| [`integration/distributed`](spec/integration/distributed.spec.ts)     | Real spawned processes; crash redelivery / at-least-once          |
-| [`integration/cli`](spec/integration/cli.spec.ts)                     | The `tempo` CLI end to end as a subprocess                        |
-| [`server/concurrency`](spec/server/concurrency.spec.ts)               | Optimistic version CAS, lease expiry, lease-race rejection        |
-| [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                      |
-| [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                      |
-| [`server/retry_policy`](spec/server/retry_policy.spec.ts)             | Retry arithmetic (attempts, backoff cap)                          |
-| [`worker/worker_loops`](spec/worker/worker_loops.spec.ts)             | Poll-failure reporting and backoff                                |
+| Spec                                                                  | Covers                                                                |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [`integration/local`](spec/integration/local.spec.ts)                 | The whole programming model against `createLocalRuntime`              |
+| [`core/replay`](spec/core/replay.spec.ts)                             | The live edge, command suppression, terminal outcomes                 |
+| [`core/apply_event`](spec/core/apply_event.spec.ts)                   | Event routing, markers, buffering, the nondeterminism check           |
+| [`core/condition`](spec/core/condition.spec.ts)                       | Parking, the unblock fixpoint, the condSeq invariant                  |
+| [`core/workflow_api`](spec/core/workflow_api.spec.ts)                 | seq allocation and command payloads                                   |
+| [`architecture`](spec/architecture.spec.ts)                           | The determinism boundary, enforced — and proven to catch breakage     |
+| [`integration/resume`](spec/integration/resume.spec.ts)               | Crash recovery: restart mid-flight and finish from history            |
+| [`integration/remote`](spec/integration/remote.spec.ts)               | Client → RemoteService → HTTP → server → workers, one process         |
+| [`integration/distributed`](spec/integration/distributed.spec.ts)     | Real spawned processes; crash redelivery / at-least-once              |
+| [`integration/cli`](spec/integration/cli.spec.ts)                     | The `tempo` CLI end to end as a subprocess                            |
+| [`server/concurrency`](spec/server/concurrency.spec.ts)               | Optimistic version CAS, lease expiry, lease-race rejection            |
+| [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
+| [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
+| [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |
+| [`server/retry_policy`](spec/server/retry_policy.spec.ts)             | Retry arithmetic (attempts, backoff cap)                              |
+| [`worker/worker_loops`](spec/worker/worker_loops.spec.ts)             | Poll-failure reporting and backoff                                    |
 
 ```bash
 npm test
@@ -257,7 +258,7 @@ npm run lint
 
 ## Status
 
-Working and green: 126 specs, `tsc --noEmit` clean, boundary checker clean. The
+Working and green: 133 specs, `tsc --noEmit` clean, boundary checker clean. The
 full programming model runs in all three modes above.
 
 Not built: server HA, activity heartbeats and start-to-close timeouts, the
