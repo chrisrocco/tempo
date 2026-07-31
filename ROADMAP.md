@@ -22,6 +22,12 @@ Phase 5's exit criterion passes: a real spawned server process, worker-crash
 redelivery, at-least-once activities, and lease-race rejection all hold under
 [`spec/integration/distributed.spec.ts`](spec/integration/distributed.spec.ts).
 
+Phase 1's outstanding piece has also landed: the determinism boundary is now
+enforced mechanically by [`tools/boundaries.ts`](tools/boundaries.ts) — layering,
+core purity, and the author entrypoint — rather than by discipline. It runs as
+`npm run lint` and inside the suite, and its exit criterion holds: a deliberately
+planted `Date.now()` in a workflow file fails the check.
+
 ## Next — finishing distribution
 
 - **Activity heartbeats + start-to-close timeouts.** Deferred since Phase 3; the
@@ -36,10 +42,6 @@ redelivery, at-least-once activities, and lease-race rejection all hold under
 
 ## Next — hardening
 
-- **Import-path lint rule.** Finish Phase 1's enforcement of the determinism
-  boundary: `core` may import only `protocol`, workflow code only `workflow.ts`.
-  Today both hold by discipline. The rule should fail a deliberately-planted
-  `Date.now()` in a workflow file.
 - **Counter-collision on resume.** `LocalService` and `ServerHost` id counters
   restart at 0, so a newly generated child id can collide with a resumed one.
   Harmless with explicit `workflowId`s; seed the counter past resumed ids to fix.

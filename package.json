@@ -8,6 +8,7 @@
     "tempo": "tsx bin/tempo.ts",
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",
     "typecheck": "tsc --noEmit",
+    "lint": "tsx tools/lint.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

@@ -4,10 +4,10 @@
  *
  * This module re-exports exclusively the deterministic primitives from `core`.
  * Nothing here touches I/O, the clock, or randomness, which is the whole point:
- * the import-path lint rule (deferred to a later milestone) keys on this file to
- * keep the determinism boundary enforced rather than merely documented. If you
- * find yourself wanting to add a non-deterministic capability here, it belongs
- * on the runtime/host side instead.
+ * the boundary checker (`tools/boundaries.ts`, run by `npm run lint` and by
+ * spec/architecture.spec.ts) keys on this file to keep the determinism boundary
+ * enforced rather than merely documented. If you find yourself wanting to add a
+ * non-deterministic capability here, it belongs on the runtime/host side instead.
  *
  * ## The boundary, and why it exists
  *
@@ -41,10 +41,11 @@
  *
  * Two entrypoints (this file for workflow code, `index.ts` for hosts) plus a
  * strictly downward dependency direction (`protocol <- core <- runtime <-
- * entrypoints`; `core/` may import only `protocol/`). Both are upheld by
- * discipline — the import-path lint rule that would make them mechanical is not
- * built yet. When deciding where a new feature goes, ask "is this deterministic
- * (history-in, commands-out) or not?" The answer names the layer.
+ * entrypoints`; `core/` may import only `protocol/`). Both are checked
+ * mechanically by `tools/boundaries.ts`, along with the ban on clock and
+ * randomness inside `core/` and inside workflow modules. When deciding where a
+ * new feature goes, ask "is this deterministic (history-in, commands-out) or
+ * not?" The answer names the layer.
  */
 
 export {

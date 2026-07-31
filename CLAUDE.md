@@ -22,7 +22,11 @@ own idea, separately testable and separately explainable.
 
 **Dependencies point one way.** `protocol <- core <- {server, services, worker,
 client} <- {local_runtime, entrypoints, bin}`. A dependency that wants to point
-back up means a responsibility is sitting on the wrong side of a line.
+back up means a responsibility is sitting on the wrong side of a line. This is
+**checked, not trusted** — [`tools/boundaries.ts`](tools/boundaries.ts) enforces
+the layering, the ban on clock/randomness/IO inside `core/`, and the rule that
+workflow modules import only `workflow.ts`. Run it with `npm run lint`; the suite
+runs the same rules. When it fails, the message names the layer and why.
 
 **Put seams behind interfaces, implementations behind them.** `server/ports/`
 declares a contract; `server/memory/` and `server/file/` satisfy it. This splits
