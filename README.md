@@ -122,17 +122,18 @@ workflow-engine/
 │   │   └── index.ts
 │   │
 │   ├── local_runtime.ts             #    createLocalRuntime(): LocalService + in-proc workers + client, one call
+│   ├── tempo.ts                     # ★ WORKER ENTRYPOINT — Tempo.startWorker(): RemoteService + poll loops
 │   ├── workflow.ts                  # ★ AUTHOR ENTRYPOINT — exports ONLY deterministic primitives  [doc 01]
-│   └── index.ts                     # ★ HOST ENTRYPOINT — createLocalRuntime, workers, client, public types
+│   └── index.ts                     # ★ HOST ENTRYPOINT — createLocalRuntime, Tempo, client, public types
 │
 ├── bin/                             # ── deployable process mains (distributed mode)
-│   ├── server-main.ts               #    boots server_core with DURABLE adapters + RPC transport
-│   ├── workflow-worker-main.ts      #    workflow_worker against RemoteService
-│   └── activity-worker-main.ts      #    activity_worker against RemoteService
+│   └── server-main.ts               #    boots server_core with DURABLE adapters + RPC transport
+│                                    #    (workers are built from user code — see examples/greeter/)
 │
 ├── examples/
 │   ├── minimal_replay.ts            #    the old standalone replay.ts, demoted to a teaching artifact
-│   └── bug_hotlist_monitor.ts       #    the original motivating workflow, end to end
+│   ├── bug_hotlist_monitor.ts       #    the original motivating workflow, end to end
+│   └── greeter/                     #    the deployable-worker shape: activities + workflows + worker.ts
 │
 └── spec/                            # ── mirrors src/ layout
     ├── support/jasmine.json

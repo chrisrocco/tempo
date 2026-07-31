@@ -1,6 +1,7 @@
 // Against a REAL server process (spawned via `node --import tsx bin/server-main`),
-// over real sockets. Test 1 wires all three deployable mains as separate processes
-// and runs a workflow through them. Test 2 demonstrates the phase's failure
+// over real sockets, driving the real deployable worker entrypoint
+// (`examples/greeter/worker.ts`) exactly as `tempo deploy` would: one binary,
+// its role chosen by TEMPO_ROLE. Test 2 demonstrates the phase's failure
 // semantics: an activity whose worker "crashed" (ran it but never acked) has its
 // lease expire and is redelivered — so it runs at-least-once.
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -19,10 +20,14 @@ import {
 import { runActivity } from '../../src/workflow';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const FIXTURE = 'spec/fixtures/distributed_fixture.ts';
+const WORKER = 'examples/greeter/worker.ts';
 
-function spawnMain(script: string, env: Record<string, string>): ChildProcess {
-  return spawn(process.execPath, ['--import', 'tsx', script], {
+function spawnMain(
+  script: string,
+  env: Record<string, string>,
+  args: string[] = [],
+): ChildProcess {
+  return spawn(process.execPath, ['--import', 'tsx', script, ...args], {
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -104,29 +109,66 @@ const remote = (url: string, opts?: RemoteServiceOptions) =>
   createRemoteService(url, opts);
 
 describe('distributed — real server process over RPC', () => {
-  it('runs a workflow across separate server + workflow-worker + activity-worker processes', async () => {
+  // The deployed shape: one worker binary, started twice, each process taking a
+  // single role from TEMPO_ROLE — what the generated systemd units do.
+  it('runs a workflow across a server and the worker binary in each role', async () => {
     const { url, proc: server } = await spawnServer();
-    const wf = spawnMain('bin/workflow-worker-main.ts', {
-      SERVER_URL: url,
-      WORKER_MODULE: FIXTURE,
+    const wf = spawnMain(WORKER, {
+      TEMPO_SERVER_URL: url,
+      TEMPO_ROLE: 'workflow',
     });
-    const act = spawnMain('bin/activity-worker-main.ts', {
-      SERVER_URL: url,
-      WORKER_MODULE: FIXTURE,
+    const act = spawnMain(WORKER, {
+      TEMPO_SERVER_URL: url,
+      TEMPO_ROLE: 'activity',
     });
     try {
-      await waitForLine(wf, /WORKFLOW_WORKER_READY/);
-      await waitForLine(act, /ACTIVITY_WORKER_READY/);
+      await waitForLine(wf, /WORKER_READY greeter workflow/);
+      await waitForLine(act, /WORKER_READY greeter activity/);
 
       const service = remote(url);
-      const { workflowId } = service.start('greeter');
+      const { workflowId } = service.start('greeter', ['world']);
       await expectAsync(service.getResult(workflowId)).toBeResolvedTo(
-        'hi world',
+        'Hello, world!',
       );
     } finally {
       await kill(wf);
       await kill(act);
       await kill(server);
+    }
+  }, 30000);
+
+  // The dev shape: TEMPO_ROLE unset, so one process serves both roles. This is
+  // what `tempo up` and a hand-run binary do.
+  it('runs a workflow with one worker process serving both roles', async () => {
+    const { url, proc: server } = await spawnServer();
+    const worker = spawnMain(WORKER, { TEMPO_SERVER_URL: url });
+    try {
+      await waitForLine(worker, /WORKER_READY greeter workflow,activity/);
+
+      const service = remote(url);
+      const { workflowId } = service.start('greeter', ['world']);
+      await expectAsync(service.getResult(workflowId)).toBeResolvedTo(
+        'Hello, world!',
+      );
+    } finally {
+      await kill(worker);
+      await kill(server);
+    }
+  }, 30000);
+
+  // How `tempo deploy` interrogates a built binary: it reports what it contains
+  // and exits, without connecting to a server (none is running here).
+  it('reports its workflows and activities under --describe, without connecting', async () => {
+    const proc = spawnMain(WORKER, {}, ['--describe']);
+    try {
+      const [line] = await waitForLine(proc, /\{.*\}/);
+      expect(JSON.parse(line)).toEqual({
+        name: 'greeter',
+        workflows: ['greeter'],
+        activities: ['greet'], // GREETING is a constant, so it is not an activity
+      });
+    } finally {
+      await kill(proc);
     }
   }, 30000);
 

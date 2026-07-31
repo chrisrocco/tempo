@@ -12,6 +12,14 @@ export {
   type Runtime,
   type LocalRuntimeOptions,
 } from './local_runtime';
+export {
+  Tempo,
+  startWorker,
+  DEFAULT_SERVER_URL,
+  type StartWorkerOptions,
+  type Worker,
+  type WorkerRole,
+} from './tempo';
 export { FileHistoryStore } from './server';
 export type { HistoryStore, ExecutionRecord } from './server';
 export type { WorkflowHandle, Client } from './client';

@@ -9,7 +9,7 @@ the shape you'd run on a VM.
 (a real spawned server + worker processes, with worker-crash redelivery) and
 [`spec/server/file_history_store.spec.ts`](../../../spec/server/file_history_store.spec.ts)
 (durability round-trip + stale-lock reclaim). Everything below runs against the
-same `bin/` mains those specs exercise.
+same server main and worker entrypoint those specs exercise.
 
 ## The shape
 
@@ -29,11 +29,10 @@ the workers/clients use (`LocalService` vs. `RemoteService`) — not a rewrite.
 ## Prerequisites
 
 - Node 18+ (uses global `fetch`); run TypeScript directly with `node --import tsx`.
-- A **definitions module** exporting `registerWorkflows` / `registerActivities` —
-  reuse the one from the [Quickstart](../quickstart.md#1-define-a-workflow-and-an-activity)
-  (`quickstart/definitions.ts` with a `greeter` workflow + `greet` activity). The
-  worker mains load it via the `WORKER_MODULE` env var. Its shape is exactly the
-  spec fixture `distributed_fixture.ts` that `distributed.spec.ts` runs.
+- A **worker entrypoint** — your own file calling `Tempo.startWorker`.
+  [`examples/greeter/`](../../../examples/greeter/) is the reference:
+  `activities.ts`, `workflows.ts`, and a `worker.ts` that hands both module
+  namespaces over. It is the exact binary `distributed.spec.ts` runs.
 
 > **Windows PowerShell:** set each env var on its own line first (e.g.
 > `$env:DATA_DIR = "./wf-data"`), then run the `node ...` command. The
@@ -53,14 +52,15 @@ DATA_DIR=./wf-data PORT=7233 node --import tsx bin/server-main.ts
 # → LISTENING 7233
 ```
 
-**Terminals 2 & 3 — the workers** (point them at your definitions module):
+**Terminals 2 & 3 — the workers.** The same entrypoint twice; only `TEMPO_ROLE`
+differs:
 
 ```bash
-SERVER_URL=http://127.0.0.1:7233 WORKER_MODULE=./quickstart/definitions.ts \
-  node --import tsx bin/workflow-worker-main.ts     # → WORKFLOW_WORKER_READY
+TEMPO_SERVER_URL=http://127.0.0.1:7233 TEMPO_ROLE=workflow \
+  node --import tsx examples/greeter/worker.ts   # → WORKER_READY greeter workflow
 
-SERVER_URL=http://127.0.0.1:7233 WORKER_MODULE=./quickstart/definitions.ts \
-  node --import tsx bin/activity-worker-main.ts     # → ACTIVITY_WORKER_READY
+TEMPO_SERVER_URL=http://127.0.0.1:7233 TEMPO_ROLE=activity \
+  node --import tsx examples/greeter/worker.ts   # → WORKER_READY greeter activity
 ```
 
 **Terminal 4 — a client.** Save this as `deploy/client.ts` (repo-root-relative, so
@@ -130,12 +130,13 @@ Restart=always
 # /etc/systemd/system/wf-workflow-worker@.service   (templated → run N instances)
 [Service]
 WorkingDirectory=/opt/workflow-engine
-Environment=SERVER_URL=http://127.0.0.1:7233 WORKER_MODULE=/opt/workflow-engine/deploy/definitions.ts
-ExecStart=/usr/bin/node --import tsx bin/workflow-worker-main.ts
+Environment=TEMPO_SERVER_URL=http://127.0.0.1:7233 TEMPO_ROLE=workflow
+ExecStart=/usr/bin/node --import tsx deploy/worker.ts
 Restart=always
 ```
 
-(same pattern for `wf-activity-worker@`.) Then:
+(same pattern for `wf-activity-worker@`, with `TEMPO_ROLE=activity` — **the same
+entrypoint**, only the role differs.) Then:
 
 ```bash
 systemctl enable --now wf-server wf-workflow-worker@{1,2} wf-activity-worker@{1,2}
@@ -156,9 +157,9 @@ lease redelivery makes a crashed worker's task reappear on a live one.
 - **No auth / no TLS** on the RPC (plain HTTP+JSON). Only expose it on loopback or a
   trusted private network; do not put the port on the public internet.
 - **The server is a single point of failure and the single writer.** Scaling is
-  horizontal on *workers*; server HA (failover, multi-writer) is Phase 6 and not
+  horizontal on _workers_; server HA (failover, multi-writer) is Phase 6 and not
   built. The `DATA_DIR` lockfile enforces one server per data dir.
-- **Child-id collision on restart** (`PROJECT.md` §6): the server's *child*-workflow
+- **Child-id collision on restart** (`PROJECT.md` §6): the server's _child_-workflow
   id counter resets to 0 on restart, so a newly-started child could collide with a
   resumed one. Client-generated top-level ids (the default) are unaffected.
 - **Runtime is `tsx`** (no build step). Fine to ship, or `tsc` to `dist/` and run
@@ -167,6 +168,6 @@ lease redelivery makes a crashed worker's task reappear on a live one.
 ## See also
 
 - [Quickstart](../quickstart.md) — the minimal dev run (in-memory, 3 terminals).
-- [Distribution](../../architecture/distribution.md) — the *why* (leasing, the
+- [Distribution](../../architecture/distribution.md) — the _why_ (leasing, the
   version check, at-least-once).
 - [`PROJECT.md`](../../../PROJECT.md) §1 (deploy summary), §6–7 (what's next, invariants).

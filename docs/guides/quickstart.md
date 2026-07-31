@@ -65,8 +65,12 @@ workflow code — only how it is hosted.
 ## 3. Deploy it distributed (server + workers)
 
 For durability across crashes and horizontal scale, split into three process
-types that communicate **only over HTTP RPC**. The `definitions.ts` above is
-reused unchanged.
+types that communicate **only over HTTP RPC**.
+
+The workers below are the same **one binary**, started twice with a different
+`TEMPO_ROLE` — your own entrypoint, built from your code. See
+[`examples/greeter/`](../../examples/greeter/) for its three files, and
+[Build and Deploy](build-and-deploy.md) for the full journey.
 
 ```text
           start / getResult (HTTP)
@@ -86,17 +90,17 @@ three processes (each in its own terminal):
 PORT=7233 node --import tsx bin/server-main.ts
 # → LISTENING 7233
 
-# 2) a workflow worker — replays workflow code; loads workflow types from WORKER_MODULE
-SERVER_URL=http://127.0.0.1:7233 \
-WORKER_MODULE=./quickstart/definitions.ts \
-node --import tsx bin/workflow-worker-main.ts
-# → WORKFLOW_WORKER_READY
+# 2) a workflow worker — replays workflow code
+TEMPO_SERVER_URL=http://127.0.0.1:7233 \
+TEMPO_ROLE=workflow \
+node --import tsx examples/greeter/worker.ts
+# → WORKER_READY greeter workflow
 
-# 3) an activity worker — runs activities (the only I/O); loads activity impls
-SERVER_URL=http://127.0.0.1:7233 \
-WORKER_MODULE=./quickstart/definitions.ts \
-node --import tsx bin/activity-worker-main.ts
-# → ACTIVITY_WORKER_READY
+# 3) an activity worker — runs activities (the only I/O)
+TEMPO_SERVER_URL=http://127.0.0.1:7233 \
+TEMPO_ROLE=activity \
+node --import tsx examples/greeter/worker.ts
+# → WORKER_READY greeter activity
 ```
 
 > On Windows PowerShell, set each env var on its own line first — e.g.

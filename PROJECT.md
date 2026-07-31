@@ -25,12 +25,15 @@ Last updated: end of **Phase 5, Slice 4** (distribution core complete).
 ### Commands
 
 ```bash
-npm test          # jasmine + tsx, all 51 specs
+npm test          # jasmine + tsx, all 55 specs
 npm run typecheck # tsc --noEmit
 ```
 
 Distributed (manual): `node --import tsx bin/server-main.ts` (prints `LISTENING <port>`),
-then the two worker mains with `SERVER_URL` + `WORKER_MODULE` env (see `bin/*-main.ts`).
+then the worker binary built from user code — `Tempo.startWorker({name, workflows,
+activities})`, with `TEMPO_SERVER_URL` and `TEMPO_ROLE` (`workflow` | `activity`;
+unset runs both) from the environment. `examples/greeter/worker.ts` is the reference
+entrypoint, and `--describe` makes any worker report its contents as JSON.
 Set `DATA_DIR` on the server for **durable** mode (filesystem store + boot `resume()`);
 unset = in-memory (the test default). Deploy on one VM: server + N of each worker
 under a supervisor (`Restart=always`); workers scale horizontally, the server is the
@@ -98,8 +101,10 @@ src/
   local_runtime.ts     createLocalRuntime() — wires LocalService + in-proc workers + client
   workflow.ts          ★ AUTHOR ENTRYPOINT — deterministic primitives only
   index.ts             ★ HOST ENTRYPOINT — createLocalRuntime, FileHistoryStore, types
-bin/                   server-main · workflow-worker-main · activity-worker-main
+  tempo.ts             ★ WORKER ENTRYPOINT — Tempo.startWorker() for deployable workers
+bin/                   server-main (the framework server; workers come from user code)
 examples/              bug_hotlist_monitor.ts — the motivating spawn-and-cancel workflow
+                       greeter/ — activities + workflows + worker.ts, the deploy shape
 ```
 
 ### The control-flow model (how a workflow advances now)
