@@ -114,11 +114,39 @@ describe('core applyEvent — markers', () => {
     const timer = parkWaiter(ctx, 0);
     const child = parkWaiter(ctx, 1);
 
-    applyEvent(ctx, { type: 'timerStarted', seq: 0, fireAt: 123 });
-    applyEvent(ctx, { type: 'childStarted', seq: 1, childId: 'c-1' });
+    applyEvent(ctx, {
+      type: 'timerStarted',
+      seq: 0,
+      fireAt: 123,
+    });
+    applyEvent(ctx, {
+      type: 'childStarted',
+      seq: 1,
+      childId: 'c-1',
+      detached: false,
+    });
 
     expect(timer.done).toBeFalse();
     expect(child.done).toBeFalse();
+  });
+
+  /**
+   * A detached child's marker exists purely to advance history past its
+   * `startChild` command, so replay does not launch a second child. Nothing is
+   * ever parked on it, and it must stay a no-op like every other marker.
+   */
+  it('leaves a detached child marker inert, since no completion follows it', () => {
+    const ctx = createContext([], []);
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'childStarted',
+        seq: 0,
+        childId: 'c-1',
+        detached: true,
+      }),
+    ).not.toThrow();
+    expect(ctx.completions.size).toBe(0);
   });
 });
 
