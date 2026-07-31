@@ -1,8 +1,12 @@
-// End to end over the RPC transport: a real HTTP server hosting the headless
-// server, workflow + activity workers polling it via RemoteService, and a client
-// starting + awaiting results — all over the wire (loopback). Slice 4 splits these
-// into separate processes; here they share one process but only touch each other
-// through HTTP.
+/**
+ * @fileoverview
+ * End to end over the RPC transport: a real HTTP server hosting the headless
+ * server, workflow + activity workers polling it via RemoteService, and a client
+ * starting + awaiting results — all over the wire (loopback). Slice 4 splits these
+ * into separate processes; here they share one process but only touch each other
+ * through HTTP.
+ */
+
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import {

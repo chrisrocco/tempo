@@ -1,7 +1,11 @@
-// The durable filesystem store: workflows run against it just like the in-memory
-// one (behavior parity), state survives into a freshly-opened store on the same
-// data dir (the durability round-trip), and a second opener is refused (the
-// single-writer lock). Each test uses a throwaway temp dir.
+/**
+ * @fileoverview
+ * The durable filesystem store: workflows run against it just like the in-memory
+ * one (behavior parity), state survives into a freshly-opened store on the same
+ * data dir (the durability round-trip), and a second opener is refused (the
+ * single-writer lock). Each test uses a throwaway temp dir.
+ */
+
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';

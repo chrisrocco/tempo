@@ -1,7 +1,11 @@
-// The `tempo` CLI end to end, as a user runs it: `tempo up` supervises a real
-// server + worker in the foreground, and the client commands drive workflows
-// through them over RPC. Everything here shells out to bin/tempo.ts — no
-// in-process shortcuts — so the command surface itself is what is under test.
+/**
+ * @fileoverview
+ * The `tempo` CLI end to end, as a user runs it: `tempo up` supervises a real
+ * server + worker in the foreground, and the client commands drive workflows
+ * through them over RPC. Everything here shells out to bin/tempo.ts — no
+ * in-process shortcuts — so the command surface itself is what is under test.
+ */
+
 import { spawn, type ChildProcess } from 'node:child_process';
 import { forwardOutput, stopChild, waitForLine } from '../../src/cli/process';
 

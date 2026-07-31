@@ -1,9 +1,13 @@
-// Against a REAL server process (spawned via `node --import tsx bin/server-main`),
-// over real sockets, driving the real deployable worker entrypoint
-// (`examples/greeter.ts`) exactly as `tempo deploy` would: one binary,
-// its role chosen by TEMPO_ROLE. Test 2 demonstrates the phase's failure
-// semantics: an activity whose worker "crashed" (ran it but never acked) has its
-// lease expire and is redelivered — so it runs at-least-once.
+/**
+ * @fileoverview
+ * Against a REAL server process (spawned via `node --import tsx bin/server-main`),
+ * over real sockets, driving the real deployable worker entrypoint
+ * (`examples/greeter.ts`) exactly as `tempo deploy` would: one binary,
+ * its role chosen by TEMPO_ROLE. Test 2 demonstrates the phase's failure
+ * semantics: an activity whose worker "crashed" (ran it but never acked) has its
+ * lease expire and is redelivered — so it runs at-least-once.
+ */
+
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
   createRemoteService,

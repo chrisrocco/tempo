@@ -1,6 +1,10 @@
-// Unit test for the in-memory durable timer service: firing, cancellation, and
-// the startup recovery sweep. Uses small real delays (the adapter arms real
-// setTimeouts) and a short wait to observe firing.
+/**
+ * @fileoverview
+ * Unit test for the in-memory durable timer service: firing, cancellation, and
+ * the startup recovery sweep. Uses small real delays (the adapter arms real
+ * setTimeouts) and a short wait to observe firing.
+ */
+
 import { MemoryTimerService } from '../../src/server/memory/memory_timer_service';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

@@ -122,7 +122,9 @@ commas (`.prettierrc.json`: `printWidth: 80`, `singleQuote: true`). Run
 - **Every module opens with an `@fileoverview`** JSDoc block, blank line after it
   — not a plain `//` header. For what goes _in_ it, see
   [Documentation lives in the code](#documentation-lives-in-the-code).
-- **Every exported symbol** — variable, function, class — carries a JSDoc comment.
+- **Every exported symbol carries a JSDoc comment**, unless the module's
+  `@fileoverview` already documents it — a single-purpose module named after the
+  thing it exports needs no second copy (`condition.ts`, `microtask_scheduler.ts`).
 - **`function` over arrow functions** for statement functions. Inline expressions
   stay arrows.
 - **`while (true)`, never `for (;;)`.**

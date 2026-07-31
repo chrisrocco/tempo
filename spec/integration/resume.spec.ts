@@ -1,7 +1,11 @@
-// Crash recovery end to end: start a workflow, drop the runtime mid-flight (while
-// it's parked on a timer / activity / child), then open a *fresh* runtime + store
-// on the same data dir and let `resume()` carry it to completion from history.
-// A `shutdown()` (stopping timers) + `close()` stands in for the process dying.
+/**
+ * @fileoverview
+ * Crash recovery end to end: start a workflow, drop the runtime mid-flight (while
+ * it's parked on a timer / activity / child), then open a *fresh* runtime + store
+ * on the same data dir and let `resume()` carry it to completion from history.
+ * A `shutdown()` (stopping timers) + `close()` stands in for the process dying.
+ */
+
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';

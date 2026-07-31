@@ -1,7 +1,11 @@
-// The distributed concurrency-control mechanisms, tested directly: optimistic
-// version CAS on the store, lease-expiry redelivery on both queues, and the two
-// composing at the seam — a lease-race loser's append is rejected by the version
-// check. Driven against a headless server_core (no in-proc worker loops).
+/**
+ * @fileoverview
+ * The distributed concurrency-control mechanisms, tested directly: optimistic
+ * version CAS on the store, lease-expiry redelivery on both queues, and the two
+ * composing at the seam — a lease-race loser's append is rejected by the version
+ * check. Driven against a headless server_core (no in-proc worker loops).
+ */
+
 import type { WorkflowTaskResult } from '../../src';
 import {
   MemoryHistoryStore,
