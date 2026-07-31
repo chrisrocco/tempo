@@ -26,12 +26,6 @@ canonical behavior spec — the whole author-facing model against
 | `continueAsNew`                          | [continue-as-new](../concepts/continue-as-new.md)                        | `local runtime — continueAsNew`             |
 | Timers (duration ordering)               | [conditions, signals & timers](../concepts/conditions-signals-timers.md) | `local runtime — timers`                    |
 
-## The motivating example
-
-[`spec/examples/bug_hotlist_monitor.spec.ts`](../../spec/examples/bug_hotlist_monitor.spec.ts)
-— the spawn-and-cancel hotlist monitor end to end. Walked through in
-[getting started](../guides/getting-started.md).
-
 ## Engine internals & durability
 
 These specs prove the guarantees behind the [architecture](../architecture/) docs

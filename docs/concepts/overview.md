@@ -46,8 +46,8 @@ The concept docs describe the _design_. For the current build status — what's
 implemented, what's deferred, and where the code has moved past these docs — see
 [`PROJECT.md` §1](../../PROJECT.md), the maintained "you are here" for the
 codebase. As of this writing the engine runs three ways (in-memory, durably on
-disk, and distributed across processes), and the original bug-hotlist monitor
-runs for real — see [getting started](../guides/getting-started.md).
+disk, and distributed across processes) — see the
+[quickstart](../guides/quickstart.md).
 
 ## Glossary
 

@@ -66,6 +66,7 @@ catches it, so the guide's spine can't silently go stale. A how-to with no
 spec-covered example behind it doesn't meet the bar yet: write (or extend) the
 example and its spec first.
 
-[`examples/bug_hotlist_monitor.ts`](../../examples/bug_hotlist_monitor.ts), covered
-by [`spec/examples/bug_hotlist_monitor.spec.ts`](../../spec/examples/bug_hotlist_monitor.spec.ts),
-is the model anchor.
+[`examples/greeter.ts`](../../examples/greeter.ts), covered by
+[`spec/integration/distributed.spec.ts`](../../spec/integration/distributed.spec.ts)
+and [`spec/integration/cli.spec.ts`](../../spec/integration/cli.spec.ts), is the
+model anchor.

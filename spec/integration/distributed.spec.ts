@@ -1,6 +1,6 @@
 // Against a REAL server process (spawned via `node --import tsx bin/server-main`),
 // over real sockets, driving the real deployable worker entrypoint
-// (`examples/greeter/worker.ts`) exactly as `tempo deploy` would: one binary,
+// (`examples/greeter.ts`) exactly as `tempo deploy` would: one binary,
 // its role chosen by TEMPO_ROLE. Test 2 demonstrates the phase's failure
 // semantics: an activity whose worker "crashed" (ran it but never acked) has its
 // lease expire and is redelivered — so it runs at-least-once.
@@ -20,7 +20,7 @@ import {
 import { runActivity } from '../../src/workflow';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const WORKER = 'examples/greeter/worker.ts';
+const WORKER = 'examples/greeter.ts';
 
 function spawnMain(
   script: string,

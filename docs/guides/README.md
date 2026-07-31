@@ -20,13 +20,14 @@ Plus on-ramps for everyone:
 
 - **[Quickstart](quickstart.md)** — define a workflow, run it locally, then deploy
   it across server + worker processes over RPC.
-- **[Getting Started](getting-started.md)** — build and run your first workflow,
-  end to end, using the motivating example.
+- **[Build and Deploy](build-and-deploy.md)** — the entrypoint-to-deployment
+  journey and the `tempo` CLI.
 
 ## Two kinds of guide
 
-- **Tutorial** — a single guided first experience ([Getting Started](getting-started.md)).
-  There is deliberately only one; tutorials are expensive to maintain.
+- **Tutorial** — a single guided first experience. There is deliberately only
+  one; tutorials are expensive to maintain. The previous tutorial was retired
+  with the example it was built on, so there is none today.
 - **How-to guides** — goal-oriented recipes (everything under `authoring/` and
   `extending/`). These are the workhorse.
 

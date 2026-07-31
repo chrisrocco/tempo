@@ -129,12 +129,11 @@ workflow-engine/
 ├── bin/                             # ── deployable process mains (distributed mode)
 │   ├── server-main.ts               #    boots server_core with DURABLE adapters + RPC transport
 │   └── tempo.ts                     #    the `tempo` CLI entry (logic in src/cli/)
-│                                    #    (workers are built from user code — see examples/greeter/)
+│                                    #    (workers are built from user code — see examples/greeter.ts)
 │
 ├── examples/
 │   ├── minimal_replay.ts            #    the old standalone replay.ts, demoted to a teaching artifact
-│   ├── bug_hotlist_monitor.ts       #    the original motivating workflow, end to end
-│   └── greeter/                     #    the deployable-worker shape: activities + workflows + worker.ts
+│   └── greeter.ts                   #    the deployable worker: activity + workflow + entrypoint
 │
 └── spec/                            # ── mirrors src/ layout
     ├── support/jasmine.json

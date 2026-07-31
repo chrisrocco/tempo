@@ -11,7 +11,7 @@ Last updated: end of **Phase 5, Slice 4** (distribution core complete).
 
 ## 1. Status at a glance
 
-- **51 specs green** under Jasmine + `tsx` (`npm test`), `tsc --noEmit` clean.
+- **58 specs green** under Jasmine + `tsx` (`npm test`), `tsc --noEmit` clean.
 - **Phases 1–4 complete. Phase 5 (distribution) core complete** — its exit
   criterion passes (a real spawned server process, worker-crash redelivery /
   at-least-once, and lease-race version rejection).
@@ -25,7 +25,7 @@ Last updated: end of **Phase 5, Slice 4** (distribution core complete).
 ### Commands
 
 ```bash
-npm test          # jasmine + tsx, all 59 specs
+npm test          # jasmine + tsx, all 58 specs
 npm run typecheck # tsc --noEmit
 npm run tempo -- help   # the tempo CLI
 ```
@@ -39,7 +39,7 @@ yet — see [the build-and-deploy guide](docs/guides/build-and-deploy.md).
 Distributed (manual): `node --import tsx bin/server-main.ts` (prints `LISTENING <port>`),
 then the worker binary built from user code — `Tempo.startWorker({name, workflows,
 activities})`, with `TEMPO_SERVER_URL` and `TEMPO_ROLE` (`workflow` | `activity`;
-unset runs both) from the environment. `examples/greeter/worker.ts` is the reference
+unset runs both) from the environment. `examples/greeter.ts` is the reference
 entrypoint, and `--describe` makes any worker report its contents as JSON.
 Set `DATA_DIR` on the server for **durable** mode (filesystem store + boot `resume()`);
 unset = in-memory (the test default). Deploy on one VM: server + N of each worker
@@ -111,8 +111,7 @@ src/
   tempo.ts             ★ WORKER ENTRYPOINT — Tempo.startWorker() for deployable workers
   cli/                 the `tempo` CLI: process.ts · describe.ts · up.ts · client.ts · cli.ts
 bin/                   server-main (the framework server) · tempo (the CLI entry)
-examples/              bug_hotlist_monitor.ts — the motivating spawn-and-cancel workflow
-                       greeter/ — activities + workflows + worker.ts, the deploy shape
+examples/              greeter.ts — the deployable worker: activity + workflow + entrypoint
 ```
 
 ### The control-flow model (how a workflow advances now)
@@ -151,17 +150,17 @@ _ideas_. The ideas are all intact; some mechanisms have moved. Where they differ
 
 ## 5. Test map (the specs are the executable documentation)
 
-| Spec                                        | Covers                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `spec/integration/local.spec.ts` (28)       | The whole programming model against `createLocalRuntime` — activities, `proxyActivities`+retries, dispatch-and-park (async + FIFO), signals/`condition`, blocking + concurrent children, timers (duration ordering), `continueAsNew`, cancellation (+ cascade). **Start here to understand behavior.** |
-| `spec/examples/bug_hotlist_monitor.spec.ts` | The motivating spawn-and-cancel workflow end to end.                                                                                                                                                                                                                                                   |
-| `spec/server/retry_policy.spec.ts`          | Retry arithmetic (attempts, exponential backoff cap).                                                                                                                                                                                                                                                  |
-| `spec/server/timer_service.spec.ts`         | Durable timer fire / cancel / startup re-arm.                                                                                                                                                                                                                                                          |
-| `spec/server/file_history_store.spec.ts`    | Durable persistence: behavior parity, reload-in-fresh-store round-trip, single-writer lockfile.                                                                                                                                                                                                        |
-| `spec/server/concurrency.spec.ts`           | Optimistic version CAS, lease-expiry redelivery (both queues), lease-race resolved by the version check (headless `server_core`).                                                                                                                                                                      |
-| `spec/integration/resume.spec.ts`           | Crash recovery: restart mid-flight on a timer / activity / blocking child and finish from history.                                                                                                                                                                                                     |
-| `spec/integration/remote.spec.ts`           | Client → `RemoteService` → HTTP → server → workers, in one process over loopback.                                                                                                                                                                                                                      |
-| `spec/integration/distributed.spec.ts`      | **Real** spawned server + worker processes; worker-crash redelivery / at-least-once.                                                                                                                                                                                                                   |
+| Spec                                     | Covers                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `spec/integration/local.spec.ts` (28)    | The whole programming model against `createLocalRuntime` — activities, `proxyActivities`+retries, dispatch-and-park (async + FIFO), signals/`condition`, blocking + concurrent children, timers (duration ordering), `continueAsNew`, cancellation (+ cascade). **Start here to understand behavior.** |
+| `spec/integration/cli.spec.ts`           | The `tempo` CLI end to end as a subprocess: `up` supervising a real server + worker, and the client commands driving workflows through them.                                                                                                                                                           |
+| `spec/server/retry_policy.spec.ts`       | Retry arithmetic (attempts, exponential backoff cap).                                                                                                                                                                                                                                                  |
+| `spec/server/timer_service.spec.ts`      | Durable timer fire / cancel / startup re-arm.                                                                                                                                                                                                                                                          |
+| `spec/server/file_history_store.spec.ts` | Durable persistence: behavior parity, reload-in-fresh-store round-trip, single-writer lockfile.                                                                                                                                                                                                        |
+| `spec/server/concurrency.spec.ts`        | Optimistic version CAS, lease-expiry redelivery (both queues), lease-race resolved by the version check (headless `server_core`).                                                                                                                                                                      |
+| `spec/integration/resume.spec.ts`        | Crash recovery: restart mid-flight on a timer / activity / blocking child and finish from history.                                                                                                                                                                                                     |
+| `spec/integration/remote.spec.ts`        | Client → `RemoteService` → HTTP → server → workers, in one process over loopback.                                                                                                                                                                                                                      |
+| `spec/integration/distributed.spec.ts`   | **Real** spawned server + worker processes; worker-crash redelivery / at-least-once.                                                                                                                                                                                                                   |
 
 ---
 

@@ -69,9 +69,10 @@ The working baseline this roadmap builds on.
     what finally lets the original **bug-hotlist monitor** run for real
     (spawn-and-cancel), rather than the blocking child model. Needs cancellation
     scopes and `CancelledFailure` propagation; give it its own design pass.
-- **Exit criteria:** `examples/bug_hotlist_monitor.ts` runs against `LocalService`;
+- **Exit criteria:** the spawn-and-cancel monitor runs against `LocalService`;
   new specs cover continue-as-new (incl. children surviving), timer ordering,
-  retries, and cancellation.
+  retries, and cancellation. _(Met. The example itself was later retired pending
+  a rework, so the primitives are covered by `spec/integration/local.spec.ts`.)_
 - **Docs:** `03`, `05`, `06`, `07`.
 
 ## Phase 4 — Durable persistence

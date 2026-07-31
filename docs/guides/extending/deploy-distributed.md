@@ -30,9 +30,8 @@ the workers/clients use (`LocalService` vs. `RemoteService`) — not a rewrite.
 
 - Node 18+ (uses global `fetch`); run TypeScript directly with `node --import tsx`.
 - A **worker entrypoint** — your own file calling `Tempo.startWorker`.
-  [`examples/greeter/`](../../../examples/greeter/) is the reference:
-  `activities.ts`, `workflows.ts`, and a `worker.ts` that hands both module
-  namespaces over. It is the exact binary `distributed.spec.ts` runs.
+  [`examples/greeter.ts`](../../../examples/greeter.ts) is the reference, and the
+  exact binary `distributed.spec.ts` runs.
 
 > **Windows PowerShell:** set each env var on its own line first (e.g.
 > `$env:DATA_DIR = "./wf-data"`), then run the `node ...` command. The
@@ -57,10 +56,10 @@ differs:
 
 ```bash
 TEMPO_SERVER_URL=http://127.0.0.1:7233 TEMPO_ROLE=workflow \
-  node --import tsx examples/greeter/worker.ts   # → WORKER_READY greeter workflow
+  node --import tsx examples/greeter.ts   # → WORKER_READY greeter workflow
 
 TEMPO_SERVER_URL=http://127.0.0.1:7233 TEMPO_ROLE=activity \
-  node --import tsx examples/greeter/worker.ts   # → WORKER_READY greeter activity
+  node --import tsx examples/greeter.ts   # → WORKER_READY greeter activity
 ```
 
 **Terminal 4 — a client.** Save this as `deploy/client.ts` (repo-root-relative, so

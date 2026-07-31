@@ -5,7 +5,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { forwardOutput, stopChild, waitForLine } from '../../src/cli/process';
 
-const WORKER = 'examples/greeter/worker.ts';
+const WORKER = 'examples/greeter.ts';
 
 function tempo(args: string[]): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx', 'bin/tempo.ts', ...args], {

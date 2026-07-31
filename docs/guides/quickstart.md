@@ -69,7 +69,7 @@ types that communicate **only over HTTP RPC**.
 
 The workers below are the same **one binary**, started twice with a different
 `TEMPO_ROLE` — your own entrypoint, built from your code. See
-[`examples/greeter/`](../../examples/greeter/) for its three files, and
+[`examples/greeter.ts`](../../examples/greeter.ts), and
 [Build and Deploy](build-and-deploy.md) for the full journey.
 
 ```text
@@ -93,13 +93,13 @@ PORT=7233 node --import tsx bin/server-main.ts
 # 2) a workflow worker — replays workflow code
 TEMPO_SERVER_URL=http://127.0.0.1:7233 \
 TEMPO_ROLE=workflow \
-node --import tsx examples/greeter/worker.ts
+node --import tsx examples/greeter.ts
 # → WORKER_READY greeter workflow
 
 # 3) an activity worker — runs activities (the only I/O)
 TEMPO_SERVER_URL=http://127.0.0.1:7233 \
 TEMPO_ROLE=activity \
-node --import tsx examples/greeter/worker.ts
+node --import tsx examples/greeter.ts
 # → WORKER_READY greeter activity
 ```
 
@@ -158,7 +158,7 @@ redelivers to another worker.
 
 ## Next
 
-- [Getting Started](getting-started.md) — a richer example (signals, children,
-  cancellation) walked through end to end.
+- [Build and Deploy](build-and-deploy.md) — the full journey from entrypoint to
+  a running deployment, and the `tempo` CLI.
 - [Concepts](../concepts/) for the _why_, [Behavior](../behavior/README.md) for
   the guarantees, each linked to the spec that proves it.
