@@ -51,11 +51,20 @@ This is the worst failure shape available: silent, invisible, and expensive.
 
 Each tier stands alone and ships value; take them in order.
 
-**Tier 1 — make failure visible (no protocol change).** Log poll failures to
-stderr from the loops, and back off exponentially on the error path instead of
-reusing the 5ms idle interval. Rate-limit or dedupe the log so a persistent
-outage does not flood the journal. This alone turns the scenario above into a
-one-line diagnosis via `tempo logs`.
+**Tier 1 — make failure visible (no protocol change). ✅ Done.** Poll failures are
+reported to stderr and the error path backs off exponentially (50ms doubling to a
+5s ceiling) instead of reusing the 5ms idle interval; the reporter repeats on a
+doubling schedule so a persistent outage stays visible without flooding. A worker
+pointed at a closed port now logs:
+
+```text
+workflow worker: poll failed (1x): fetch failed
+activity worker: poll failed (1x): fetch failed
+workflow worker: poll failed (2x): fetch failed
+...
+```
+
+Roughly 8 attempts in 12s, where it previously managed ~2,400 silently.
 
 **Tier 2 — a real server health probe.** Add a `health` method to `RpcRequest`
 returning server liveness plus whatever is already cheap to read (uptime, durable
@@ -70,9 +79,9 @@ stats. Largest change: touches `protocol`, `server_host`, and `worker_loops`.
 
 ## Acceptance criteria
 
-- [ ] **T1:** a worker that cannot reach its server logs a distinguishable error
+- [x] **T1:** a worker that cannot reach its server logs a distinguishable error
       and backs off; verified by pointing one at a closed port.
-- [ ] **T1:** error-path backoff is exponential and capped; idle polling cadence
+- [x] **T1:** error-path backoff is exponential and capped; idle polling cadence
       is unchanged.
 - [ ] **T2:** `health` exists on the RPC surface and `RemoteService` exposes it.
 - [ ] **T3:** the server can enumerate live workers by role with a last-seen
