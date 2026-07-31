@@ -7,6 +7,7 @@ export * from './errors';
 export * from './context';
 export * from './workflow_api';
 export * from './signals';
+export * from './signal_stream';
 export * from './condition';
 export * from './apply_event';
 export * from './microtask_scheduler';

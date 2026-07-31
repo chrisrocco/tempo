@@ -10,24 +10,28 @@
  *
  * ## The handler-only-enqueues discipline
  *
- * Signal handlers should do the minimum — push onto a queue, set a flag. Doing
- * real work inside a handler (starting or cancelling children) invites races and
- * unfinished-handler problems at continue-as-new. Let the main loop drain the
- * queue and act:
+ * A handler runs synchronously inside `applyEvent`, so it has no coherent place to
+ * suspend: it cannot await. It should therefore do the minimum — push onto a
+ * queue, set a flag — and let ordinary control flow do the work. Starting real
+ * work inside a handler produces a detached branch that is abandoned silently at
+ * continue-as-new or completion.
  *
- *     const diff = defineSignal('diff');
+ * That constraint is essential. What is *not* essential is hand-rolling the
+ * plumbing around it: **prefer `signalStream` from `core/signal_stream.ts`**,
+ * which turns signal consumption into a `for await` loop whose body may await
+ * activities freely. The manual form below is what it replaces, kept here because
+ * the ordering guarantee it relies on is the same one the stream is built on:
+ *
  *     const queue: Diff[] = [];
- *     setHandler(diff, (d) => queue.push(d)); // handler only enqueues
+ *     setHandler(diff, (d) => queue.push(d));
  *     while (true) {
- *       await condition(() => queue.length > 0); // park until something changes
+ *       await condition(() => queue.length > 0);
  *       const d = queue.shift()!;
- *       // ...reconcile...
  *     }
  *
- * This never misses an item because of the ordering guarantee: the signal that
- * pushes onto `queue` *is* the activation that triggers the condition unblock
- * pass, and the handler runs before the pass — so the condition reliably sees the
- * new item.
+ * It never misses an item because the signal that pushes onto `queue` *is* the
+ * activation that triggers the condition unblock pass, and the handler runs
+ * before the pass — so the condition reliably sees the new item.
  */
 
 import { getContext } from './context';
@@ -51,4 +55,28 @@ export function setHandler(
     (s) => s.name !== signalDef.name,
   );
   for (const s of ready) fn(s.payload);
+}
+
+/**
+ * Remove a signal handler. Signals arriving afterwards go back to the
+ * pre-registration buffer, so a later `setHandler` still receives them. This is
+ * what lets a consumer be scoped to a block instead of to the whole workflow.
+ */
+export function clearHandler(signalDef: SignalDef): void {
+  getContext().signalHandlers.delete(signalDef.name);
+}
+
+/**
+ * Reserve a signal name for one consumer, failing loudly if it is already taken.
+ * Only one handler exists per name, so a second registration would silently
+ * replace the first and the original consumer would simply stop receiving —
+ * a bug with no symptom at the point it is introduced.
+ */
+export function claimSignal(signalDef: SignalDef): void {
+  if (getContext().signalHandlers.has(signalDef.name)) {
+    throw new Error(
+      `signal '${signalDef.name}' already has a consumer — a signal is consumed ` +
+        `by one handler or one stream at a time; close the existing one first`,
+    );
+  }
 }

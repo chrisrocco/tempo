@@ -59,7 +59,19 @@ export {
   workflowInfo,
   type WorkflowInfo,
 } from './core/workflow_api';
-export { defineSignal, setHandler, type SignalDef } from './core/signals';
+export {
+  defineSignal,
+  setHandler,
+  clearHandler,
+  type SignalDef,
+} from './core/signals';
+export {
+  signalStream,
+  firstSignal,
+  background,
+  type StreamOptions,
+  type Branch,
+} from './core/signal_stream';
 export { condition } from './core/condition';
 export { CancelledFailure } from './core/errors';
 
