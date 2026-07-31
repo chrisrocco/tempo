@@ -39,7 +39,19 @@ export function createWorkflowWorker(
       continueAsNewSuggested: boolean,
     ): Promise<WorkflowTaskResult> {
       const fn = registry.get(name);
-      if (!fn) throw new Error(`no workflow registered as ${name}`);
+      // Report this as a failed task rather than throwing. A throw escapes to the
+      // poll loop, which cannot complete the task, so the lease expires and the
+      // task redelivers — forever, while the client waits on an execution that
+      // never settles. Failing the execution is both terminal and diagnosable,
+      // and mirrors how a missing *activity* is reported (activity_worker).
+      if (!fn)
+        return {
+          done: false,
+          result: undefined,
+          failed: true,
+          failure: new Error(`no workflow registered as ${name}`),
+          commands: [],
+        };
       const ctx = createContext(args, history, continueAsNewSuggested);
       await replay(ctx, fn);
       return {

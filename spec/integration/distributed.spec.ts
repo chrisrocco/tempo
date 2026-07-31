@@ -156,6 +156,27 @@ describe('distributed — real server process over RPC', () => {
     }
   }, 30000);
 
+  // A workflow name the worker does not have is ordinary user error (a typo), so
+  // it must settle the execution rather than wedge the worker. Before this was a
+  // failed task result, replayTask threw, the task could never be completed, and
+  // the lease redelivered it forever while the client waited on `running`.
+  it('fails an execution whose workflow is not registered, rather than retrying forever', async () => {
+    const { url, proc: server } = await spawnServer();
+    const worker = spawnMain(WORKER, { TEMPO_SERVER_URL: url });
+    try {
+      await waitForLine(worker, /WORKER_READY/);
+
+      const service = remote(url);
+      const { workflowId } = service.start('not-a-workflow');
+      await expectAsync(service.getResult(workflowId)).toBeRejectedWithError(
+        /no workflow registered as not-a-workflow/,
+      );
+    } finally {
+      await kill(worker);
+      await kill(server);
+    }
+  }, 30000);
+
   // How `tempo deploy` interrogates a built binary: it reports what it contains
   // and exits, without connecting to a server (none is running here).
   it('reports its workflows and activities under --describe, without connecting', async () => {

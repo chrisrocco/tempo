@@ -32,6 +32,10 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 export interface RemoteServiceOptions {
   /** How often getResult/pollers back off when there's nothing yet. */
   pollIntervalMs?: number;
@@ -100,7 +104,18 @@ export function createRemoteService(
       token: TaskToken,
       result: WorkflowTaskResult,
     ): Promise<void> {
-      await call({ method: 'completeWorkflowTask', token, result });
+      // An Error does not survive JSON — `JSON.stringify(new Error('x'))` is
+      // `{}`, so the client would see "[object Object]" instead of the reason a
+      // workflow failed. Flatten it to its message here, at the wire boundary,
+      // rather than in the worker: LocalService hands the failure over in-process
+      // and callers there expect the original Error.
+      await call({
+        method: 'completeWorkflowTask',
+        token,
+        result: result.failed
+          ? { ...result, failure: errorMessage(result.failure) }
+          : result,
+      });
     },
     async pollActivityTask(): Promise<LeasedActivityTask | undefined> {
       return (

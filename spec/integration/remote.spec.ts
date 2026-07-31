@@ -85,6 +85,25 @@ describe('distributed — client + workers over RPC', () => {
     }
   });
 
+  // A workflow that throws must reach the client as its own message. The failure
+  // crosses the wire as JSON, where an `Error` would serialize to `{}` and arrive
+  // as "[object Object]" — so what travels has to be the message itself.
+  it('surfaces a failing workflow to the client with its message intact', async () => {
+    const h = await startHarness();
+    try {
+      h.registerWorkflow('boom', async () => {
+        throw new Error('kaboom');
+      });
+
+      const { workflowId } = h.service.start('boom');
+      await expectAsync(h.service.getResult(workflowId)).toBeRejectedWithError(
+        /kaboom/,
+      );
+    } finally {
+      await h.teardown();
+    }
+  });
+
   it('delivers a signal that unblocks a condition, over the wire', async () => {
     const h = await startHarness();
     try {
