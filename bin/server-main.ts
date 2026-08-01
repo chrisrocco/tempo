@@ -9,6 +9,9 @@
  *                      `resume()` running executions on boot. If unset, in-memory
  *                      (fast, non-durable) — the default used by tests.
  *   ACTIVITY_LEASE_MS  activity-task lease timeout (short values force redelivery).
+ *                      Must exceed the largest `startToCloseTimeoutMs` any activity
+ *                      sets, or the lease redelivers the task before its own
+ *                      deadline is reached and the timeout never gets to decide.
  *
  * ## Operational notes
  *

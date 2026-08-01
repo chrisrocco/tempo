@@ -12,6 +12,13 @@
  * for a seq that already has a terminal event (see `server_core`). Activity **side
  * effects** are the author's problem — use an idempotency key. The framework
  * guarantees at-least-once; exactly-once effects are out of scope by design.
+ *
+ * Lease expiry is not the only way an attempt ends. An activity carrying
+ * `startToCloseTimeoutMs` is given up on at its deadline, and the server `complete`s
+ * the token then — deliberately acking work that never finished, so this queue
+ * does not redeliver it into a second concurrent run. From here that is
+ * indistinguishable from a normal ack, which is the point: the queue delivers and
+ * expires, and the server owns every policy about when an attempt is over.
  */
 
 import type {

@@ -216,7 +216,7 @@ Two consequences fall out and are now part of T1:
       it, and a spec covers the case `cancel` cannot reach.
 - [x] **T2:** `tempo describe <id>` prints status, history, and what the execution
       is parked on; `tempo list` enumerates executions with status.
-- [ ] **T3:** an activity exceeding its start-to-close timeout is failed by the
+- [x] **T3:** an activity exceeding its start-to-close timeout is failed by the
       server rather than left to duplicate on lease expiry; a spec asserts one
       run, not two.
 - [ ] `npm run typecheck`, `npm test`, `npm run lint`, `npm run format:check` clean.

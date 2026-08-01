@@ -39,20 +39,23 @@ the shape it does.
 Each row names the phase that owns the fix. The plan lives there; the consequence
 and the interim mitigation live here, so neither repeats the other.
 
-| #   | Blocker                              | Consequence                                                                                                                                                                                                                                                  | Mitigation today                                                                                                                                     | Fix owned by                   |
-| --- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| 1   | No activity timeout or heartbeat     | A lease expires on elapsed time alone, so an activity slower than `ACTIVITY_LEASE_MS` (global, default 30s) is redelivered and runs **concurrently** with the attempt still in flight, once per lease period. Two activity replicas is enough to trigger it. | Keep activities well under the lease; raise `ACTIVITY_LEASE_MS`, at the cost of slower crash detection for everything else; make effects idempotent. | Phase 6                        |
-| 2   | Poison tasks wedge an execution      | Any replay that throws — a workflow bug, a nondeterminism error — leaves a task that cannot be completed, so the lease redelivers it forever. `getResult` never returns and the only signal is stderr backoff.                                               | None. Detect by watching for one execution replaying endlessly.                                                                                      | Phase 6                        |
-| 3   | No workflow versioning               | Deploying changed workflow code while executions are in flight diverges replay from history, which lands in blocker 2.                                                                                                                                       | Drain in-flight executions before deploying a changed workflow.                                                                                      | Unphased (needs design)        |
-| 4   | No auth or TLS; single server        | The RPC starts, signals, and cancels arbitrary workflows unauthenticated; the loopback bind is the only thing containing it. The server is also a single point of failure and a single writer.                                                               | Keep everything on one trusted host; do not widen the bind without a private network.                                                                | Unphased (auth) / Phase 9 (HA) |
-| 5   | No metrics or tracing                | Per-execution state is now inspectable (`tempo describe` / `list`), but queue depth, task latency, and history size are unmeasured, so nothing aggregates across executions or alerts.                                                                       | `tempo describe` for one execution; the `.jsonl` logs under `DATA_DIR` for the rest.                                                                 | Phase 7 (inspection landed)    |
-| 6   | Retry state is not durable           | Retry counters live in the activity worker's memory, so a worker lost mid-backoff restarts attempts at 0 on redelivery — `maximumAttempts` is best-effort under worker loss.                                                                                 | Assume more attempts than configured; keep activities idempotent.                                                                                    | Phase 7                        |
-| 7   | Generated ids can collide on restart | `LocalService`/`ServerHost` counters restart at 0, so a fresh child id can collide with a resumed one.                                                                                                                                                       | Pass explicit `workflowId`s.                                                                                                                         | Unphased                       |
+| #   | Blocker                              | Consequence                                                                                                                                                                                                                                                                                                        | Mitigation today                                                                      | Fix owned by                   |
+| --- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- | ------------------------------ |
+| 1   | No activity heartbeat                | An activity that sets no `startToCloseTimeoutMs` is still redelivered on lease expiry and runs **concurrently** with the attempt in flight. With one set the engine bounds the attempt, but without heartbeats it still cannot tell a slow worker from a dead one, so a long honest attempt cannot hold its claim. | Set `startToCloseTimeoutMs` (below `ACTIVITY_LEASE_MS`); keep effects idempotent.     | Phase 6 (timeout landed)       |
+| 2   | Nothing alerts on a wedged execution | A replay that throws no longer hides: the failure is counted, backed off, reported by `describe`, fixable by redeploy, and endable with `terminate`. But discovering it still requires someone to look — `getResult` waits indefinitely by design, and no alert fires.                                             | `tempo describe` / `list`; `terminate` to end one.                                    | Phase 7 (handling landed)      |
+| 3   | No workflow versioning               | Deploying changed workflow code while executions are in flight diverges replay from history, which lands in blocker 2.                                                                                                                                                                                             | Drain in-flight executions before deploying a changed workflow.                       | Unphased (needs design)        |
+| 4   | No auth or TLS; single server        | The RPC starts, signals, and cancels arbitrary workflows unauthenticated; the loopback bind is the only thing containing it. The server is also a single point of failure and a single writer.                                                                                                                     | Keep everything on one trusted host; do not widen the bind without a private network. | Unphased (auth) / Phase 9 (HA) |
+| 5   | No metrics or tracing                | Per-execution state is now inspectable (`tempo describe` / `list`), but queue depth, task latency, and history size are unmeasured, so nothing aggregates across executions or alerts.                                                                                                                             | `tempo describe` for one execution; the `.jsonl` logs under `DATA_DIR` for the rest.  | Phase 7 (inspection landed)    |
+| 6   | Retry state is not durable           | Retry counters live in the activity worker's memory, so a worker lost mid-backoff restarts attempts at 0 on redelivery — `maximumAttempts` is best-effort under worker loss.                                                                                                                                       | Assume more attempts than configured; keep activities idempotent.                     | Phase 7                        |
+| 7   | Generated ids can collide on restart | `LocalService`/`ServerHost` counters restart at 0, so a fresh child id can collide with a resumed one.                                                                                                                                                                                                             | Pass explicit `workflowId`s.                                                          | Unphased                       |
 
-Blockers 1, 2, and 6 reduce to one missing capability: **the server keeps no
-account of attempts.** It cannot tell a worker that is slow from one that is gone,
-nor a task that is failing from one still in flight — a failed replay is not even
-reported to it. Scope them together and the fix is one mechanism, not three.
+Blockers 1, 2, and 6 were one missing capability — **the server kept no account of
+attempts** — and Phase 6 built it: failures are reported, counted durably, backed
+off, and bounded. What is left of each is what that account cannot supply on its
+own. Blocker 6 needs the retry _decision_ moved server-side to use it (Phase 7);
+blocker 1 needs a heartbeat, so a long honest attempt can hold its claim rather
+than merely being cut off at a deadline; and blocker 2 is now a question of
+noticing rather than surviving, which is Phase 7's metrics.
 
 ## Phases 6–9
 
@@ -104,11 +107,15 @@ happen today (a poison task, a hung activity) present identically as silence.
   ([`src/server/pending_work.ts`](src/server/pending_work.ts)) — so what an
   operator is told and what resume actually does cannot drift. Closes the
   history-inspection half of blocker 5; metrics and tracing remain in Phase 7.
-- **Activity start-to-close timeouts** (blocker 1), then heartbeats. The timeout is
-  the part that ends the duplicate-concurrent-run behavior; heartbeats can follow
-  inside the phase. See
-  [`src/worker/activity_worker.ts`](src/worker/activity_worker.ts) for what the gap
-  costs today.
+- ~~**Activity start-to-close timeouts**~~ — **landed** (blocker 1). Opt-in via
+  `ActivityOptions.startToCloseTimeoutMs`: at the deadline the server fails the
+  attempt _and acks the task_, so the lease cannot later redeliver it into a
+  second concurrent run — the ack is the half that turns a timeout into a bound.
+  A late report from the abandoned worker is dropped by the completion dedup.
+  Left unset, the old at-least-once redelivery stands, which is still the right
+  default for a crashed worker. **Heartbeats remain unbuilt**, so the server still
+  cannot distinguish a slow worker from a dead one; a long, honest attempt has no
+  way to keep its claim, which is what a heartbeat would buy.
 - **Structured lifecycle log**, replacing ad-hoc stderr writes — no new dependency,
   and it is the source Phase 7 aggregates.
 

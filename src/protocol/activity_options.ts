@@ -25,5 +25,25 @@ export interface RetryPolicy {
 
 export interface ActivityOptions {
   retry?: RetryPolicy;
-  // startToCloseTimeoutMs, heartbeatTimeoutMs, taskQueue — later phases.
+  /**
+   * How long a single attempt may run before the server gives up on it, measured
+   * from when a worker polls the task. Unset means unbounded.
+   *
+   * Setting it changes what happens when an attempt overruns, and that is the
+   * whole point. **Unset**, the lease eventually expires and the task is
+   * redelivered — so a slow activity ends up running *concurrently* with the
+   * attempt already in flight, once per lease period. **Set**, the server fails
+   * the attempt at the deadline and stops redelivering it, so the workflow sees a
+   * timeout instead of the engine quietly running the work twice.
+   *
+   * It does not stop the worker. Nothing here can — there is no heartbeat, so the
+   * server cannot tell a slow worker from a dead one, and cannot reach into one
+   * that is still going. The guarantee is about what the *engine* does: one
+   * attempt is dispatched, one outcome is recorded.
+   *
+   * Must be shorter than the server's `ACTIVITY_LEASE_MS`, or the lease expires
+   * first and redelivers before this deadline is reached.
+   */
+  startToCloseTimeoutMs?: number;
+  // heartbeatTimeoutMs, taskQueue — later phases.
 }

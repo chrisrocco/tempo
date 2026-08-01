@@ -28,7 +28,8 @@ on npm and makes no stability promises — clone it, read it, run it.
 
 ## What it does
 
-- **Activities** with typed `proxyActivities`, retry policies, and backoff
+- **Activities** with typed `proxyActivities`, retry policies, backoff, and
+  optional start-to-close timeouts
 - **Timers** — real wall-clock, durable, re-armed from history on restart
 - **Signals** and **`condition`** — event-driven waiting, no polling
 - **Child workflows**, both blocking and fire-and-forget
@@ -243,6 +244,7 @@ understand what the engine does.
 | [`server/concurrency`](spec/server/concurrency.spec.ts)               | Version CAS, lease expiry, lease-race rejection, late-ack dedup       |
 | [`server/pending_work`](spec/server/pending_work.spec.ts)             | What an execution still awaits — shared by recovery and `describe`    |
 | [`server/task_failure`](spec/server/task_failure.spec.ts)             | Poison tasks: counted, backed off, never settled, fixed by redeploy   |
+| [`server/activity_timeout`](spec/server/activity_timeout.spec.ts)     | Start-to-close bounds an attempt without duplicating the work         |
 | [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
 | [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
 | [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |

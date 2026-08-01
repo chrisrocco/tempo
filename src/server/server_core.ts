@@ -171,6 +171,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     TaskToken,
     { workflowId: string; version: number }
   >();
+  // Start-to-close deadlines for attempts currently out with a worker, so a
+  // completion can cancel the one that belongs to it.
+  const startToCloseTimers = new Map<
+    TaskToken,
+    ReturnType<typeof setTimeout>
+  >();
 
   function recordChild(parentId: string, seq: number, childId: string): void {
     let kids = childrenByParent.get(parentId);
@@ -527,6 +533,37 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     wakeAfter(lease.workflowId, workflowTaskBackoffMs(failures));
   }
 
+  /**
+   * Start-to-close: the attempt is now running, so give up on it at the deadline.
+   *
+   * The server cannot stop a worker mid-activity — there is no heartbeat and no
+   * channel back into a running attempt. What it can do is stop *waiting*, record
+   * the outcome, and take the task out of the queue so the lease does not later
+   * redeliver it into a second concurrent run. That ack is the part that turns a
+   * timeout into a bound rather than just an early failure.
+   */
+  function armStartToClose(task: LeasedActivityTask, timeoutMs: number): void {
+    const timer = setTimeout(() => {
+      const lease = activityLeases.get(task.token);
+      if (!lease) return; // completed in time
+      activityLeases.delete(task.token);
+      activityTaskQueue.complete(task.token); // no redelivery for this attempt
+      void reportActivityResult(lease.workflowId, lease.seq, {
+        ok: false,
+        error: `activity ${task.name} timed out after ${timeoutMs}ms`,
+      });
+    }, timeoutMs);
+    timer.unref?.(); // a pending deadline must not hold the process open
+    startToCloseTimers.set(task.token, timer);
+  }
+
+  function clearStartToClose(token: TaskToken): void {
+    const timer = startToCloseTimers.get(token);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    startToCloseTimers.delete(token);
+  }
+
   async function pollActivityTask(): Promise<LeasedActivityTask | undefined> {
     const task = activityTaskQueue.poll();
     if (!task) return undefined;
@@ -534,6 +571,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowId: task.workflowId,
       seq: task.seq,
     });
+    // Armed on poll, not on dispatch: start-to-close bounds the attempt, and the
+    // attempt begins when a worker takes the task, not when it was queued.
+    const timeoutMs = task.options.startToCloseTimeoutMs;
+    if (timeoutMs !== undefined && timeoutMs > 0)
+      armStartToClose(task, timeoutMs);
     return task;
   }
 
@@ -542,6 +584,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     result: ActivityResult,
   ): Promise<void> {
     const lease = activityLeases.get(token);
+    clearStartToClose(token); // this attempt is over, whatever it reported
     activityTaskQueue.complete(token);
     // Nothing sweeps this map when the queue expires a lease, so an expired
     // token still resolves here — the redelivery case is caught downstream, by

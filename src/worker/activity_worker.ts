@@ -5,20 +5,27 @@
  * the server invokes it directly; in the distributed form `worker/worker_loops`
  * polls a leased task, calls it once, and reports the outcome.
  *
- * **There is no heartbeat, and no start-to-close timeout.** A lease expires on
- * elapsed time alone, so the queue cannot tell a crashed worker from a slow one:
- * an activity still running when its lease expires is redelivered and runs
- * *concurrently* with the attempt already in flight, once per lease period until
- * one of them finishes. Only the first completion reaches history (the server
- * drops the rest — see `server/server_core.reportActivityResult`), but the side
- * effects all really happen, which is the sharp edge behind the at-least-once
- * contract in `server/ports/task_queue`.
+ * **There is still no heartbeat**, so the server cannot tell a crashed worker
+ * from a slow one, and cannot reach into an attempt that is still running. What
+ * it can do is decide when to stop waiting, and that decision is now the author's
+ * to make:
  *
- * Two consequences worth designing around: keep an activity's runtime well under
- * `ACTIVITY_LEASE_MS` (a single global on the server — there is no per-activity
- * lease), and make its effects idempotent. Heartbeats and per-activity timeouts
- * are the planned fix (ROADMAP, "finishing distribution"); `ActivityOptions`
- * reserves the names but implements neither.
+ * - **`startToCloseTimeoutMs` unset (the default).** The lease expires on elapsed
+ *   time alone and the task is redelivered, so an activity slower than
+ *   `ACTIVITY_LEASE_MS` runs *concurrently* with the attempt already in flight,
+ *   once per lease period until one finishes. Only the first completion reaches
+ *   history (`server_core.reportActivityResult` drops the rest), but every side
+ *   effect really happens. This is the at-least-once contract in
+ *   `server/ports/task_queue` at its sharpest.
+ * - **`startToCloseTimeoutMs` set.** At the deadline the server fails the attempt
+ *   and takes the task out of the queue, so no second worker picks it up. The
+ *   abandoned worker may still be running and may still report; that late
+ *   completion is dropped, because the seq already carries a terminal event.
+ *
+ * Either way, idempotent effects remain the author's responsibility — a timeout
+ * bounds what the *engine* does, not what the activity already did. Heartbeats
+ * (which would let a long, honest attempt keep its claim) are still unbuilt; see
+ * ROADMAP Phase 6.
  */
 
 import type { ActivityResult, ActivityTask } from '../protocol';
