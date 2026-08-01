@@ -237,7 +237,7 @@ understand what the engine does.
 | [`integration/remote`](spec/integration/remote.spec.ts)               | Client → RemoteService → HTTP → server → workers, one process         |
 | [`integration/distributed`](spec/integration/distributed.spec.ts)     | Real spawned processes; crash redelivery / at-least-once              |
 | [`integration/cli`](spec/integration/cli.spec.ts)                     | The `tempo` CLI end to end as a subprocess                            |
-| [`server/concurrency`](spec/server/concurrency.spec.ts)               | Optimistic version CAS, lease expiry, lease-race rejection            |
+| [`server/concurrency`](spec/server/concurrency.spec.ts)               | Version CAS, lease expiry, lease-race rejection, late-ack dedup       |
 | [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
 | [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
 | [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |
@@ -258,8 +258,8 @@ npm run lint
 
 ## Status
 
-Working and green: 133 specs, `tsc --noEmit` clean, boundary checker clean. The
-full programming model runs in all three modes above.
+Working and green: the suite, `tsc --noEmit`, and the boundary checker all pass.
+The full programming model runs in all three modes above.
 
 Not built: server HA, activity heartbeats and start-to-close timeouts, the
 workflow-worker sticky cache, cross-process timer-sweep failover, and the
