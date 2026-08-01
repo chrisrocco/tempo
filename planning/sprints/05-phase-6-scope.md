@@ -120,9 +120,9 @@ unaddressed cause after a sprint themed on stuck executions. Full heartbeats can
 stay deferred; the timeout is the part that ends the duplicate-concurrent-run
 behavior.
 
-**Stretch — structured event log.** Replace ad-hoc stderr writes with one
-structured line per lifecycle event. No new dependency, and it is what the
-deferred metrics work will aggregate later.
+**Stretch — structured event log.** _Landed._ One JSON Lines event per lifecycle
+fact, through an injected `Logger` port so the sink is swappable. No new
+dependency, and it is what the deferred metrics work aggregates later.
 
 ## The dead-letter question, settled
 

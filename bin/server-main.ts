@@ -13,6 +13,11 @@
  *                      sets, or the lease redelivers the task before its own
  *                      deadline is reached and the timeout never gets to decide.
  *
+ * Lifecycle events are written to **stderr as JSON Lines** — one object per
+ * event, `{ts, event, ...fields}` (see `server/json_logger.ts`). stdout carries
+ * only the readiness line. Nothing aggregates or alerts on these yet; they are
+ * the source a metrics backend consumes later without any call site changing.
+ *
  * ## Operational notes
  *
  * - **Binds `127.0.0.1`.** Right for a single VM with everything co-located. To
@@ -31,6 +36,7 @@
 
 import type { AddressInfo } from 'node:net';
 import { FileHistoryStore } from '../src';
+import { createJsonLogger } from '../src/server';
 import { createRpcServer, createServerHost } from '../src/services';
 
 const port = process.env.PORT ? Number(process.env.PORT) : 0;
@@ -43,7 +49,12 @@ async function main(): Promise<void> {
   // Durable when DATA_DIR is set (a single-writer lockfile guards the dir);
   // otherwise in-memory. `undefined` lets createServerHost default the store.
   const store = dataDir ? await FileHistoryStore.open(dataDir) : undefined;
-  const host = createServerHost(store, { activityLeaseMs });
+  // Structured lifecycle events on stderr; stdout stays reserved for the
+  // readiness line supervisors and the specs parse.
+  const host = createServerHost(store, {
+    activityLeaseMs,
+    log: createJsonLogger(),
+  });
   if (store) await host.resume(); // re-arm timers, re-dispatch pending work, re-drive running execs
 
   const server = createRpcServer(host);

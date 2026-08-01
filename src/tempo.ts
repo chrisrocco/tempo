@@ -22,6 +22,7 @@
  */
 
 import type { WorkflowFn } from './core';
+import { createJsonLogger } from './server';
 import { createRemoteService } from './services';
 import {
   createActivityRegistry,
@@ -137,18 +138,35 @@ export function startWorker(options: StartWorkerOptions): Worker {
     process.env.TEMPO_SERVER_URL ?? DEFAULT_SERVER_URL,
   );
 
+  // The worker's own lifecycle log, in the same JSON Lines shape the server
+  // emits, so one pipeline reads both. A poll failure is the fault most likely
+  // to matter here — an unreachable server makes a worker look healthy to its
+  // supervisor while doing nothing (planning/tickets/02).
+  const log = createJsonLogger();
+  const onError = (error: unknown, consecutive: number): void => {
+    log('worker.poll_failed', {
+      worker: options.name,
+      consecutive,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  };
+
   const loops: WorkerLoop[] = [];
   if (roles.includes('workflow')) {
     const registry = createWorkflowRegistry();
     for (const [exported, fn] of workflows)
       registry.set(exported, fn as WorkflowFn);
-    loops.push(runWorkflowWorker(service, createWorkflowWorker(registry)));
+    loops.push(
+      runWorkflowWorker(service, createWorkflowWorker(registry), { onError }),
+    );
   }
   if (roles.includes('activity')) {
     const registry = createActivityRegistry();
     for (const [exported, fn] of activities)
       registry.set(exported, fn as ActivityFn);
-    loops.push(runActivityWorker(service, createActivityWorker(registry)));
+    loops.push(
+      runActivityWorker(service, createActivityWorker(registry), { onError }),
+    );
   }
 
   let stopping: Promise<void> | undefined;

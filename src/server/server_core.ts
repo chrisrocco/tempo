@@ -75,6 +75,7 @@ import type { WorkflowTaskQueue } from './ports/workflow_task_queue';
 import type { TimerService } from './ports/timer_service';
 import { completedSeqs, pendingWork } from './pending_work';
 import { workflowTaskBackoffMs } from './retry_policy';
+import { silentLogger, type Logger } from './ports/logger';
 
 const CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4;
 
@@ -89,6 +90,8 @@ export interface ServerCoreDeps {
   kickWorkflowWorker(): void;
   /** Nudge the (async, in-proc) activity worker to drain the activity-task queue. */
   kickActivityWorker(): void;
+  /** Where lifecycle events go. Defaults to silence — see `ports/logger`. */
+  log?: Logger;
 }
 
 export interface ServerCore {
@@ -157,6 +160,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     launch,
     kickWorkflowWorker,
     kickActivityWorker,
+    log = silentLogger,
   } = deps;
 
   const childrenByParent = new Map<string, Map<number, string>>();
@@ -167,9 +171,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     TaskToken,
     { workflowId: string; seq: number }
   >();
+  // `polledAt` exists purely so a completion can report how long the task was out
+  // with a worker — the task-latency number Phase 7 wants to aggregate.
   const workflowLeases = new Map<
     TaskToken,
-    { workflowId: string; version: number }
+    { workflowId: string; version: number; polledAt: number }
   >();
   // Start-to-close deadlines for attempts currently out with a worker, so a
   // completion can cancel the one that belongs to it.
@@ -260,6 +266,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         args: cmd.args,
         options: cmd.options,
       });
+      log('activity.scheduled', {
+        workflowId,
+        seq: cmd.seq,
+        name: cmd.name,
+      });
       kickActivityWorker();
     } else if (cmd.type === 'startTimer') {
       const fireAt = Date.now() + cmd.ms;
@@ -315,12 +326,23 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       await historyStore.setStatus(workflowId, 'completed', {
         result: result.result,
       });
+      log('execution.settled', {
+        workflowId,
+        status: 'completed',
+        historyLength: rec.history.length,
+      });
       await notifyParentOfTerminal(workflowId);
       return;
     }
     if (result.failed) {
       await historyStore.setStatus(workflowId, 'failed', {
         failure: result.failure,
+      });
+      log('execution.settled', {
+        workflowId,
+        status: 'failed',
+        historyLength: rec.history.length,
+        failure: errorMessage(result.failure),
       });
       await notifyParentOfTerminal(workflowId);
       return;
@@ -351,13 +373,22 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // can absorb them: replay cannot, because the waiter is deleted when the
     // first completion resolves, so a second one is a history event for an
     // unknown seq and `core/apply_event` throws nondeterminism on it.
-    if (completedSeqs(rec.history).activities.has(seq)) return;
+    if (completedSeqs(rec.history).activities.has(seq)) {
+      log('activity.duplicate_dropped', { workflowId, seq });
+      return;
+    }
     await appendEvent(
       workflowId,
       result.ok
         ? { type: 'activityCompleted', seq, result: result.result }
         : { type: 'activityFailed', seq, error: result.error },
     );
+    log('activity.settled', {
+      workflowId,
+      seq,
+      ok: result.ok,
+      ...(result.ok ? {} : { error: result.error }),
+    });
     wake(workflowId);
   }
 
@@ -390,6 +421,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // an ordinary close does today.
     await historyStore.setStatus(workflowId, 'terminated', {
       failure: new Error(reason),
+    });
+    log('execution.settled', {
+      workflowId,
+      status: 'terminated',
+      historyLength: rec.history.length,
+      reason,
+      taskFailures: rec.taskFailures,
     });
     await notifyParentOfTerminal(workflowId);
     // Any backoff timer still pending is harmless: the wake it produces finds a
@@ -478,6 +516,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowLeases.set(leased.token, {
         workflowId: leased.workflowId,
         version: rec.version,
+        polledAt: Date.now(),
       });
       return {
         token: leased.token,
@@ -504,10 +543,21 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // discarded — safe, because replay commits no external effects.
       if (rec && rec.status === 'running' && rec.version === lease.version) {
         await applyWorkflowTaskResult(lease.workflowId, result);
+        log('workflow_task.completed', {
+          workflowId: lease.workflowId,
+          durationMs: Date.now() - lease.polledAt,
+          commands: result.commands.length,
+          historyLength: rec.history.length,
+        });
         // A task got through, so whatever was failing is not failing now — start
         // the backoff schedule over rather than carrying a stale count forward.
         if (rec.taskFailures > 0)
           await historyStore.clearTaskFailures(lease.workflowId);
+      } else {
+        log('workflow_task.discarded', {
+          workflowId: lease.workflowId,
+          reason: 'execution advanced while the task was out',
+        });
       }
     }
     workflowTaskQueue.complete(token);
@@ -530,7 +580,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       lease.workflowId,
       reason,
     );
-    wakeAfter(lease.workflowId, workflowTaskBackoffMs(failures));
+    const backoffMs = workflowTaskBackoffMs(failures);
+    // The wedged-execution signal. Nothing alerts on it yet (Phase 7), but a
+    // consecutive count climbing in the log is the thing to alert on.
+    log('workflow_task.failed', {
+      workflowId: lease.workflowId,
+      reason,
+      consecutiveFailures: failures,
+      retryInMs: backoffMs,
+      durationMs: Date.now() - lease.polledAt,
+    });
+    wakeAfter(lease.workflowId, backoffMs);
   }
 
   /**
@@ -548,6 +608,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       if (!lease) return; // completed in time
       activityLeases.delete(task.token);
       activityTaskQueue.complete(task.token); // no redelivery for this attempt
+      log('activity.timed_out', {
+        workflowId: lease.workflowId,
+        seq: lease.seq,
+        name: task.name,
+        timeoutMs,
+      });
       void reportActivityResult(lease.workflowId, lease.seq, {
         ok: false,
         error: `activity ${task.name} timed out after ${timeoutMs}ms`,

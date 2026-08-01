@@ -39,6 +39,8 @@ on npm and makes no stability promises — clone it, read it, run it.
 - **Crash recovery** — kill the server mid-workflow, restart, and it continues
 - **Inspection** — `tempo list`, and `tempo describe` for what an execution is
   waiting on, derived from history rather than stored
+- **Structured lifecycle log** — JSON Lines on stderr, one event per fact, so a
+  run can be aggregated without parsing prose
 
 The same workflow code runs three ways, with no changes:
 
@@ -245,6 +247,7 @@ understand what the engine does.
 | [`server/pending_work`](spec/server/pending_work.spec.ts)             | What an execution still awaits — shared by recovery and `describe`    |
 | [`server/task_failure`](spec/server/task_failure.spec.ts)             | Poison tasks: counted, backed off, never settled, fixed by redeploy   |
 | [`server/activity_timeout`](spec/server/activity_timeout.spec.ts)     | Start-to-close bounds an attempt without duplicating the work         |
+| [`server/logging`](spec/server/logging.spec.ts)                       | Lifecycle events, their fields, and silence by default                |
 | [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
 | [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
 | [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |

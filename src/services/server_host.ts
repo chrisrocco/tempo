@@ -31,9 +31,11 @@ import {
   MemoryWorkflowTaskQueue,
   createServerCore,
   describeExecution,
+  silentLogger,
   summarizeExecution,
   MemoryHistoryStore,
   type HistoryStore,
+  type Logger,
 } from '../server';
 
 function errorMessage(e: unknown): string {
@@ -75,6 +77,8 @@ export interface ServerHostOptions {
   workflowLeaseMs?: number;
   /** Lease timeout for activity tasks (ms). Default 30s. A short value forces redelivery. */
   activityLeaseMs?: number;
+  /** Where lifecycle events go. Defaults to silence; `bin/server-main` supplies a JSON logger. */
+  log?: Logger;
 }
 
 export function createServerHost(
@@ -86,6 +90,7 @@ export function createServerHost(
   );
   const activityTaskQueue = new MemoryTaskQueue(options.activityLeaseMs);
   const timerService = new MemoryTimerService();
+  const log = options.log ?? silentLogger;
   let counter = 0;
 
   const core = createServerCore({
@@ -97,6 +102,7 @@ export function createServerHost(
     // No in-proc workers to nudge — remote workers poll on their own cadence.
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
+    log,
   });
   timerService.recover();
 
@@ -105,9 +111,10 @@ export function createServerHost(
     name: string,
     args: unknown[],
   ): void {
-    void historyStore
-      .create(workflowId, name, args)
-      .then(() => workflowTaskQueue.enqueue(workflowId));
+    void historyStore.create(workflowId, name, args).then(() => {
+      workflowTaskQueue.enqueue(workflowId);
+      log('execution.started', { workflowId, name });
+    });
   }
 
   function launch(name: string, args: unknown[]): string {
