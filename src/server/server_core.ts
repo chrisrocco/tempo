@@ -97,7 +97,11 @@ export interface ServerCore {
     workflowId: string,
     result: WorkflowTaskResult,
   ): Promise<void>;
-  /** The activity worker (in-proc) reports a finished activity: append + wake. */
+  /**
+   * The activity worker (in-proc) reports a finished activity: append + wake.
+   * Idempotent per seq — a second report for a seq that already has a terminal
+   * event is dropped, which is what makes at-least-once delivery harmless.
+   */
   reportActivityResult(
     workflowId: string,
     seq: number,
@@ -319,6 +323,14 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   ): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
+    // Activity delivery is at-least-once, so a seq can be reported twice: a lease
+    // expires, the task is redelivered and completed by a second worker, and the
+    // first worker — slow, not dead — acks afterwards. The first terminal event
+    // for the seq wins and the rest are dropped here. This is the only place that
+    // can absorb them: replay cannot, because the waiter is deleted when the
+    // first completion resolves, so a second one is a history event for an
+    // unknown seq and `core/apply_event` throws nondeterminism on it.
+    if (completedSeqs(rec.history).activities.has(seq)) return;
     await appendEvent(
       workflowId,
       result.ok
@@ -468,7 +480,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   ): Promise<void> {
     const lease = activityLeases.get(token);
     activityTaskQueue.complete(token);
-    if (!lease) return; // lease expired → task redelivered → this completer is stale
+    // Nothing sweeps this map when the queue expires a lease, so an expired
+    // token still resolves here — the redelivery case is caught downstream, by
+    // the completion dedup in `reportActivityResult`. `!lease` therefore means
+    // only a double-ack of the same token, or a token this server never issued.
+    if (!lease) return;
     activityLeases.delete(token);
     await reportActivityResult(lease.workflowId, lease.seq, result);
   }

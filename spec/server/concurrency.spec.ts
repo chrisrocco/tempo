@@ -1,9 +1,13 @@
 /**
  * @fileoverview
  * The distributed concurrency-control mechanisms, tested directly: optimistic
- * version CAS on the store, lease-expiry redelivery on both queues, and the two
+ * version CAS on the store, lease-expiry redelivery on both queues, the two
  * composing at the seam — a lease-race loser's append is rejected by the version
- * check. Driven against a headless server_core (no in-proc worker loops).
+ * check — and the activity-side equivalent, where a late ack from the worker
+ * whose lease expired is dropped by the server's completion dedup. Driven
+ * against a headless server_core (no in-proc worker loops); the last test drives
+ * replay by hand, because the guarantee it checks is that history stays
+ * replayable.
  */
 
 import type { WorkflowTaskResult } from '../../src';
@@ -15,6 +19,8 @@ import {
   VersionConflictError,
   createServerCore,
 } from '../../src/server';
+import { createWorkflowRegistry, createWorkflowWorker } from '../../src/worker';
+import { runActivity } from '../../src/workflow';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -120,5 +126,87 @@ describe('lease race resolved by the version check', () => {
     expect(
       rec!.history.filter((e) => e.type === 'activityScheduled').length,
     ).toBe(1);
+  });
+});
+
+describe('late activity ack after redelivery', () => {
+  it('drops the ack from the worker whose lease expired, leaving one completion event and a replayable history', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const workflowTaskQueue = new MemoryWorkflowTaskQueue();
+    const activityTaskQueue = new MemoryTaskQueue(10); // short lease to force redelivery
+    const core = createServerCore({
+      historyStore,
+      workflowTaskQueue,
+      activityTaskQueue,
+      timerService: new MemoryTimerService(),
+      launch: () => 'child',
+      kickWorkflowWorker: () => {},
+      kickActivityWorker: () => {},
+    });
+
+    // Two activities, so the workflow is still parked when the late ack lands.
+    // With a one-activity workflow a trailing duplicate is absorbed by accident:
+    // `replay` stops feeding events once the workflow is done, so it never
+    // reaches the event that would have thrown.
+    const registry = createWorkflowRegistry();
+    registry.set('doer', async () => {
+      const a = await runActivity<string>('work');
+      const b = await runActivity<string>('more');
+      return `${a}+${b}`;
+    });
+    const workflowWorker = createWorkflowWorker(registry);
+
+    // One turn of the crank the in-proc worker loop would do for us: claim the
+    // queued task, replay the real workflow over the recorded history, apply.
+    async function driveWorkflow(): Promise<void> {
+      const leased = workflowTaskQueue.poll();
+      if (!leased) return;
+      const task = await core.buildWorkflowTask(leased.workflowId);
+      if (task) {
+        const result = await workflowWorker.replayTask(
+          task.name,
+          task.args,
+          task.history,
+          task.continueAsNewSuggested,
+        );
+        await core.applyWorkflowTaskResult(leased.workflowId, result);
+      }
+      workflowTaskQueue.complete(leased.token);
+    }
+
+    await historyStore.create('wf', 'doer', []);
+    workflowTaskQueue.enqueue('wf');
+    await driveWorkflow(); // schedules 'work' (seq 0) and parks
+
+    const first = await core.pollActivityTask();
+    expect(first?.name).toBe('work');
+    await wait(25); // worker A's lease expires without an ack
+    const second = await core.pollActivityTask();
+    expect(second?.name).toBe('work'); // redelivered to worker B
+
+    await core.completeActivityTask(second!.token, { ok: true, result: 'w' });
+    await driveWorkflow(); // seq 0 resolves; the workflow schedules 'more'
+
+    // Worker A was not dead, only slow: its ack for seq 0 lands now, behind the
+    // `activityScheduled` for seq 1.
+    await core.completeActivityTask(first!.token, { ok: true, result: 'w' });
+
+    const mid = await historyStore.get('wf');
+    expect(
+      mid!.history.filter((e) => e.type === 'activityCompleted' && e.seq === 0)
+        .length,
+    ).toBe(1);
+
+    const more = await core.pollActivityTask();
+    expect(more?.name).toBe('more');
+    await core.completeActivityTask(more!.token, { ok: true, result: 'm' });
+
+    // A duplicate completion mid-history replays as `nondeterminism: history
+    // event for unknown seq 0` — the seq-0 waiter is gone by then — so running
+    // the execution out is what proves the late ack really was dropped.
+    await driveWorkflow();
+    const settled = await historyStore.get('wf');
+    expect(settled!.status).toBe('completed');
+    expect(settled!.result).toBe('w+m');
   });
 });

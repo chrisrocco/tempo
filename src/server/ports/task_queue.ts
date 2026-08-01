@@ -6,10 +6,12 @@
  * their side effects must be idempotent. `ActivityTask`/`LeasedActivityTask` live
  * in `protocol` because they are the shared server/worker contract.
  *
- * The workflow side dedups redelivery naturally: a duplicate completion for a seq
- * that is already resolved is discarded on replay. Activity **side effects** are
- * the author's problem — use an idempotency key. The framework guarantees
- * at-least-once; exactly-once effects are out of scope by design.
+ * Redelivery means a seq can be *reported* twice — the redelivered task acks, and
+ * then the original worker acks late. History is kept clean of that by the server,
+ * not by this port and not by replay: `reportActivityResult` drops a completion
+ * for a seq that already has a terminal event (see `server_core`). Activity **side
+ * effects** are the author's problem — use an idempotency key. The framework
+ * guarantees at-least-once; exactly-once effects are out of scope by design.
  */
 
 import type {
