@@ -10,7 +10,7 @@
  * model is documented by `spec/integration/local.spec.ts`.
  */
 
-import { createContext, replay } from '../../src/core';
+import { createContext, NondeterminismError, replay } from '../../src/core';
 import { runActivity, sleep } from '../../src/core';
 import type { HistoryEvent } from '../../src/protocol';
 
@@ -180,5 +180,100 @@ describe('core replay — the live edge', () => {
     });
 
     expect(ctx.result).toBe('caught: upstream exploded');
+  });
+});
+
+/**
+ * The branch-order divergence these checks exist for (planning/tickets/04). Seqs
+ * are assigned in call order, so two concurrent branches that swap order produce
+ * seqs whose meanings have swapped — and both are parked, so both resolve, each
+ * with the other's result. The completion-side check cannot see that; comparing
+ * markers against the commands actually issued can.
+ */
+describe('core replay — divergence between history and code', () => {
+  it('stops replay when a marker disagrees with the command issued at that seq', async () => {
+    // History from a run where the timer was created first; this code creates the
+    // activity first, so seq 0 means different things on each side.
+    const events: HistoryEvent[] = [
+      { type: 'timerStarted', seq: 0, fireAt: 1 },
+      { type: 'activityScheduled', seq: 1, name: 'a', args: [], options: {} },
+    ];
+    const ctx = createContext([], events);
+
+    await expectAsync(
+      replay(ctx, async () => {
+        await Promise.all([runActivity('a'), sleep(10)]);
+      }),
+    ).toBeRejectedWithError(NondeterminismError);
+  });
+
+  it('replays two concurrent branches whose order is unchanged', async () => {
+    const events: HistoryEvent[] = [
+      { type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {} },
+      { type: 'timerStarted', seq: 1, fireAt: 1 },
+    ];
+    const ctx = createContext([], events);
+
+    await expectAsync(
+      replay(ctx, async () => {
+        await Promise.all([runActivity('a'), sleep(10)]);
+      }),
+    ).toBeResolved();
+  });
+
+  /**
+   * The check rests on the workflow having issued seq N before the marker for N
+   * is applied. That holds because the server writes a marker only after
+   * receiving the command batch, so every event that drove the emission precedes
+   * it in history. Pinned rather than assumed — on the first task, where the
+   * command is issued during the initial synchronous run before any event is
+   * applied, and on a later one, where it is issued only after an earlier
+   * completion resumes the workflow.
+   */
+  it('validates a marker issued during the first synchronous run', async () => {
+    const events: HistoryEvent[] = [
+      { type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {} },
+    ];
+    const ctx = createContext([], events);
+
+    await expectAsync(
+      replay(ctx, async () => {
+        await runActivity('a');
+      }),
+    ).toBeResolved();
+  });
+
+  it('validates a marker for a command issued only after an earlier completion', async () => {
+    const events: HistoryEvent[] = [
+      {
+        type: 'activityScheduled',
+        seq: 0,
+        name: 'first',
+        args: [],
+        options: {},
+      },
+      { type: 'activityCompleted', seq: 0, result: 'ok' },
+      {
+        type: 'activityScheduled',
+        seq: 1,
+        name: 'second',
+        args: [],
+        options: {},
+      },
+    ];
+    const ctx = createContext([], events);
+
+    await replay(ctx, async () => {
+      await runActivity('first');
+      await runActivity('second');
+    });
+
+    expect(ctx.requested.get(1)).toEqual({
+      type: 'scheduleActivity',
+      seq: 1,
+      name: 'second',
+      args: [],
+      options: {},
+    });
   });
 });

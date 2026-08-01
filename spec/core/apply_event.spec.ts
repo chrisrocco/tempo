@@ -9,11 +9,13 @@ import {
   als,
   applyEvent,
   CancelledFailure,
+  NondeterminismError,
   createContext,
   defineSignal,
   setHandler,
 } from '../../src/core';
 import type { WorkflowContext } from '../../src/core';
+import type { Command } from '../../src/protocol';
 
 /** Park a fake waiter at `seq` and report how it settles. */
 function parkWaiter(ctx: WorkflowContext, seq: number) {
@@ -147,6 +149,141 @@ describe('core applyEvent — markers', () => {
       }),
     ).not.toThrow();
     expect(ctx.completions.size).toBe(0);
+  });
+});
+
+describe('core applyEvent — marker validation', () => {
+  /** Record what the workflow claims about a seq, as `issue` does on replay. */
+  function requested(ctx: WorkflowContext, cmd: Command): void {
+    ctx.requested.set(cmd.seq, cmd);
+  }
+
+  it('accepts a marker that matches the command issued at its seq', () => {
+    const ctx = createContext([], []);
+    requested(ctx, {
+      type: 'scheduleActivity',
+      seq: 0,
+      name: 'greet',
+      args: [],
+      options: {},
+    });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'activityScheduled',
+        seq: 0,
+        name: 'greet',
+        args: [],
+        options: {},
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a marker whose kind disagrees with the command at that seq', () => {
+    const ctx = createContext([], []);
+    requested(ctx, { type: 'startTimer', seq: 0, ms: 10 });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'activityScheduled',
+        seq: 0,
+        name: 'greet',
+        args: [],
+        options: {},
+      }),
+    ).toThrowError(NondeterminismError);
+  });
+
+  it('rejects a marker for a different activity than the one requested', () => {
+    const ctx = createContext([], []);
+    requested(ctx, {
+      type: 'scheduleActivity',
+      seq: 0,
+      name: 'charge',
+      args: [],
+      options: {},
+    });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'activityScheduled',
+        seq: 0,
+        name: 'refund',
+        args: [],
+        options: {},
+      }),
+    ).toThrowError(/seq 0.*activityScheduled refund.*scheduleActivity charge/);
+  });
+
+  it('rejects a child marker whose detached flag disagrees', () => {
+    const ctx = createContext([], []);
+    requested(ctx, {
+      type: 'startChild',
+      seq: 0,
+      childName: 'c',
+      childArgs: [],
+      detached: false,
+    });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'childStarted',
+        seq: 0,
+        childId: 'c-1',
+        detached: true,
+      }),
+    ).toThrowError(NondeterminismError);
+  });
+
+  it('names the seq and both sides of the disagreement', () => {
+    const ctx = createContext([], []);
+    requested(ctx, { type: 'startTimer', seq: 3, ms: 5 });
+
+    try {
+      applyEvent(ctx, {
+        type: 'activityScheduled',
+        seq: 3,
+        name: 'greet',
+        args: [],
+        options: {},
+      });
+      fail('expected a NondeterminismError');
+    } catch (e) {
+      const err = e as NondeterminismError;
+      expect(err.seq).toBe(3);
+      expect(err.actual).toContain('activityScheduled greet');
+      expect(err.expected).toContain('startTimer');
+    }
+  });
+
+  // A timer's marker records `fireAt`, an absolute time, while the command
+  // carries a relative `ms` — there is nothing to compare, so only the kind is.
+  it('accepts a timer marker regardless of when it fires', () => {
+    const ctx = createContext([], []);
+    requested(ctx, { type: 'startTimer', seq: 0, ms: 10 });
+
+    expect(() =>
+      applyEvent(ctx, { type: 'timerStarted', seq: 0, fireAt: 999999 }),
+    ).not.toThrow();
+  });
+
+  /**
+   * Absence is not disagreement. A run stops allocating seqs the moment
+   * `cancelRequested` is applied, so a marker can legitimately arrive for a seq
+   * this replay never issued — rejecting it would fail a correct workflow.
+   */
+  it('skips validation for a seq the workflow never issued', () => {
+    const ctx = createContext([], []);
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'activityScheduled',
+        seq: 9,
+        name: 'greet',
+        args: [],
+        options: {},
+      }),
+    ).not.toThrow();
   });
 });
 

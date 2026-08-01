@@ -14,15 +14,28 @@
  */
 
 import type { ActivityOptions, Command, CommandSpec } from '../protocol';
-import { getContext } from './context';
+import { getContext, type WorkflowContext } from './context';
 import { CancelledFailure } from './errors';
+
+/**
+ * The one place a command becomes real. Every site that mints a `Command` must go
+ * through here: `requested` is recorded unconditionally (it is what the marker
+ * check compares against on replay) while `commands` is only appended past the
+ * live edge (re-emitting a durable command would double-dispatch). Setting one
+ * without the other is the bug this helper exists to prevent — a command that
+ * skipped `requested` looks unrequested on the next replay and would fail the
+ * check on a perfectly correct workflow.
+ */
+function issue(ctx: WorkflowContext, command: Command): void {
+  ctx.requested.set(command.seq, command);
+  if (ctx.isLive) ctx.commands.push(command);
+}
 
 function scheduleCommand(spec: CommandSpec): Promise<unknown> {
   const ctx = getContext();
   if (ctx.cancelled) return Promise.reject(new CancelledFailure()); // no new work after cancel
   const seq = ctx.seq++;
-  const command = { ...spec, seq } as Command;
-  if (ctx.isLive) ctx.commands.push(command);
+  issue(ctx, { ...spec, seq } as Command);
   return new Promise<unknown>((resolve, reject) =>
     ctx.completions.set(seq, { resolve, reject }),
   );
@@ -82,21 +95,19 @@ export function startChild(name: string, ...args: unknown[]): ChildHandle {
   const ctx = getContext();
   if (ctx.cancelled) return { cancel() {} };
   const targetSeq = ctx.seq++;
-  const command: Command = {
+  issue(ctx, {
     type: 'startChild',
     childName: name,
     childArgs: args,
     detached: true,
     seq: targetSeq,
-  };
-  if (ctx.isLive) ctx.commands.push(command);
+  });
   return {
     cancel() {
       const c = getContext();
       if (c.cancelled) return;
       const seq = c.seq++;
-      const cancelCommand: Command = { type: 'cancelChild', targetSeq, seq };
-      if (c.isLive) c.commands.push(cancelCommand);
+      issue(c, { type: 'cancelChild', targetSeq, seq });
     },
   };
 }

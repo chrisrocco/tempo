@@ -39,6 +39,17 @@ export interface WorkflowContext {
   condSeq: number; // condition id counter — NOT recorded; must not perturb command seqs
   isLive: boolean;
   commands: Command[];
+  /**
+   * Every command this replay issued, by seq — including the ones suppressed
+   * because they are already durable. `commands` holds only what the server has
+   * yet to see; this holds what the workflow *claims* about each seq, which is
+   * what a marker is checked against (see `apply_event`).
+   *
+   * It grows with seq for the life of a run where `completions` shrinks as things
+   * resolve. Bounded by history size and reset by continue-as-new, so acceptable
+   * — but it is a real cost, not a free one.
+   */
+  requested: Map<number, Command>;
   completions: Map<number, Waiter>;
   blockedConditions: Map<number, BlockedCondition>;
   signalHandlers: Map<string, (payload: unknown) => void>;
@@ -75,6 +86,7 @@ export function createContext(
     condSeq: 0,
     isLive: events.length === 0,
     commands: [],
+    requested: new Map(),
     completions: new Map(),
     blockedConditions: new Map(),
     signalHandlers: new Map(),

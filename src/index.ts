@@ -32,7 +32,10 @@ export type { HistoryStore, ExecutionRecord } from './server';
 export type { WorkflowHandle, Client } from './client';
 export type { ActivityFn } from './worker';
 export type { WorkflowFn, WorkflowContext } from './core';
-export { CancelledFailure } from './core';
+// NondeterminismError is exported here but deliberately NOT from `workflow.ts`:
+// a host may want to distinguish a diverged execution from an ordinary failure,
+// while a workflow cannot do anything useful about its own history diverging.
+export { CancelledFailure, NondeterminismError } from './core';
 
 // the service seam + worker task contracts
 export type {

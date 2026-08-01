@@ -3,6 +3,18 @@
 **Type:** correctness (core) · **Raised by:** the concurrency made idiomatic in
 `signalStream` / `background` ([`src/core/signal_stream.ts`](../../src/core/signal_stream.ts))
 
+> **Status: Tier 1 landed.** `requested` is recorded through a single `issue`
+> helper in [`workflow_api.ts`](../../src/core/workflow_api.ts) (which closes the
+> `startChild`/`cancel` bypass trap by construction), markers are validated in
+> [`apply_event.ts`](../../src/core/apply_event.ts), and `NondeterminismError`
+> carries `{seq, expected, actual}`. Tiers 2 and 3 remain open.
+>
+> One deviation from the plan below, decided while implementing: **a marker whose
+> seq the workflow never issued is skipped, not rejected.** A run stops allocating
+> seqs the moment `cancelRequested` is applied, so absence is not evidence of
+> divergence, and treating it as such would fail correct workflows. The check is
+> strictly about disagreement.
+
 ## Problem
 
 Command correlation is by `seq`, assigned in call order. With two concurrent
@@ -116,14 +128,14 @@ of real divergences.
 
 ## Acceptance criteria
 
-- [ ] **T1:** a marker whose `type` or `name` disagrees with the command recorded
+- [x] **T1:** a marker whose `type` or `name` disagrees with the command recorded
       at that seq throws `NondeterminismError` naming the seq, the expectation,
       and what history holds.
-- [ ] **T1:** every existing spec still passes — no false positive on any correct
+- [x] **T1:** every existing spec still passes — no false positive on any correct
       workflow, including concurrent branches and detached children.
-- [ ] **T1:** a spec drives two branches whose order is deliberately perturbed and
+- [x] **T1:** a spec drives two branches whose order is deliberately perturbed and
       asserts the error, rather than only asserting the happy path.
-- [ ] **T1:** a spec pins the ordering invariant (command recorded before its
+- [x] **T1:** a spec pins the ordering invariant (command recorded before its
       marker is applied) on the first task and on a later one.
 - [ ] **T2:** children validate by name; a history without `childName` still replays.
 - [ ] `npm run typecheck`, `npm test`, `npm run lint` clean.
