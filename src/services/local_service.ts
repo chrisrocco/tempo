@@ -284,6 +284,16 @@ export function createLocalService(
         throw new Error(`no execution ${workflowId}`);
       void core.requestCancel(workflowId);
     },
+    terminate(workflowId, reason) {
+      if (!statusMirror.has(workflowId))
+        throw new Error(`no execution ${workflowId}`);
+      void core.terminate(workflowId, reason).then(() => {
+        // No task follows a terminate — it settles the record directly — so the
+        // drain loop will never observe this one. Settle the local waiter here.
+        statusMirror.set(workflowId, 'terminated');
+        rejectWaiter(workflowId, new Error(reason));
+      });
+    },
     getResult(workflowId) {
       return ensureWaiter(workflowId).promise;
     },

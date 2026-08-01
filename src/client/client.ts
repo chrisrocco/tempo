@@ -15,7 +15,17 @@ export interface WorkflowHandle<T = unknown> {
   result(): Promise<T>;
   status(): ExecutionStatus;
   signal(signalDef: SignalDef | string, payload?: unknown): void;
+  /**
+   * Ask the workflow to unwind. Cooperative: it is delivered through replay, so
+   * the workflow catches `CancelledFailure` and can clean up — and so it cannot
+   * reach an execution whose replay is itself failing. Use `terminate` for that.
+   */
   cancel(): void;
+  /**
+   * End the execution outright, running no workflow code. `result()` rejects with
+   * the reason. The blunt instrument, for when cancel cannot land.
+   */
+  terminate(reason?: string): void;
 }
 
 export interface Client {
@@ -41,6 +51,8 @@ export function createClient(service: WorkflowService): Client {
           payload,
         ),
       cancel: () => service.cancel(workflowId),
+      terminate: (reason = 'terminated by operator') =>
+        service.terminate(workflowId, reason),
     };
   }
 

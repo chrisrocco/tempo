@@ -32,7 +32,8 @@ on npm and makes no stability promises — clone it, read it, run it.
 - **Timers** — real wall-clock, durable, re-armed from history on restart
 - **Signals** and **`condition`** — event-driven waiting, no polling
 - **Child workflows**, both blocking and fire-and-forget
-- **Cancellation**, cascading to children, surfacing as a catchable failure
+- **Cancellation**, cascading to children, surfacing as a catchable failure —
+  plus `terminate` for when cooperative cancellation cannot land
 - **`continueAsNew`** to bound history on long-lived workflows
 - **Crash recovery** — kill the server mid-workflow, restart, and it continues
 - **Inspection** — `tempo list`, and `tempo describe` for what an execution is

@@ -391,6 +391,26 @@ describe('local runtime — cancellation', () => {
     await expectAsync(handle.result()).toBeResolvedTo('cleaned up');
   });
 
+  it('terminates a workflow outright, without giving it a chance to clean up', async () => {
+    const rt = createLocalRuntime().registerWorkflow('stubborn', async () => {
+      try {
+        await condition(() => false);
+        return 'never';
+      } catch {
+        return 'cleaned up'; // a cancel would land here; a terminate does not
+      }
+    });
+
+    const handle = rt.start<string>('stubborn');
+    await wait(5);
+    handle.terminate('operator gave up');
+
+    await expectAsync(handle.result()).toBeRejectedWithError(
+      'operator gave up',
+    );
+    expect(handle.status()).toBe('terminated');
+  });
+
   it('cancels a fire-and-forget child via its handle', async () => {
     const ticks: string[] = [];
     const rt = createLocalRuntime()

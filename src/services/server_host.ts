@@ -52,6 +52,7 @@ export interface ServerHost {
     payload: unknown,
   ): Promise<void>;
   cancel(workflowId: string): Promise<void>;
+  terminate(workflowId: string, reason: string): Promise<void>;
   getOutcome(workflowId: string): Promise<WorkflowOutcome>;
   describeExecution(workflowId: string): Promise<ExecutionDetail | undefined>;
   listExecutions(): Promise<ExecutionSummary[]>;
@@ -127,14 +128,21 @@ export function createServerHost(
     cancel(workflowId) {
       return core.requestCancel(workflowId);
     },
+    terminate(workflowId, reason) {
+      return core.terminate(workflowId, reason);
+    },
     async getOutcome(workflowId) {
       const rec = await historyStore.get(workflowId);
       if (!rec) return { status: 'running' }; // not created yet — client keeps polling
       return {
         status: rec.status,
         result: rec.result,
+        // Both non-success terminal states carry a reason: 'failed' the error the
+        // workflow raised, 'terminated' why the operator ended it.
         failure:
-          rec.status === 'failed' ? errorMessage(rec.failure) : undefined,
+          rec.status === 'failed' || rec.status === 'terminated'
+            ? errorMessage(rec.failure)
+            : undefined,
       };
     },
     async describeExecution(workflowId) {

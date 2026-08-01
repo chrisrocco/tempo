@@ -117,6 +117,17 @@ export interface ServerCore {
   ): Promise<void>;
   /** Request cancellation, cascading to fire-and-forget children. */
   requestCancel(workflowId: string): Promise<void>;
+  /**
+   * End an execution outright, without replaying it.
+   *
+   * The escape hatch `cancel` cannot be. Cancellation is *cooperative*: it
+   * appends `cancelRequested` and relies on the workflow replaying to unwind
+   * through its own try/catch. On a wedged execution replay is precisely what
+   * throws, so a cancel is appended and never applied — the one case where an
+   * operator most needs a way out is the one cancellation cannot serve. This
+   * settles the record directly and runs no user code.
+   */
+  terminate(workflowId: string, reason: string): Promise<void>;
   /** Rebuild correlation + re-dispatch pending work from persisted history (crash recovery). */
   resumeFromHistory(records: ExecutionRecord[]): Promise<void>;
   // ── worker-facing seam (for out-of-process workers; see WorkflowService) ──
@@ -365,6 +376,20 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     wake(workflowId);
   }
 
+  async function terminate(workflowId: string, reason: string): Promise<void> {
+    const rec = await historyStore.get(workflowId);
+    if (!rec || rec.status !== 'running') return; // already settled — idempotent
+    // No replay, no commands, no history event: the whole point is that this
+    // works on an execution whose replay throws. Children survive, matching what
+    // an ordinary close does today.
+    await historyStore.setStatus(workflowId, 'terminated', {
+      failure: new Error(reason),
+    });
+    await notifyParentOfTerminal(workflowId);
+    // Any backoff timer still pending is harmless: the wake it produces finds a
+    // non-running execution, and `pollWorkflowTask` discards the task.
+  }
+
   async function resumeFromHistory(records: ExecutionRecord[]): Promise<void> {
     const byId = new Map(records.map((r) => [r.workflowId, r]));
     // Both kinds of child go back into childrenByParent: that map is what
@@ -533,6 +558,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     reportActivityResult,
     appendSignal,
     requestCancel,
+    terminate,
     resumeFromHistory,
     pollWorkflowTask,
     completeWorkflowTask,

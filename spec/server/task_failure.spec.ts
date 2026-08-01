@@ -145,6 +145,86 @@ describe('a workflow task the worker could not replay', () => {
   });
 });
 
+describe('terminate — the escape hatch cancel cannot be', () => {
+  it('settles a wedged execution without replaying it', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const { core, workflowTaskQueue } = makeCore(historyStore);
+    await historyStore.create('wf', 'w', []);
+    workflowTaskQueue.enqueue('wf');
+    const task = await core.pollWorkflowTask();
+    await core.failWorkflowTask(task!.token, 'nondeterminism at seq 0');
+
+    await core.terminate('wf', 'giving up on this one');
+
+    const rec = await historyStore.get('wf');
+    expect(rec!.status).toBe('terminated');
+    expect((rec!.failure as Error).message).toBe('giving up on this one');
+  });
+
+  /**
+   * The reason terminate had to exist. `requestCancel` appends `cancelRequested`
+   * and waits for the workflow to unwind on its next replay — but replay is the
+   * thing that is broken, so the execution stays running no matter how many times
+   * the cancel is retried. Terminate touches the record instead of the workflow.
+   */
+  it('ends an execution that cancellation leaves running', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const broken = createWorkflowRegistry();
+    broken.set('doer', () => {
+      throw new Error('replay is broken');
+    });
+    const worker = createWorkflowWorker(broken);
+
+    await historyStore.create('wf', 'doer', []);
+    workflowTaskQueue.enqueue('wf');
+
+    await core.requestCancel('wf'); // cooperative: recorded, not yet applied
+    expect(
+      (await historyStore.get('wf'))!.history.some(
+        (e) => e.type === 'cancelRequested',
+      ),
+    ).toBeTrue();
+
+    // The workflow can never apply it, because replaying is what throws.
+    const task = await core.pollWorkflowTask();
+    const reason = await worker
+      .replayTask(task!.name, task!.args, task!.history, false)
+      .then(
+        () => undefined,
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+    await core.failWorkflowTask(task!.token, reason!);
+    expect((await historyStore.get('wf'))!.status).toBe('running'); // cancel did not land
+
+    await core.terminate('wf', 'operator gave up');
+    expect((await historyStore.get('wf'))!.status).toBe('terminated');
+  });
+
+  it('is idempotent, so terminating a settled execution changes nothing', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const { core } = makeCore(historyStore);
+    await historyStore.create('wf', 'w', []);
+
+    await core.terminate('wf', 'first');
+    await core.terminate('wf', 'second');
+
+    const rec = await historyStore.get('wf');
+    expect(rec!.status).toBe('terminated');
+    expect((rec!.failure as Error).message).toBe('first');
+  });
+
+  it('stops the retry loop, since a terminated task is no longer handed out', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const { core, workflowTaskQueue } = makeCore(historyStore);
+    await historyStore.create('wf', 'w', []);
+    await core.terminate('wf', 'done with it');
+
+    workflowTaskQueue.enqueue('wf'); // a backoff wake still in flight
+    expect(await core.pollWorkflowTask()).toBeUndefined();
+  });
+});
+
 describe('recovering a wedged execution', () => {
   /**
    * The whole justification for retrying forever: the fix is a code deploy. A

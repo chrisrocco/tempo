@@ -62,7 +62,10 @@ export function describeExecution(rec: ExecutionRecord): ExecutionDetail {
     },
     cancelRequested: pending.cancelRequested,
     result: rec.status === 'completed' ? rec.result : undefined,
-    failure: rec.status === 'failed' ? errorMessage(rec.failure) : undefined,
+    failure:
+      rec.status === 'failed' || rec.status === 'terminated'
+        ? errorMessage(rec.failure)
+        : undefined,
     taskFailures: rec.taskFailures,
     lastTaskFailure: rec.lastTaskFailure,
   };

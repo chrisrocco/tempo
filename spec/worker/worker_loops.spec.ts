@@ -22,6 +22,7 @@ function fakeService(overrides: Partial<WorkflowService>): WorkflowService {
     start: () => ({ workflowId: 'wf' }),
     signal: () => {},
     cancel: () => {},
+    terminate: () => {},
     getResult: async () => undefined,
     getStatus: () => 'running',
     describeExecution: async () => undefined,

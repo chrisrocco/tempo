@@ -85,6 +85,9 @@ export function createRemoteService(
     cancel(workflowId) {
       void call({ method: 'cancel', workflowId }).catch(() => {});
     },
+    terminate(workflowId, reason) {
+      void call({ method: 'terminate', workflowId, reason }).catch(() => {});
+    },
     getStatus(workflowId): ExecutionStatus {
       return statusCache.get(workflowId) ?? 'running';
     },
@@ -96,8 +99,11 @@ export function createRemoteService(
         })) as WorkflowOutcome;
         statusCache.set(workflowId, outcome.status);
         if (outcome.status === 'completed') return outcome.result;
-        if (outcome.status === 'failed')
-          throw new Error(outcome.failure ?? 'workflow failed');
+        // Any non-running status is terminal and must break the loop. Testing for
+        // 'failed' alone would poll a terminated execution forever, since nothing
+        // will ever move it to a status this knows about.
+        if (outcome.status !== 'running')
+          throw new Error(outcome.failure ?? `workflow ${outcome.status}`);
         await sleep(pollIntervalMs);
       }
     },

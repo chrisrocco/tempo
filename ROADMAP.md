@@ -88,10 +88,14 @@ happen today (a poison task, a hung activity) present identically as silence.
   destroy recoverable work. This follows Temporal, and the reasoning is in
   [sprint 05](planning/sprints/05-phase-6-scope.md#the-dead-letter-question-settled).
 
-- **`tempo terminate <id>`** — the escape hatch retry-forever requires. It must
-  settle the execution _without_ replaying it, because `cancel` cannot serve here:
-  cancellation is cooperative and delivered through replay, so it never lands on
-  the execution whose replay is the thing that throws.
+- ~~**`tempo terminate <id>`**~~ — **landed.** Settles the execution _without_
+  replaying it, which is exactly why `cancel` could not serve: cancellation is
+  cooperative and delivered through replay, so on a wedged execution it is
+  recorded and never applied. Confirmed against a real one — `cancel` left it
+  `running` with `cancelRequested: true` and the failure count still climbing,
+  and `terminate` ended it. `terminated` is its own `ExecutionStatus` rather than
+  a flavour of `failed`, so a postmortem can tell "an operator pulled the plug"
+  from "your code raised".
 - ~~**Per-execution inspection**~~ — **landed.** `tempo describe <id>` and
   `tempo list` over new `describeExecution`/`listExecutions` RPCs, reporting what
   an execution is parked on. Views are derived from history, never stored

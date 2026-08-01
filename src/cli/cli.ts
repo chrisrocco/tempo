@@ -36,6 +36,7 @@ import {
   resolveServerUrl,
   sendSignal,
   startWorkflow,
+  terminateWorkflow,
 } from './client';
 import { up } from './up';
 
@@ -51,7 +52,10 @@ Usage:
 
   tempo result <workflow-id>       Fetch the outcome of an existing run.
   tempo signal <workflow-id> <name> [payload]
-  tempo cancel <workflow-id>       Request cancellation.
+  tempo cancel <workflow-id>       Request cancellation (cooperative).
+  tempo terminate <workflow-id> [reason]
+      End an execution outright, without replaying it. Use this when cancel
+      cannot land — a workflow whose replay is what fails.
 
   tempo list [--json]              Every execution the server knows about.
   tempo describe <workflow-id> [--json]
@@ -122,6 +126,12 @@ async function dispatch(argv: string[]): Promise<number> {
       );
     case 'cancel':
       return cancelWorkflow(serverUrl, required(rest[0], 'workflow id'));
+    case 'terminate':
+      return terminateWorkflow(
+        serverUrl,
+        required(rest[0], 'workflow id'),
+        rest[1] ?? 'terminated via tempo',
+      );
     case 'list':
       return listExecutions(serverUrl, flags.has('json'));
     case 'describe':

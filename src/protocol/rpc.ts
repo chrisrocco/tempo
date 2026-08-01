@@ -34,6 +34,7 @@ export type RpcRequest =
       payload: unknown;
     }
   | { method: 'cancel'; workflowId: string }
+  | { method: 'terminate'; workflowId: string; reason: string }
   | { method: 'getOutcome'; workflowId: string }
   | { method: 'describeExecution'; workflowId: string }
   | { method: 'listExecutions' }

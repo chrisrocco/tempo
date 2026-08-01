@@ -212,7 +212,7 @@ Two consequences fall out and are now part of T1:
       is the whole justification for the policy, so it is a spec, not a hope:
       replay against a registry that throws, then swap in one that does not, and
       assert the execution finishes.
-- [ ] **T1:** `tempo terminate <id>` settles a wedged execution _without_ replaying
+- [x] **T1:** `tempo terminate <id>` settles a wedged execution _without_ replaying
       it, and a spec covers the case `cancel` cannot reach.
 - [x] **T2:** `tempo describe <id>` prints status, history, and what the execution
       is parked on; `tempo list` enumerates executions with status.

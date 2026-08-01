@@ -220,6 +220,48 @@ describe('tempo CLI', () => {
     }
   }, 60000);
 
+  // Deliberately no worker: the execution can never make progress, so the
+  // terminate is the only thing that can settle it and the assertion cannot race
+  // a workflow finishing on its own.
+  it('terminates an execution that no worker is advancing', async () => {
+    const server = spawn(
+      process.execPath,
+      ['--import', 'tsx', 'bin/server-main.ts'],
+      { env: { ...process.env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    try {
+      const [, port] = await waitForLine(server, /LISTENING (\d+)/, 30000);
+      const url = `http://127.0.0.1:${port}`;
+      const started = await runTempo([
+        'start',
+        'greeter',
+        'world',
+        `--server=${url}`,
+      ]);
+      const workflowId = started.out.trim();
+
+      const killed = await runTempo([
+        'terminate',
+        workflowId,
+        'no longer needed',
+        `--server=${url}`,
+      ]);
+      expect(killed.code).toBe(0);
+
+      const { out } = await runTempo([
+        'describe',
+        workflowId,
+        '--json',
+        `--server=${url}`,
+      ]);
+      const detail = JSON.parse(out) as { status: string; failure?: string };
+      expect(detail.status).toBe('terminated');
+      expect(detail.failure).toBe('no longer needed');
+    } finally {
+      await stopChild(server);
+    }
+  }, 60000);
+
   it('fails with a clear error when the execution does not exist', async () => {
     const server = tempo(['up', WORKER, '--port=0']);
     forwardOutput(server, 'up');

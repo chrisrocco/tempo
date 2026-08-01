@@ -103,6 +103,21 @@ export async function cancelWorkflow(
   return 0;
 }
 
+/**
+ * End an execution without replaying it. Kept distinct from `cancel` in the
+ * command surface as well as the code: reaching for the wrong one on a wedged
+ * execution looks like nothing happening at all.
+ */
+export async function terminateWorkflow(
+  serverUrl: string,
+  workflowId: string,
+  reason: string,
+): Promise<number> {
+  await assertReachable(serverUrl);
+  createRemoteService(serverUrl).terminate(workflowId, reason);
+  return 0;
+}
+
 /** One history event as a line: the type, its seq if it has one, and its payload. */
 function formatEvent(ev: HistoryEvent, index: number): string {
   const seq = 'seq' in ev ? ` seq=${ev.seq}` : '';
@@ -169,8 +184,10 @@ export async function describeExecution(
     out.push(`result:    ${formatResult(detail.result)}`);
   if (detail.failure !== undefined) out.push(`failure:   ${detail.failure}`);
   // The wedged case. Loud on purpose: a running execution the engine cannot
-  // replay looks identical to a healthy parked one without this.
-  if (detail.taskFailures > 0) {
+  // replay looks identical to a healthy parked one without this. Only while it
+  // is still running, though — the count outlives the execution, and announcing
+  // a retry schedule for something already settled is just wrong.
+  if (detail.status === 'running' && detail.taskFailures > 0) {
     out.push(
       '',
       `STUCK — ${detail.taskFailures} consecutive task failure${detail.taskFailures === 1 ? '' : 's'}, retrying with backoff`,
@@ -201,11 +218,11 @@ export async function listExecutions(
   }
   const width = Math.max(...rows.map((r) => r.workflowId.length), 11);
   process.stdout.write(
-    `${'WORKFLOW ID'.padEnd(width)}  ${'NAME'.padEnd(12)}  ${'STATUS'.padEnd(9)}  EVENTS\n`,
+    `${'WORKFLOW ID'.padEnd(width)}  ${'NAME'.padEnd(12)}  ${'STATUS'.padEnd(10)}  EVENTS\n`,
   );
   for (const r of rows) {
     process.stdout.write(
-      `${r.workflowId.padEnd(width)}  ${r.name.padEnd(12)}  ${r.status.padEnd(9)}  ${r.historyLength}\n`,
+      `${r.workflowId.padEnd(width)}  ${r.name.padEnd(12)}  ${r.status.padEnd(10)}  ${r.historyLength}\n`,
     );
   }
   return 0;

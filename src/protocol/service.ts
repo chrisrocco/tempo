@@ -17,7 +17,14 @@ import type { Command } from './commands';
 import type { HistoryEvent } from './history_events';
 import type { TaskToken } from './task_token';
 
-export type ExecutionStatus = 'running' | 'completed' | 'failed';
+/**
+ * `terminated` is deliberately its own status rather than a flavour of `failed`.
+ * They answer different questions in a postmortem — "your code raised" versus "an
+ * operator pulled the plug" — and folding them together loses that exactly where
+ * it is being looked for. Adding the member also makes every switch over status a
+ * compile error until it is considered, which is the point.
+ */
+export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'terminated';
 
 export interface StartWorkflowOptions {
   workflowId?: string;
@@ -86,6 +93,12 @@ export interface WorkflowService {
   ): { workflowId: string };
   signal(workflowId: string, signalName: string, payload?: unknown): void;
   cancel(workflowId: string): void;
+  /**
+   * End an execution outright, without replaying it. Distinct from `cancel`,
+   * which is cooperative and therefore cannot reach an execution whose replay is
+   * the thing that throws.
+   */
+  terminate(workflowId: string, reason: string): void;
   getResult(workflowId: string): Promise<unknown>;
   getStatus(workflowId: string): ExecutionStatus;
   /** Inspect one execution: status, history, and what it is waiting on. */
