@@ -168,6 +168,16 @@ export async function describeExecution(
   if (detail.result !== undefined)
     out.push(`result:    ${formatResult(detail.result)}`);
   if (detail.failure !== undefined) out.push(`failure:   ${detail.failure}`);
+  // The wedged case. Loud on purpose: a running execution the engine cannot
+  // replay looks identical to a healthy parked one without this.
+  if (detail.taskFailures > 0) {
+    out.push(
+      '',
+      `STUCK — ${detail.taskFailures} consecutive task failure${detail.taskFailures === 1 ? '' : 's'}, retrying with backoff`,
+      `  last error: ${detail.lastTaskFailure ?? 'unknown'}`,
+      '  the execution is not lost: fix the workflow, redeploy the workers, and it resumes',
+    );
+  }
   out.push('', 'waiting on:', ...formatPending(detail));
   out.push('', `history (${detail.historyLength}):`);
   out.push(...detail.history.map(formatEvent));

@@ -197,18 +197,18 @@ Two consequences fall out and are now part of T1:
 
 ## Acceptance criteria
 
-- [ ] **T1:** a workflow whose replay throws has that failure _reported to the
+- [x] **T1:** a workflow whose replay throws has that failure _reported to the
       server_ rather than dropped on the floor — the worker calls
       `failWorkflowTask`, and the task is not left to expire silently.
-- [ ] **T1:** the execution stays `running` and keeps retrying. It is **not**
+- [x] **T1:** the execution stays `running` and keeps retrying. It is **not**
       auto-terminated, and a spec asserts that: this is the policy, and a future
       change that "helpfully" settles it should fail the suite.
-- [ ] **T1:** redelivery of a repeatedly failing task backs off rather than
+- [x] **T1:** redelivery of a repeatedly failing task backs off rather than
       spinning at the lease interval.
-- [ ] **T1:** `describe` shows the attempt count and the last failure reason.
-- [ ] **T1:** the attempt count survives a server restart — a spec restarts the
+- [x] **T1:** `describe` shows the attempt count and the last failure reason.
+- [x] **T1:** the attempt count survives a server restart — a spec restarts the
       server mid-poison and asserts the count did not reset to zero.
-- [ ] **T1:** deploying a corrected workflow lets a wedged execution complete. This
+- [x] **T1:** deploying a corrected workflow lets a wedged execution complete. This
       is the whole justification for the policy, so it is a spec, not a hope:
       replay against a registry that throws, then swap in one that does not, and
       assert the execution finishes.

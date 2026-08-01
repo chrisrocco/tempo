@@ -33,6 +33,9 @@ interface PersistedMeta {
   status: ExecutionStatus;
   result?: unknown;
   failureMessage?: string;
+  /** Absent in data dirs written before task-failure tracking; reads as 0. */
+  taskFailures?: number;
+  lastTaskFailure?: string;
 }
 
 function errorMessage(e: unknown): string {
@@ -83,6 +86,7 @@ export class FileHistoryStore implements HistoryStore {
       history: [],
       version: 0,
       status: 'running',
+      taskFailures: 0,
     };
     this.cache.set(workflowId, rec); // synchronous → immediately visible to get()
     await this.enqueue(workflowId, async () => {
@@ -130,6 +134,26 @@ export class FileHistoryStore implements HistoryStore {
     await this.enqueue(workflowId, () =>
       fs.appendFile(path.join(this.execDir(workflowId), 'events.jsonl'), lines),
     );
+  }
+
+  async recordTaskFailure(workflowId: string, reason: string): Promise<number> {
+    const rec = this.cache.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.taskFailures += 1;
+    rec.lastTaskFailure = reason;
+    await this.enqueue(workflowId, () => this.writeMeta(rec));
+    return rec.taskFailures;
+  }
+
+  // Guarded, not unconditional: this runs after every successful workflow task,
+  // and meta is rewritten atomically (temp + rename). Paying that on every task
+  // to clear a counter that is almost always already zero is pure waste.
+  async clearTaskFailures(workflowId: string): Promise<void> {
+    const rec = this.cache.get(workflowId);
+    if (!rec || rec.taskFailures === 0) return;
+    rec.taskFailures = 0;
+    rec.lastTaskFailure = undefined;
+    await this.enqueue(workflowId, () => this.writeMeta(rec));
   }
 
   async setStatus(
@@ -194,6 +218,8 @@ export class FileHistoryStore implements HistoryStore {
       result: rec.result,
       failureMessage:
         rec.failure !== undefined ? errorMessage(rec.failure) : undefined,
+      taskFailures: rec.taskFailures,
+      lastTaskFailure: rec.lastTaskFailure,
     };
     const metaPath = path.join(this.execDir(rec.workflowId), 'meta.json');
     const tmp = `${metaPath}.tmp`;
@@ -233,6 +259,8 @@ export class FileHistoryStore implements HistoryStore {
           meta.failureMessage !== undefined
             ? new Error(meta.failureMessage)
             : undefined,
+        taskFailures: meta.taskFailures ?? 0,
+        lastTaskFailure: meta.lastTaskFailure,
       });
     }
   }

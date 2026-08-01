@@ -64,6 +64,50 @@ describe('FileHistoryStore', () => {
     }
   });
 
+  /**
+   * The reason the task-failure counter lives on the record instead of in the
+   * queue: a restart is the first thing anyone tries on a stuck execution, and a
+   * counter that reset there would make a poison task immortal — its backoff
+   * would return to zero every time.
+   */
+  it('carries the workflow-task failure count across a restart', async () => {
+    const dir = await tmpDir();
+    try {
+      const store1 = await FileHistoryStore.open(dir);
+      await store1.create('wf-1', 'w', []);
+      await store1.recordTaskFailure('wf-1', 'nondeterminism at seq 0');
+      await store1.recordTaskFailure('wf-1', 'nondeterminism at seq 0');
+      await store1.close();
+
+      const store2 = await FileHistoryStore.open(dir);
+      const rec = await store2.get('wf-1');
+      expect(rec?.taskFailures).toBe(2);
+      expect(rec?.lastTaskFailure).toBe('nondeterminism at seq 0');
+      await store2.close();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('clears the failure count durably once a task succeeds', async () => {
+    const dir = await tmpDir();
+    try {
+      const store1 = await FileHistoryStore.open(dir);
+      await store1.create('wf-1', 'w', []);
+      await store1.recordTaskFailure('wf-1', 'boom');
+      await store1.clearTaskFailures('wf-1');
+      await store1.close();
+
+      const store2 = await FileHistoryStore.open(dir);
+      const rec = await store2.get('wf-1');
+      expect(rec?.taskFailures).toBe(0);
+      expect(rec?.lastTaskFailure).toBeUndefined();
+      await store2.close();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('enforces a single writer via a lockfile', async () => {
     const dir = await tmpDir();
     try {

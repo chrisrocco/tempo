@@ -40,6 +40,8 @@ async function dispatch(
       return (await host.pollWorkflowTask()) ?? null;
     case 'completeWorkflowTask':
       return host.completeWorkflowTask(request.token, request.result);
+    case 'failWorkflowTask':
+      return host.failWorkflowTask(request.token, request.reason);
     case 'pollActivityTask':
       return (await host.pollActivityTask()) ?? null;
     case 'completeActivityTask':

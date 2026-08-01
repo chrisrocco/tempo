@@ -43,6 +43,7 @@ export type RpcRequest =
       token: TaskToken;
       result: WorkflowTaskResult;
     }
+  | { method: 'failWorkflowTask'; token: TaskToken; reason: string }
   | { method: 'pollActivityTask' }
   | {
       method: 'completeActivityTask';

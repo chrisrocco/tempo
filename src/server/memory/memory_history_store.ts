@@ -29,6 +29,7 @@ export class MemoryHistoryStore implements HistoryStore {
       history: [],
       version: 0,
       status: 'running',
+      taskFailures: 0,
     });
   }
 
@@ -58,6 +59,23 @@ export class MemoryHistoryStore implements HistoryStore {
       throw new VersionConflictError(workflowId, expectedVersion, rec.version);
     rec.history.push(...events);
     rec.version += 1;
+  }
+
+  // Note the absent `version` bump: a task failure is not history, and bumping
+  // would make a racing worker's successful completion lose the CAS.
+  async recordTaskFailure(workflowId: string, reason: string): Promise<number> {
+    const rec = this.records.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.taskFailures += 1;
+    rec.lastTaskFailure = reason;
+    return rec.taskFailures;
+  }
+
+  async clearTaskFailures(workflowId: string): Promise<void> {
+    const rec = this.records.get(workflowId);
+    if (!rec || rec.taskFailures === 0) return;
+    rec.taskFailures = 0;
+    rec.lastTaskFailure = undefined;
   }
 
   async setStatus(

@@ -24,6 +24,10 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 export interface WorkerLoop {
   /** Stop polling and wait for the in-flight iteration to finish. */
   stop(): Promise<void>;
@@ -121,12 +125,23 @@ export function runWorkflowWorker(
   return runPollLoop('workflow worker', options, async () => {
     const task = await service.pollWorkflowTask();
     if (!task) return false;
-    const result = await worker.replayTask(
-      task.name,
-      task.args,
-      task.history,
-      task.continueAsNewSuggested,
-    );
+    let result;
+    try {
+      result = await worker.replayTask(
+        task.name,
+        task.args,
+        task.history,
+        task.continueAsNewSuggested,
+      );
+    } catch (e) {
+      // Replay itself broke — a nondeterminism error, or a throw from outside the
+      // workflow's own control flow. Report it instead of letting it escape to
+      // the loop's catch: an unreported task is invisible to the server, which
+      // learns only when the lease expires and then knows nothing about *why*.
+      // Reporting is what makes the failure countable, diagnosable, and paced.
+      await service.failWorkflowTask(task.token, errorMessage(e));
+      return true;
+    }
     await service.completeWorkflowTask(task.token, result);
     return true;
   });

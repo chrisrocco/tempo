@@ -74,6 +74,7 @@ import type { TaskQueue } from './ports/task_queue';
 import type { WorkflowTaskQueue } from './ports/workflow_task_queue';
 import type { TimerService } from './ports/timer_service';
 import { completedSeqs, pendingWork } from './pending_work';
+import { workflowTaskBackoffMs } from './retry_policy';
 
 const CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4;
 
@@ -124,6 +125,14 @@ export interface ServerCore {
     token: TaskToken,
     result: WorkflowTaskResult,
   ): Promise<void>;
+  /**
+   * A worker could not replay this task at all — a bug in the workflow, or a
+   * nondeterminism error. Counts the failure durably and re-queues the execution
+   * after a backoff. The execution is **never** settled here: workflow code is
+   * redeployable, so a fix lets a wedged execution carry on from where it stopped
+   * (see planning/sprints/05-phase-6-scope.md).
+   */
+  failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
 }
@@ -174,6 +183,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   function wake(workflowId: string): void {
     workflowTaskQueue.enqueue(workflowId);
     kickWorkflowWorker();
+  }
+
+  // A wake held back, so a failing task retries on a schedule instead of at
+  // whatever rate the workers happen to poll. The timer is in-memory and unref'd:
+  // losing it to a restart costs nothing, because `resume` re-enqueues every
+  // running execution anyway, and it must never hold the process open.
+  function wakeAfter(workflowId: string, delayMs: number): void {
+    if (delayMs <= 0) {
+      wake(workflowId);
+      return;
+    }
+    setTimeout(() => wake(workflowId), delayMs).unref?.();
   }
 
   async function notifyParentOfTerminal(childId: string): Promise<void> {
@@ -452,9 +473,33 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // discarded — safe, because replay commits no external effects.
       if (rec && rec.status === 'running' && rec.version === lease.version) {
         await applyWorkflowTaskResult(lease.workflowId, result);
+        // A task got through, so whatever was failing is not failing now — start
+        // the backoff schedule over rather than carrying a stale count forward.
+        if (rec.taskFailures > 0)
+          await historyStore.clearTaskFailures(lease.workflowId);
       }
     }
     workflowTaskQueue.complete(token);
+  }
+
+  async function failWorkflowTask(
+    token: TaskToken,
+    reason: string,
+  ): Promise<void> {
+    const lease = workflowLeases.get(token);
+    // Ack first: while the task is still leased the queue folds any enqueue into
+    // its rerun flag and redelivers the moment it is completed, which would skip
+    // the backoff entirely.
+    workflowTaskQueue.complete(token);
+    if (!lease) return;
+    workflowLeases.delete(token);
+    const rec = await historyStore.get(lease.workflowId);
+    if (!rec || rec.status !== 'running') return; // settled or terminated meanwhile
+    const failures = await historyStore.recordTaskFailure(
+      lease.workflowId,
+      reason,
+    );
+    wakeAfter(lease.workflowId, workflowTaskBackoffMs(failures));
   }
 
   async function pollActivityTask(): Promise<LeasedActivityTask | undefined> {
@@ -491,6 +536,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     resumeFromHistory,
     pollWorkflowTask,
     completeWorkflowTask,
+    failWorkflowTask,
     pollActivityTask,
     completeActivityTask,
   };

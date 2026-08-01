@@ -60,6 +60,14 @@ export interface ExecutionDetail extends ExecutionSummary {
   result?: unknown;
   /** A message, not an Error — failures cross the wire as text. */
   failure?: string;
+  /**
+   * Consecutive workflow-task failures. Non-zero on a `running` execution is the
+   * signal that it is wedged rather than merely waiting — the engine cannot
+   * replay it, and is retrying on a backoff.
+   */
+  taskFailures: number;
+  /** Why the most recent workflow task failed. */
+  lastTaskFailure?: string;
 }
 
 /**
@@ -90,6 +98,14 @@ export interface WorkflowService {
     token: TaskToken,
     result: WorkflowTaskResult,
   ): Promise<void>;
+  /**
+   * Report that this task could not be replayed at all. Distinct from a
+   * `WorkflowTaskResult` carrying `failed` — that is the *workflow* failing, a
+   * normal outcome the engine records and settles. This is the *engine* unable to
+   * run it: a nondeterminism error, or a bug thrown outside the workflow's own
+   * control flow. The execution keeps running and the task is retried.
+   */
+  failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
 }

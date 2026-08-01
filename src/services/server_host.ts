@@ -60,6 +60,7 @@ export interface ServerHost {
     token: TaskToken,
     result: WorkflowTaskResult,
   ): Promise<void>;
+  failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /** Re-drive persisted executions after a restart. */
@@ -148,6 +149,9 @@ export function createServerHost(
     },
     completeWorkflowTask(token, result) {
       return core.completeWorkflowTask(token, result);
+    },
+    failWorkflowTask(token, reason) {
+      return core.failWorkflowTask(token, reason);
     },
     pollActivityTask() {
       return core.pollActivityTask();

@@ -73,13 +73,14 @@ this is the schedule that came out of it. Two things it changed:
 _An execution can no longer stop making progress silently._ Both ways it can
 happen today (a poison task, a hung activity) present identically as silence.
 
-- **Make a poison workflow task loud, bounded, and escapable** (adoption blocker
-  2). A replay that throws is reported to the server via a new `failWorkflowTask`
-  — today it escapes the poll loop and the server never learns — which lets the
-  server count attempts durably, back off between redeliveries, and retain the
-  reason for `describe`. The count lives on the record, not in the queue: the
-  queues are in-memory, so a counter held there resets on exactly the restart an
-  operator will try.
+- ~~**Make a poison workflow task loud and bounded**~~ — **landed** (adoption
+  blocker 2, less the escape hatch below). A replay that throws is reported via
+  `failWorkflowTask` instead of escaping the poll loop unseen; the server counts
+  failures on the record (not the queue, which is in-memory and would reset on
+  exactly the restart an operator tries), backs off exponentially to a 30s cap,
+  and `describe` reports the count and the last reason. The count resets on the
+  next success. Pairs with ticket 04: the reason a task is poison is now a
+  precise `NondeterminismError` naming both sides of the divergence.
 
   **The execution is never auto-terminated.** A workflow-task failure is nearly
   always a code bug, and workflow code is redeployable — fix it, roll the workers,

@@ -241,6 +241,7 @@ understand what the engine does.
 | [`integration/cli`](spec/integration/cli.spec.ts)                     | The `tempo` CLI end to end as a subprocess                            |
 | [`server/concurrency`](spec/server/concurrency.spec.ts)               | Version CAS, lease expiry, lease-race rejection, late-ack dedup       |
 | [`server/pending_work`](spec/server/pending_work.spec.ts)             | What an execution still awaits — shared by recovery and `describe`    |
+| [`server/task_failure`](spec/server/task_failure.spec.ts)             | Poison tasks: counted, backed off, never settled, fixed by redeploy   |
 | [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
 | [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
 | [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |

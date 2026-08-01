@@ -239,6 +239,7 @@ describe('core applyEvent — marker validation', () => {
     const ctx = createContext([], []);
     requested(ctx, { type: 'startTimer', seq: 3, ms: 5 });
 
+    let thrown: NondeterminismError | undefined;
     try {
       applyEvent(ctx, {
         type: 'activityScheduled',
@@ -247,13 +248,14 @@ describe('core applyEvent — marker validation', () => {
         args: [],
         options: {},
       });
-      fail('expected a NondeterminismError');
     } catch (e) {
-      const err = e as NondeterminismError;
-      expect(err.seq).toBe(3);
-      expect(err.actual).toContain('activityScheduled greet');
-      expect(err.expected).toContain('startTimer');
+      thrown = e as NondeterminismError;
     }
+
+    expect(thrown).toBeInstanceOf(NondeterminismError);
+    expect(thrown!.seq).toBe(3);
+    expect(thrown!.actual).toContain('activityScheduled greet');
+    expect(thrown!.expected).toContain('startTimer');
   });
 
   // A timer's marker records `fireAt`, an absolute time, while the command

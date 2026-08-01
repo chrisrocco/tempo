@@ -22,6 +22,20 @@ export interface ExecutionRecord {
   status: ExecutionStatus;
   result?: unknown;
   failure?: unknown;
+  /**
+   * Consecutive workflow-task failures, reset by the next success. Durable
+   * because the queues are not: a counter kept in the queue would reset on
+   * exactly the restart a frustrated operator reaches for first, making a poison
+   * task immortal.
+   *
+   * Deliberately **not** a history event. History is replayed, and one event per
+   * failed attempt would both bloat it and skew `continueAsNewSuggested`, which
+   * fires on history length — a task failing in a loop would push its own
+   * execution toward continue-as-new while making no progress.
+   */
+  taskFailures: number;
+  /** Why the most recent workflow task failed; cleared alongside the count. */
+  lastTaskFailure?: string;
 }
 
 /** Thrown by `appendIfVersion` when the execution has moved on — a lost lease race. */
@@ -56,6 +70,21 @@ export interface HistoryStore {
     events: HistoryEvent[],
     expectedVersion: number,
   ): Promise<void>;
+  /**
+   * Record that a workflow task failed: increment the counter, keep the reason,
+   * and return the new count so the caller can size its backoff.
+   *
+   * **Must not bump `version`.** A failure is not history, and bumping it would
+   * make a concurrent worker's legitimate completion lose the optimistic CAS —
+   * one worker's failure would discard another's success.
+   */
+  recordTaskFailure(workflowId: string, reason: string): Promise<number>;
+  /**
+   * Forget past failures once a task succeeds. Implementations should no-op when
+   * the count is already zero: this runs after every successful workflow task,
+   * and a durable adapter should not pay a write for the common case.
+   */
+  clearTaskFailures(workflowId: string): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */
   setStatus(
     workflowId: string,

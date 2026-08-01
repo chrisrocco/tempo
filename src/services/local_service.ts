@@ -135,12 +135,24 @@ export function createLocalService(
           while (true) {
             const task = await core.pollWorkflowTask();
             if (!task) break;
-            const result = await workflowWorker.replayTask(
-              task.name,
-              task.args,
-              task.history,
-              task.continueAsNewSuggested,
-            );
+            let result;
+            try {
+              result = await workflowWorker.replayTask(
+                task.name,
+                task.args,
+                task.history,
+                task.continueAsNewSuggested,
+              );
+            } catch (e) {
+              // Same contract as the out-of-process loop: report, do not throw.
+              // Letting this escape would reject the drain's floating promise
+              // (an unhandled rejection) and leave the task leased until expiry.
+              await core.failWorkflowTask(
+                task.token,
+                e instanceof Error ? e.message : String(e),
+              );
+              continue;
+            }
             // Applies behind the version check, so a result built on a snapshot
             // that something appended to mid-replay is discarded — and the wake
             // that appended it is what re-enqueues the execution.
@@ -297,6 +309,9 @@ export function createLocalService(
       result: WorkflowTaskResult,
     ): Promise<void> {
       return core.completeWorkflowTask(token, result);
+    },
+    failWorkflowTask(token: TaskToken, reason: string): Promise<void> {
+      return core.failWorkflowTask(token, reason);
     },
     pollActivityTask(): Promise<LeasedActivityTask | undefined> {
       return core.pollActivityTask();

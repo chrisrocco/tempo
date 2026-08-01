@@ -137,6 +137,9 @@ export function createRemoteService(
           : result,
       });
     },
+    async failWorkflowTask(token: TaskToken, reason: string): Promise<void> {
+      await call({ method: 'failWorkflowTask', token, reason });
+    },
     async pollActivityTask(): Promise<LeasedActivityTask | undefined> {
       return (
         ((await call({
