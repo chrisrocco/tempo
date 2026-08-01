@@ -23,6 +23,45 @@ export interface StartWorkflowOptions {
   workflowId?: string;
 }
 
+// ── inspection (read-only views) ─────────────────────────────────────────
+// Derived from history rather than stored, so they cannot drift from the truth
+// and no adapter has to maintain them. Deliberately projections, not the
+// server's own record types: `ExecutionRecord` carries a `version` for the
+// optimistic CAS and raw `failure` values that need not be serializable, and
+// neither belongs on the wire.
+
+/** One line of `tempo list`: enough to identify an execution and its state. */
+export interface ExecutionSummary {
+  workflowId: string;
+  /** Increments on each continue-as-new; the workflowId is stable across runs. */
+  runId: number;
+  name: string;
+  status: ExecutionStatus;
+  historyLength: number;
+}
+
+/**
+ * Dispatched work whose completion has not arrived — why a running execution is
+ * parked. An execution that is `running` with nothing pending is either mid-task
+ * or genuinely stuck, and that distinction is the first thing an operator wants.
+ */
+export interface PendingWorkView {
+  activities: { seq: number; name: string }[];
+  timers: { seq: number; fireAt: number }[];
+  children: { seq: number; childId: string; detached: boolean }[];
+}
+
+/** `tempo describe`: the summary, plus history and what the execution awaits. */
+export interface ExecutionDetail extends ExecutionSummary {
+  args: unknown[];
+  history: HistoryEvent[];
+  pending: PendingWorkView;
+  cancelRequested: boolean;
+  result?: unknown;
+  /** A message, not an Error — failures cross the wire as text. */
+  failure?: string;
+}
+
 /**
  * The seam both `LocalService` (in-proc) and, later, `RemoteService` (RPC) satisfy.
  * It has two faces: the client-facing methods (start/signal/cancel/get*) and the
@@ -41,6 +80,10 @@ export interface WorkflowService {
   cancel(workflowId: string): void;
   getResult(workflowId: string): Promise<unknown>;
   getStatus(workflowId: string): ExecutionStatus;
+  /** Inspect one execution: status, history, and what it is waiting on. */
+  describeExecution(workflowId: string): Promise<ExecutionDetail | undefined>;
+  /** Every execution the server knows about. */
+  listExecutions(): Promise<ExecutionSummary[]>;
   // ── worker-facing (poll a task, respond when done) ──
   pollWorkflowTask(): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(

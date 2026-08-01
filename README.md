@@ -35,6 +35,8 @@ on npm and makes no stability promises — clone it, read it, run it.
 - **Cancellation**, cascading to children, surfacing as a catchable failure
 - **`continueAsNew`** to bound history on long-lived workflows
 - **Crash recovery** — kill the server mid-workflow, restart, and it continues
+- **Inspection** — `tempo list`, and `tempo describe` for what an execution is
+  waiting on, derived from history rather than stored
 
 The same workflow code runs three ways, with no changes:
 
@@ -238,6 +240,7 @@ understand what the engine does.
 | [`integration/distributed`](spec/integration/distributed.spec.ts)     | Real spawned processes; crash redelivery / at-least-once              |
 | [`integration/cli`](spec/integration/cli.spec.ts)                     | The `tempo` CLI end to end as a subprocess                            |
 | [`server/concurrency`](spec/server/concurrency.spec.ts)               | Version CAS, lease expiry, lease-race rejection, late-ack dedup       |
+| [`server/pending_work`](spec/server/pending_work.spec.ts)             | What an execution still awaits — shared by recovery and `describe`    |
 | [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
 | [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
 | [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |

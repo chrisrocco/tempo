@@ -61,7 +61,9 @@ import {
   MemoryWorkflowTaskQueue,
   backoffMs,
   createServerCore,
+  describeExecution,
   shouldRetry,
+  summarizeExecution,
   type HistoryStore,
 } from '../server';
 import type { ActivityWorker, WorkflowWorker } from '../worker';
@@ -275,6 +277,16 @@ export function createLocalService(
     },
     getStatus(workflowId): ExecutionStatus {
       return statusMirror.get(workflowId) ?? 'running';
+    },
+    // Inspection reads the store, not `statusMirror`: the mirror exists to make
+    // `getStatus` synchronous, while these are already async and the store is the
+    // truth. One fewer thing that can disagree with history.
+    async describeExecution(workflowId) {
+      const rec = await historyStore.get(workflowId);
+      return rec && describeExecution(rec);
+    },
+    async listExecutions() {
+      return (await historyStore.list()).map(summarizeExecution);
     },
     // ── worker-facing seam (for out-of-process workers; unused by the in-proc loops) ──
     pollWorkflowTask(): Promise<WorkflowTask | undefined> {

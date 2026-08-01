@@ -31,6 +31,11 @@ async function dispatch(
       return host.cancel(request.workflowId);
     case 'getOutcome':
       return host.getOutcome(request.workflowId);
+    case 'describeExecution':
+      // undefined (unknown id) must cross as JSON null, like a polled task.
+      return (await host.describeExecution(request.workflowId)) ?? null;
+    case 'listExecutions':
+      return host.listExecutions();
     case 'pollWorkflowTask':
       return (await host.pollWorkflowTask()) ?? null;
     case 'completeWorkflowTask':

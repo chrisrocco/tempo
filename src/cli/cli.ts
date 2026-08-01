@@ -4,8 +4,9 @@
  * modules; this file owns only the surface: which words map to which call, and
  * turning a thrown error into an exit code.
  *
- * Built today: `up <entry>` (run server + worker in the foreground) and the
- * workflow-driving commands `start` / `result` / `signal` / `cancel`.
+ * Built today: `up <entry>` (run server + worker in the foreground), the
+ * workflow-driving commands `start` / `result` / `signal` / `cancel`, and the
+ * read-only `list` / `describe`.
  *
  * The deployment half of the surface is designed but not built (tracked in
  * planning/sprints/01-deployment-api.md). The target:
@@ -28,7 +29,9 @@
 
 import {
   cancelWorkflow,
+  describeExecution,
   fetchResult,
+  listExecutions,
   parseWorkflowArg,
   resolveServerUrl,
   sendSignal,
@@ -50,9 +53,14 @@ Usage:
   tempo signal <workflow-id> <name> [payload]
   tempo cancel <workflow-id>       Request cancellation.
 
+  tempo list [--json]              Every execution the server knows about.
+  tempo describe <workflow-id> [--json]
+      Status, what the execution is waiting on, and its history.
+
 Options:
   --server=URL   Server to talk to. Default $TEMPO_SERVER_URL, else
                  http://127.0.0.1:7233.
+  --json         Machine-readable output, for list and describe.
 `;
 
 interface ParsedArgs {
@@ -114,6 +122,14 @@ async function dispatch(argv: string[]): Promise<number> {
       );
     case 'cancel':
       return cancelWorkflow(serverUrl, required(rest[0], 'workflow id'));
+    case 'list':
+      return listExecutions(serverUrl, flags.has('json'));
+    case 'describe':
+      return describeExecution(
+        serverUrl,
+        required(rest[0], 'workflow id'),
+        flags.has('json'),
+      );
     case undefined:
     case 'help':
       process.stdout.write(USAGE);

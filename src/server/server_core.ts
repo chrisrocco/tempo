@@ -73,6 +73,7 @@ import type { ExecutionRecord, HistoryStore } from './ports/history_store';
 import type { TaskQueue } from './ports/task_queue';
 import type { WorkflowTaskQueue } from './ports/workflow_task_queue';
 import type { TimerService } from './ports/timer_service';
+import { completedSeqs, pendingWork } from './pending_work';
 
 const CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4;
 
@@ -125,24 +126,6 @@ export interface ServerCore {
   ): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
-}
-
-function completedSeqs(history: HistoryEvent[]): {
-  activities: Set<number>;
-  timers: Set<number>;
-  children: Set<number>;
-} {
-  const activities = new Set<number>();
-  const timers = new Set<number>();
-  const children = new Set<number>();
-  for (const ev of history) {
-    if (ev.type === 'activityCompleted' || ev.type === 'activityFailed')
-      activities.add(ev.seq);
-    else if (ev.type === 'timerFired') timers.add(ev.seq);
-    else if (ev.type === 'childCompleted' || ev.type === 'childFailed')
-      children.add(ev.seq);
-  }
-  return { activities, timers, children };
 }
 
 export function createServerCore(deps: ServerCoreDeps): ServerCore {
@@ -375,45 +358,43 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     let anyActivity = false;
     for (const rec of records) {
       if (rec.status !== 'running') continue;
-      const done = completedSeqs(rec.history);
-      for (const ev of rec.history) {
-        if (ev.type === 'activityScheduled' && !done.activities.has(ev.seq)) {
-          activityTaskQueue.enqueue({
-            workflowId: rec.workflowId,
+      // The same derivation `describeExecution` reports, so what an operator is
+      // told this execution awaits is exactly what recovery re-dispatches.
+      const pending = pendingWork(rec.history);
+      for (const ev of pending.activities) {
+        activityTaskQueue.enqueue({
+          workflowId: rec.workflowId,
+          seq: ev.seq,
+          name: ev.name,
+          args: ev.args,
+          options: ev.options,
+        });
+        anyActivity = true;
+      }
+      for (const ev of pending.timers)
+        timerService.schedule(rec.workflowId, ev.seq, ev.fireAt);
+      for (const ev of pending.children) {
+        // A detached child reports nothing back, so there is no completion to
+        // synthesize and no parent to reconnect — it resumes as its own
+        // execution like any other. Only blocking children are correlated here.
+        if (ev.detached) continue;
+        const child = byId.get(ev.childId);
+        if (child && child.status !== 'running') {
+          await appendEvent(
+            rec.workflowId,
+            child.status === 'completed'
+              ? { type: 'childCompleted', seq: ev.seq, result: child.result }
+              : {
+                  type: 'childFailed',
+                  seq: ev.seq,
+                  error: errorMessage(child.failure),
+                },
+          );
+        } else {
+          parentOfChild.set(ev.childId, {
+            parentId: rec.workflowId,
             seq: ev.seq,
-            name: ev.name,
-            args: ev.args,
-            options: ev.options,
           });
-          anyActivity = true;
-        } else if (ev.type === 'timerStarted' && !done.timers.has(ev.seq)) {
-          timerService.schedule(rec.workflowId, ev.seq, ev.fireAt);
-        } else if (
-          ev.type === 'childStarted' &&
-          // A detached child reports nothing back, so there is no completion to
-          // synthesize and no parent to reconnect — it resumes as its own
-          // execution like any other. Only blocking children are correlated here.
-          !ev.detached &&
-          !done.children.has(ev.seq)
-        ) {
-          const child = byId.get(ev.childId);
-          if (child && child.status !== 'running') {
-            await appendEvent(
-              rec.workflowId,
-              child.status === 'completed'
-                ? { type: 'childCompleted', seq: ev.seq, result: child.result }
-                : {
-                    type: 'childFailed',
-                    seq: ev.seq,
-                    error: errorMessage(child.failure),
-                  },
-            );
-          } else {
-            parentOfChild.set(ev.childId, {
-              parentId: rec.workflowId,
-              seq: ev.seq,
-            });
-          }
         }
       }
       wake(rec.workflowId); // re-drive from history

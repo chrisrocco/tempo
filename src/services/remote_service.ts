@@ -16,7 +16,9 @@
 
 import type {
   ActivityResult,
+  ExecutionDetail,
   ExecutionStatus,
+  ExecutionSummary,
   LeasedActivityTask,
   RpcRequest,
   RpcResponse,
@@ -98,6 +100,19 @@ export function createRemoteService(
           throw new Error(outcome.failure ?? 'workflow failed');
         await sleep(pollIntervalMs);
       }
+    },
+    async describeExecution(
+      workflowId: string,
+    ): Promise<ExecutionDetail | undefined> {
+      return (
+        ((await call({
+          method: 'describeExecution',
+          workflowId,
+        })) as ExecutionDetail | null) ?? undefined
+      );
+    },
+    async listExecutions(): Promise<ExecutionSummary[]> {
+      return (await call({ method: 'listExecutions' })) as ExecutionSummary[];
     },
     async pollWorkflowTask(): Promise<WorkflowTask | undefined> {
       return (

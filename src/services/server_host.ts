@@ -16,6 +16,8 @@
 
 import type {
   ActivityResult,
+  ExecutionDetail,
+  ExecutionSummary,
   LeasedActivityTask,
   StartWorkflowOptions,
   TaskToken,
@@ -28,6 +30,8 @@ import {
   MemoryTimerService,
   MemoryWorkflowTaskQueue,
   createServerCore,
+  describeExecution,
+  summarizeExecution,
   MemoryHistoryStore,
   type HistoryStore,
 } from '../server';
@@ -49,6 +53,8 @@ export interface ServerHost {
   ): Promise<void>;
   cancel(workflowId: string): Promise<void>;
   getOutcome(workflowId: string): Promise<WorkflowOutcome>;
+  describeExecution(workflowId: string): Promise<ExecutionDetail | undefined>;
+  listExecutions(): Promise<ExecutionSummary[]>;
   pollWorkflowTask(): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
@@ -129,6 +135,13 @@ export function createServerHost(
         failure:
           rec.status === 'failed' ? errorMessage(rec.failure) : undefined,
       };
+    },
+    async describeExecution(workflowId) {
+      const rec = await historyStore.get(workflowId);
+      return rec && describeExecution(rec);
+    },
+    async listExecutions() {
+      return (await historyStore.list()).map(summarizeExecution);
     },
     pollWorkflowTask() {
       return core.pollWorkflowTask();

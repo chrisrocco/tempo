@@ -13,4 +13,6 @@ export * from './memory/memory_workflow_task_queue';
 export * from './memory/memory_timer_service';
 export * from './file/file_history_store';
 export * from './retry_policy';
+export * from './pending_work';
+export * from './execution_view';
 export * from './server_core';

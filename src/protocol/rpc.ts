@@ -35,6 +35,8 @@ export type RpcRequest =
     }
   | { method: 'cancel'; workflowId: string }
   | { method: 'getOutcome'; workflowId: string }
+  | { method: 'describeExecution'; workflowId: string }
+  | { method: 'listExecutions' }
   | { method: 'pollWorkflowTask' }
   | {
       method: 'completeWorkflowTask';

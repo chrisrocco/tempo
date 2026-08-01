@@ -24,6 +24,8 @@ function fakeService(overrides: Partial<WorkflowService>): WorkflowService {
     cancel: () => {},
     getResult: async () => undefined,
     getStatus: () => 'running',
+    describeExecution: async () => undefined,
+    listExecutions: async () => [],
     pollWorkflowTask: async () => undefined,
     completeWorkflowTask: async () => {},
     pollActivityTask: async () => undefined,
