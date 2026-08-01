@@ -422,28 +422,40 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
 
   // ── worker-facing seam (out-of-process workers) ──────────────────────────
+  /**
+   * The next *runnable* task, or undefined when there is none.
+   *
+   * An execution can go terminal while its task sits queued, so a drawn entry is
+   * not necessarily workable. Those are acked and skipped rather than returned as
+   * `undefined`: the distinction matters to a caller that stops draining on
+   * `undefined`, which would otherwise abandon real work still behind the dead
+   * entry in the queue. A polling worker only paid a wasted idle interval for it,
+   * which is why this went unnoticed while the seam had no in-process caller.
+   */
   async function pollWorkflowTask(): Promise<WorkflowTask | undefined> {
-    const leased = workflowTaskQueue.poll();
-    if (!leased) return undefined;
-    const rec = await historyStore.get(leased.workflowId);
-    if (!rec || rec.status !== 'running') {
-      workflowTaskQueue.complete(leased.token);
-      return undefined;
+    while (true) {
+      const leased = workflowTaskQueue.poll();
+      if (!leased) return undefined;
+      const rec = await historyStore.get(leased.workflowId);
+      if (!rec || rec.status !== 'running') {
+        workflowTaskQueue.complete(leased.token);
+        continue;
+      }
+      // remember the version this task was built at, for the completion-time check
+      workflowLeases.set(leased.token, {
+        workflowId: leased.workflowId,
+        version: rec.version,
+      });
+      return {
+        token: leased.token,
+        workflowId: leased.workflowId,
+        name: rec.name,
+        args: rec.args,
+        history: rec.history.slice(),
+        continueAsNewSuggested:
+          rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+      };
     }
-    // remember the version this task was built at, for the completion-time check
-    workflowLeases.set(leased.token, {
-      workflowId: leased.workflowId,
-      version: rec.version,
-    });
-    return {
-      token: leased.token,
-      workflowId: leased.workflowId,
-      name: rec.name,
-      args: rec.args,
-      history: rec.history.slice(),
-      continueAsNewSuggested:
-        rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
-    };
   }
 
   async function completeWorkflowTask(

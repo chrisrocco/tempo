@@ -6,9 +6,26 @@
  * an activity-worker loop that drains the activity-task queue. Distributed mode
  * runs those same loops in separate processes against `RemoteService`.
  *
- * The drain loops poll their queues *synchronously* (no await in the loop
- * condition) so there is no lost-wakeup window at the loop boundary: a wake that
- * lands mid-task is coalesced by the queue and picked up by the next poll.
+ * ## The loops go through the worker-facing seam, deliberately
+ *
+ * Both drain loops call `pollWorkflowTask`/`completeWorkflowTask` (and the
+ * activity pair) — the same methods a remote worker calls over RPC — rather than
+ * reaching past them to `buildWorkflowTask`/`applyWorkflowTaskResult`. It costs
+ * nothing here and buys the thing this service claims to be: leasing and the
+ * optimistic version check now run on every local task, so the always-on fast
+ * suite actually covers the concurrency control it is meant to be a regression
+ * net for. While the loops bypassed the seam, `workflowLeases` was never
+ * populated in local mode and the version check ran only in the distributed
+ * specs — the fast net had a hole exactly where the subtle bugs live.
+ *
+ * Polling through the seam is `async`, which reopens a lost-wakeup window the old
+ * synchronous loop condition closed by construction: a wake can land after the
+ * final poll saw an empty queue but before `draining` is cleared, and it would
+ * find `draining === true` and decline to start a sweep. The `pending` flag
+ * closes it — the same coalescing shape the workflow-task queue itself uses. Any
+ * kick arriving mid-drain sets it, the `do/while` sweeps once more, and it is
+ * read and `draining` cleared with no await between, so nothing can interleave
+ * in that gap.
  *
  * In-proc bookkeeping stays synchronous: `statusMirror` backs the sync `getStatus`
  * (updated after each task), and `waiters` back `getResult`. Both are rebuilt by
@@ -102,35 +119,43 @@ export function createLocalService(
 
   // In-proc workflow worker: drain the workflow-task queue, replaying + applying.
   let wfDraining = false;
+  let wfPending = false;
   function kickWorkflowWorker(): void {
-    if (wfDraining) return;
+    if (wfDraining) {
+      wfPending = true; // a wake landed mid-drain — sweep once more
+      return;
+    }
     wfDraining = true;
     void (async () => {
       try {
-        for (
-          let leased = workflowTaskQueue.poll();
-          leased;
-          leased = workflowTaskQueue.poll()
-        ) {
-          const { token, workflowId: id } = leased;
-          const task = await core.buildWorkflowTask(id);
-          if (task) {
+        do {
+          wfPending = false;
+          while (true) {
+            const task = await core.pollWorkflowTask();
+            if (!task) break;
             const result = await workflowWorker.replayTask(
               task.name,
               task.args,
               task.history,
               task.continueAsNewSuggested,
             );
-            await core.applyWorkflowTaskResult(id, result);
-            const rec = await historyStore.get(id);
+            // Applies behind the version check, so a result built on a snapshot
+            // that something appended to mid-replay is discarded — and the wake
+            // that appended it is what re-enqueues the execution.
+            await core.completeWorkflowTask(task.token, result);
+            const rec = await historyStore.get(task.workflowId);
             if (rec) {
-              statusMirror.set(id, rec.status);
+              statusMirror.set(task.workflowId, rec.status);
               if (rec.status !== 'running')
-                settleTerminal(id, rec.status, rec.result, rec.failure);
+                settleTerminal(
+                  task.workflowId,
+                  rec.status,
+                  rec.result,
+                  rec.failure,
+                );
             }
           }
-          workflowTaskQueue.complete(token);
-        }
+        } while (wfPending);
       } finally {
         wfDraining = false;
       }
@@ -140,20 +165,24 @@ export function createLocalService(
   // In-proc activity worker: drain the activity-task queue, running (with retry)
   // and reporting back. The workflow stays parked the whole time.
   let actDraining = false;
+  let actPending = false;
   function kickActivityWorker(): void {
-    if (actDraining) return;
+    if (actDraining) {
+      actPending = true;
+      return;
+    }
     actDraining = true;
     void (async () => {
       try {
-        for (
-          let task = activityTaskQueue.poll();
-          task;
-          task = activityTaskQueue.poll()
-        ) {
-          const result = await runActivityWithRetry(task);
-          await core.reportActivityResult(task.workflowId, task.seq, result);
-          activityTaskQueue.complete(task.token);
-        }
+        do {
+          actPending = false;
+          while (true) {
+            const task = await core.pollActivityTask();
+            if (!task) break;
+            const result = await runActivityWithRetry(task);
+            await core.completeActivityTask(task.token, result); // acks + reports
+          }
+        } while (actPending);
       } finally {
         actDraining = false;
       }
