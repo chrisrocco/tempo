@@ -261,8 +261,9 @@ npm run lint
 Working and green: the suite, `tsc --noEmit`, and the boundary checker all pass.
 The full programming model runs in all three modes above.
 
-Not built: server HA, activity heartbeats and start-to-close timeouts, the
-workflow-worker sticky cache, cross-process timer-sweep failover, and the
-deployment half of the CLI. The RPC has no auth or TLS and binds loopback. See
-[`ROADMAP.md`](ROADMAP.md) for what's planned and
-[`planning/`](planning/) for in-flight design work.
+Not built: server HA, activity heartbeats and start-to-close timeouts, workflow
+versioning, poison-task dead-lettering, the workflow-worker sticky cache,
+cross-process timer-sweep failover, and the deployment half of the CLI. The RPC
+has no auth or TLS and binds loopback. [`ROADMAP.md`](ROADMAP.md) ranks these by
+how likely each is to bite a real deployment ("Adoption blockers") and tracks
+what's planned; [`planning/`](planning/) holds in-flight design work.
