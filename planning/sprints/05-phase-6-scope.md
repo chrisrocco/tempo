@@ -17,12 +17,11 @@ have a dependency order the list hides. Two things fall out of sizing them:
 
 1. **Server HA is not a sprint item; it is a phase, and its first step is the last
    item in the list.** Everything else in Phase 6 is small by comparison.
-2. **The coherent unit of work cuts across the phase boundary.** Dead-lettering
-   (Phase 6) and start-to-close timeouts (scheduled earlier, under "finishing
-   distribution") are the same mechanism: the server gaining an opinion about
-   attempts and about when work is beyond saving. Shipping either alone leaves the
-   user-visible symptom — "this execution never finishes and nothing says why" —
-   only half fixed.
+2. **The coherent unit of work cuts across the phase boundary.** Poison-task
+   handling (Phase 6) and start-to-close timeouts (scheduled earlier, under
+   "finishing distribution") are the same mechanism: the server keeping a durable
+   account of attempts. Shipping either alone leaves the user-visible symptom —
+   "this execution never finishes and nothing says why" — only half fixed.
 
 So the sprint should be scoped by mechanism, not by phase membership.
 
@@ -30,7 +29,7 @@ So the sprint should be scoped by mechanism, not by phase membership.
 
 | Item                                 | Size | Risk   | Blocked on                          | Verdict            |
 | ------------------------------------ | ---- | ------ | ----------------------------------- | ------------------ |
-| Poison-task handling + dead-letter   | S    | low    | —                                   | **In**             |
+| Poison-task handling + terminate     | S    | low    | —                                   | **In**             |
 | Per-execution history inspection     | S    | low    | protocol addition                   | **In**             |
 | Activity start-to-close timeout      | M    | low    | —                                   | **In** (see below) |
 | Structured server/worker event log   | S    | low    | —                                   | Stretch            |
@@ -84,19 +83,38 @@ Today an execution can stop making progress for two unrelated reasons, and both
 present identically as silence — `getResult` never returns, and the only trace is
 backoff noise on stderr.
 
-**T1 — Dead-letter a poison workflow task.** Count deliveries; past a threshold,
-stop redelivering and move the execution to a terminal state carrying a
-diagnosable reason. Closes adoption blocker 2, the only blocker with no mitigation
-at all.
+**T1 — Make a poison workflow task loud, bounded, and escapable.** _Policy
+decided; see "The dead-letter question, settled" below._ The server learns that a
+task failed, counts attempts durably, re-enqueues with backoff, and reports the
+reason through `describe` — but never terminates the execution on its own. An
+operator ends it explicitly with `terminate`. Closes adoption blocker 2, the only
+blocker with no mitigation at all.
+
+Three pieces, in dependency order:
+
+1. **The worker must report the failure.** Today a replay that throws escapes
+   `runPollLoop`, which logs to stderr and never calls `completeWorkflowTask` — so
+   the task is never acked and the server never learns anything happened. It finds
+   out only when the lease expires. A `failWorkflowTask(token, reason)` on the
+   worker-facing seam is the prerequisite for everything else here.
+2. **The server counts and backs off.** Attempts on the record, backoff on
+   re-enqueue, the reason retained for inspection.
+3. **`tempo terminate <id>`**, non-cooperative — see the trap below on why
+   `cancel` cannot serve this.
 
 **T2 — Per-execution inspection.** `tempo describe <id>` (status, history, current
 parked state) and `tempo list`. This is the smaller half of the observability item
-and it is a _prerequisite for T1 being usable_: a dead-letter you cannot inspect
-just relocates the mystery.
+and it is a _prerequisite for T1 being usable_: under retry-forever, inspection is
+the entire mitigation — a stuck execution nobody can examine is just a mystery
+that now also never ends.
 
 **T3 — Activity start-to-close timeout.** Blocker 1, pulled forward from
 "finishing distribution" because it shares T1's mechanism — server-side accounting
-of an attempt and a terminal verdict on it. Doing them together is meaningfully
+of attempts, and a verdict on one that has run too long. Note the asymmetry the
+policy introduces: an over-running _activity attempt_ is failed (its retry policy
+then applies), while a failing _workflow task_ is only retried. Activities are
+I/O the server dispatched and can safely give up on; workflow tasks are the
+execution itself. Doing them together is meaningfully
 cheaper than doing them apart, and leaving it out means "stuck" still has an
 unaddressed cause after a sprint themed on stuck executions. Full heartbeats can
 stay deferred; the timeout is the part that ends the duplicate-concurrent-run
@@ -106,51 +124,98 @@ behavior.
 structured line per lifecycle event. No new dependency, and it is what the
 deferred metrics work will aggregate later.
 
+## The dead-letter question, settled
+
+The original plan was to settle a poison execution past a threshold. **We are
+not doing that.** Temporal's design is the model: a failing workflow task retries
+indefinitely with backoff, the execution stays open, and the failure is made
+impossible to miss rather than fatal.
+
+The reasoning that decided it: a workflow-task failure is almost always a _code_
+bug, and workflow code is redeployable. Fix the bug, roll the workflow workers,
+and the execution replays past the point that was throwing and carries on —
+**work that auto-termination would have destroyed**. The failure is loud and
+recoverable, which is a strictly better place to be than terminal and
+diagnosable. That trade only holds if the loudness is real, which is what makes
+the attempt count, the retained reason, and `describe` load-bearing rather than
+nice-to-have.
+
+Two consequences fall out and are now part of T1:
+
+- **An explicit terminate is mandatory**, not optional. Retrying forever with no
+  way out is worse than the bug.
+- **Per-attempt history events are out.** Temporal keeps attempt counts in mutable
+  state and treats retries as transient precisely to avoid history bloat, and the
+  same argument applies here with extra force (see the trap below). The counter
+  goes on `ExecutionRecord`; history records the _first_ failure so the log shows
+  something went wrong, not one event per attempt.
+
 ## Traps found while scoping
 
+- **`cancel` cannot unstick a poison execution — `terminate` is a different
+  mechanism.** Cancellation is cooperative and delivered _through replay_:
+  `requestCancel` appends `cancelRequested`, and the workflow unwinds when it next
+  replays. If replay is what throws, the cancel is never applied. Terminate must
+  settle the execution server-side without replaying it, which makes it the one
+  client operation that deliberately bypasses the workflow function.
 - **A delivery counter kept in the queue would be reset by a restart.** The queues
   are in-memory, and `resume()` re-enqueues from history — so an attempt count
   living in `LeaseTable` makes a poison task immortal across exactly the restart a
-  frustrated operator will try. The counter has to be durable: either a field on
-  `ExecutionRecord` or an event in history. History is more in keeping with the
-  event-sourced design but grows it on every failed attempt; the record is cheaper
-  and needs no protocol change. **Decide this first — everything in T1 hangs off
-  it.**
+  frustrated operator will try. **Decided:** the counter is a field on
+  `ExecutionRecord` (durable, not replayed, no wire-format change), following
+  Temporal's mutable-state precedent.
+- **Per-attempt events would poison the continue-as-new heuristic.** Beyond
+  history bloat: `continueAsNewSuggested` fires on history _length_, so a task
+  failing in a loop would push its own execution toward continue-as-new while
+  making no progress. A second reason the counter does not belong in history.
 - **`WorkflowTask` has nowhere to put an attempt count today.** It carries
   `{token, workflowId, name, args, history, continueAsNewSuggested}`
   ([`protocol/service.ts`](../../src/protocol/service.ts)). Adding to it is a
   change to a durable, serialized contract — ROADMAP invariant 4 applies.
-- **`failed` currently conflates two things.** `ExecutionStatus` is
-  `running | completed | failed`, and a dead-lettered execution is not the same as
-  a workflow that threw: one is "your code raised", the other is "we gave up".
-  Making them indistinguishable would defeat the point. Either a distinct status or
-  a structured failure reason — again a wire-contract change.
-- **Dead-lettering changes `getResult`'s contract.** It can now reject with an
-  infrastructure failure rather than only a workflow failure, or hang forever. That
-  is client-visible and needs saying in [`client/client.ts`](../../src/client/client.ts).
+- **`failed` will conflate two things once terminate exists.** `ExecutionStatus`
+  is `running | completed | failed`, and an operator-terminated execution is not a
+  workflow that threw: one is "we pulled the plug", the other is "your code
+  raised". Folding them together loses the distinction exactly where a postmortem
+  needs it. Either a distinct status or a structured reason — a wire-contract
+  change either way, so ROADMAP invariant 4 applies.
+- **`getResult` never returns for a wedged execution, and that is now permanent.**
+  Under retry-forever it hangs until someone terminates, at which point it rejects.
+  A caller with no timeout waits indefinitely by design — say so in
+  [`client/client.ts`](../../src/client/client.ts) rather than leaving people to
+  discover it.
 - **[Ticket 04](../tickets/04-validate-markers-against-commands.md) pairs with
-  T1.** A dead-letter is only as useful as its reason, and 04 produces a
-  `NondeterminismError` carrying `{seq, expected, actual}` — the single most likely
-  reason a task is poison. Sequence 04 first, or accept a generic reason in T1 and
-  enrich it later.
-- **Inspection needs new RPCs.** `WorkflowService` exposes `getResult`/`getStatus`
-  and nothing else — no history fetch, no execution list. T2 is a protocol
-  addition, not just a CLI change.
+  T1.** The whole policy rests on the reported reason being good enough to act on,
+  and 04 produces a `NondeterminismError` carrying `{seq, expected, actual}` — the
+  single most likely reason a task is poison. Sequence 04 first, or accept a
+  generic reason in T1 and enrich it later.
+- ~~**Inspection needs new RPCs.**~~ Landed with T2: `describeExecution` /
+  `listExecutions` are on the seam, and `describe` already has the section T1's
+  attempt count and last failure belong in.
 - **Backpressure is genuinely blocked, not merely deprioritized.** Retry is
   worker-side today; throttling a retry storm means throttling a decision the
   server does not yet make. It has to follow server-decided retry.
 
 ## Acceptance criteria
 
-- [ ] **T1:** a workflow whose replay always throws reaches a terminal state within
-      a bounded number of deliveries instead of redelivering forever.
-- [ ] **T1:** the terminal state is distinguishable from an ordinary workflow
-      failure, and carries a reason naming why the task could not be applied.
-- [ ] **T1:** the delivery count survives a server restart — a spec restarts the
-      server mid-poison and asserts the execution still dead-letters.
-- [ ] **T2:** `tempo describe <id>` prints status, history, and what the execution
+- [ ] **T1:** a workflow whose replay throws has that failure _reported to the
+      server_ rather than dropped on the floor — the worker calls
+      `failWorkflowTask`, and the task is not left to expire silently.
+- [ ] **T1:** the execution stays `running` and keeps retrying. It is **not**
+      auto-terminated, and a spec asserts that: this is the policy, and a future
+      change that "helpfully" settles it should fail the suite.
+- [ ] **T1:** redelivery of a repeatedly failing task backs off rather than
+      spinning at the lease interval.
+- [ ] **T1:** `describe` shows the attempt count and the last failure reason.
+- [ ] **T1:** the attempt count survives a server restart — a spec restarts the
+      server mid-poison and asserts the count did not reset to zero.
+- [ ] **T1:** deploying a corrected workflow lets a wedged execution complete. This
+      is the whole justification for the policy, so it is a spec, not a hope:
+      replay against a registry that throws, then swap in one that does not, and
+      assert the execution finishes.
+- [ ] **T1:** `tempo terminate <id>` settles a wedged execution _without_ replaying
+      it, and a spec covers the case `cancel` cannot reach.
+- [x] **T2:** `tempo describe <id>` prints status, history, and what the execution
       is parked on; `tempo list` enumerates executions with status.
-- [ ] **T2:** a dead-lettered execution's reason is visible through `describe`.
 - [ ] **T3:** an activity exceeding its start-to-close timeout is failed by the
       server rather than left to duplicate on lease expiry; a spec asserts one
       run, not two.

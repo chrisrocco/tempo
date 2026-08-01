@@ -45,14 +45,14 @@ and the interim mitigation live here, so neither repeats the other.
 | 2   | Poison tasks wedge an execution      | Any replay that throws — a workflow bug, a nondeterminism error — leaves a task that cannot be completed, so the lease redelivers it forever. `getResult` never returns and the only signal is stderr backoff.                                               | None. Detect by watching for one execution replaying endlessly.                                                                                      | Phase 6                        |
 | 3   | No workflow versioning               | Deploying changed workflow code while executions are in flight diverges replay from history, which lands in blocker 2.                                                                                                                                       | Drain in-flight executions before deploying a changed workflow.                                                                                      | Unphased (needs design)        |
 | 4   | No auth or TLS; single server        | The RPC starts, signals, and cancels arbitrary workflows unauthenticated; the loopback bind is the only thing containing it. The server is also a single point of failure and a single writer.                                                               | Keep everything on one trusted host; do not widen the bind without a private network.                                                                | Unphased (auth) / Phase 9 (HA) |
-| 5   | No operational visibility            | No metrics, no tracing, no way to list executions or inspect a history. Debugging a stuck workflow means reading the data dir by hand.                                                                                                                       | `tempo result`, and the `.jsonl` logs under `DATA_DIR`.                                                                                              | Phase 6 / Phase 7              |
+| 5   | No metrics or tracing                | Per-execution state is now inspectable (`tempo describe` / `list`), but queue depth, task latency, and history size are unmeasured, so nothing aggregates across executions or alerts.                                                                       | `tempo describe` for one execution; the `.jsonl` logs under `DATA_DIR` for the rest.                                                                 | Phase 7 (inspection landed)    |
 | 6   | Retry state is not durable           | Retry counters live in the activity worker's memory, so a worker lost mid-backoff restarts attempts at 0 on redelivery — `maximumAttempts` is best-effort under worker loss.                                                                                 | Assume more attempts than configured; keep activities idempotent.                                                                                    | Phase 7                        |
 | 7   | Generated ids can collide on restart | `LocalService`/`ServerHost` counters restart at 0, so a fresh child id can collide with a resumed one.                                                                                                                                                       | Pass explicit `workflowId`s.                                                                                                                         | Unphased                       |
 
-Blockers 1, 2, and 6 reduce to one missing capability: **the server cannot tell a
-worker that is slow from one that is gone, and has no terminal disposition for
-work that can never succeed.** Scope them together and the fix is one mechanism,
-not three.
+Blockers 1, 2, and 6 reduce to one missing capability: **the server keeps no
+account of attempts.** It cannot tell a worker that is slow from one that is gone,
+nor a task that is failing from one still in flight — a failed replay is not even
+reported to it. Scope them together and the fix is one mechanism, not three.
 
 ## Phases 6–9
 
@@ -62,9 +62,9 @@ depends on. The decomposition and the evidence behind it are in
 this is the schedule that came out of it. Two things it changed:
 
 - **Phases are scoped by mechanism, not by symptom.** Activity timeouts used to
-  sit in "finishing distribution" and dead-lettering in "production", but they are
-  one capability — the server having an opinion about attempts and about when work
-  is beyond saving — so they ship together in Phase 6.
+  sit in "finishing distribution" and poison-task handling in "production", but
+  they are one capability — the server keeping a durable account of attempts — so
+  they ship together in Phase 6.
 - **HA moved behind the store.** A shared multi-writer store is a _prerequisite_
   for HA, not a sibling of it, so it gets its own phase before it.
 
@@ -73,15 +73,32 @@ this is the schedule that came out of it. Two things it changed:
 _An execution can no longer stop making progress silently._ Both ways it can
 happen today (a poison task, a hung activity) present identically as silence.
 
-- **Dead-letter poison workflow tasks.** Count deliveries durably; past a
-  threshold, stop redelivering and settle the execution with a diagnosable reason
-  (adoption blocker 2). The count must survive a restart — the queues are
-  in-memory, so a counter held there is reset by exactly the restart an operator
-  will try.
-- **Per-execution inspection** — `tempo describe <id>` and `tempo list`, plus the
-  RPCs they need; `WorkflowService` has no history fetch today (blocker 5, in
-  part). Prerequisite for the above being usable: a dead-letter nobody can inspect
-  just relocates the mystery.
+- **Make a poison workflow task loud, bounded, and escapable** (adoption blocker
+  2). A replay that throws is reported to the server via a new `failWorkflowTask`
+  — today it escapes the poll loop and the server never learns — which lets the
+  server count attempts durably, back off between redeliveries, and retain the
+  reason for `describe`. The count lives on the record, not in the queue: the
+  queues are in-memory, so a counter held there resets on exactly the restart an
+  operator will try.
+
+  **The execution is never auto-terminated.** A workflow-task failure is nearly
+  always a code bug, and workflow code is redeployable — fix it, roll the workers,
+  and the execution replays past the throw and carries on. Terminating would
+  destroy recoverable work. This follows Temporal, and the reasoning is in
+  [sprint 05](planning/sprints/05-phase-6-scope.md#the-dead-letter-question-settled).
+
+- **`tempo terminate <id>`** — the escape hatch retry-forever requires. It must
+  settle the execution _without_ replaying it, because `cancel` cannot serve here:
+  cancellation is cooperative and delivered through replay, so it never lands on
+  the execution whose replay is the thing that throws.
+- ~~**Per-execution inspection**~~ — **landed.** `tempo describe <id>` and
+  `tempo list` over new `describeExecution`/`listExecutions` RPCs, reporting what
+  an execution is parked on. Views are derived from history, never stored
+  ([`src/server/execution_view.ts`](src/server/execution_view.ts)), over the same
+  outstanding-work derivation crash recovery re-dispatches
+  ([`src/server/pending_work.ts`](src/server/pending_work.ts)) — so what an
+  operator is told and what resume actually does cannot drift. Closes the
+  history-inspection half of blocker 5; metrics and tracing remain in Phase 7.
 - **Activity start-to-close timeouts** (blocker 1), then heartbeats. The timeout is
   the part that ends the duplicate-concurrent-run behavior; heartbeats can follow
   inside the phase. See
@@ -90,8 +107,10 @@ happen today (a poison task, a hung activity) present identically as silence.
 - **Structured lifecycle log**, replacing ad-hoc stderr writes — no new dependency,
   and it is the source Phase 7 aggregates.
 
-**Exit criterion:** no execution can stop making progress without becoming
-terminal and inspectable, and a spec proves it across a server restart.
+**Exit criterion:** no execution stops making progress silently. A stuck one
+reports what it is waiting on, how many times it has tried, and why it last
+failed; an operator can end it; and deploying corrected workflow code lets it
+finish. Specs prove all three, the attempt count across a server restart.
 
 ### Phase 7 — Measurement and control
 
