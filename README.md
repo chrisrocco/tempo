@@ -207,7 +207,7 @@ it mechanically — layering, core purity, and the author entrypoint — via
 
 **Design documentation lives in the code**, in the `@fileoverview` comment of the
 module that owns each idea. There is no `docs/` tree to drift out of sync.
-[`CLAUDE.md`](CLAUDE.md) explains that convention and how to structure code so it
+[`AGENTS.md`](AGENTS.md) explains that convention and how to structure code so it
 keeps working.
 
 Read in this order the first time; each builds on the last:

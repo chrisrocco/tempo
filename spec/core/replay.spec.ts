@@ -5,7 +5,7 @@
  * That this is possible at all is the determinism boundary paying off — see
  * `src/workflow.ts`.
  *
- * These are internals specs (per CLAUDE.md's two-kinds split): they pin the
+ * These are internals specs (per AGENTS.md's two-kinds split): they pin the
  * invariants the engine rests on, for contributors. The author-facing programming
  * model is documented by `spec/integration/local.spec.ts`.
  */
