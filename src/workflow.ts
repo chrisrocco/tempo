@@ -55,6 +55,7 @@ export {
   executeChild,
   startChild,
   type ChildHandle,
+  type ChildOptions,
   continueAsNew,
   workflowInfo,
   type WorkflowInfo,

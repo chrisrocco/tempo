@@ -39,6 +39,16 @@ export interface StartChildCommand extends CommandBase {
   childArgs: unknown[];
   /** false = blocking (executeChild); true = fire-and-forget (startChild). */
   detached: boolean;
+  /**
+   * The child's execution id, when the workflow chose one. Absent means "derive
+   * it from lineage" (see `server_core.childExecutionId`).
+   *
+   * A chosen id is a *claim* on that execution: if one already exists under it,
+   * the server correlates to that execution instead of starting a second. This
+   * is how a workflow expresses "one child per real-world thing" — one planner
+   * per calendar event — rather than one per call.
+   */
+  workflowId?: string;
 }
 
 /** Cancel a fire-and-forget child, identified by the seq of its startChild command. */

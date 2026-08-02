@@ -239,6 +239,21 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     return historyStore.append(workflowId, [event]);
   }
 
+  /**
+   * What a parent is told about a child that has reached a terminal state. Three
+   * paths need this — a child settling now, a child that settled during an
+   * outage, and a claimed id that was already finished when it was claimed — and
+   * they must agree on how a terminated child reads to its parent.
+   */
+  function childOutcomeEvent(
+    seq: number,
+    child: ExecutionRecord,
+  ): HistoryEvent {
+    return child.status === 'completed'
+      ? { type: 'childCompleted', seq, result: child.result }
+      : { type: 'childFailed', seq, error: errorMessage(child.failure) };
+  }
+
   // Wake an execution: it needs another workflow task. The queue coalesces, so a
   // wake during an in-flight task becomes exactly one more task.
   function wake(workflowId: string): void {
@@ -266,16 +281,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (!parent || parent.status !== 'running') return;
     const child = await historyStore.get(childId);
     if (!child) return;
-    await appendEvent(
-      link.parentId,
-      child.status === 'completed'
-        ? { type: 'childCompleted', seq: link.seq, result: child.result }
-        : {
-            type: 'childFailed',
-            seq: link.seq,
-            error: errorMessage(child.failure),
-          },
-    );
+    await appendEvent(link.parentId, childOutcomeEvent(link.seq, child));
     wake(link.parentId);
   }
 
@@ -323,8 +329,22 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       });
       timerService.schedule(workflowId, cmd.seq, fireAt);
     } else if (cmd.type === 'startChild') {
-      const childId = childExecutionId(workflowId, runId, cmd.seq);
-      launch(childId, cmd.childName, cmd.childArgs);
+      const childId =
+        cmd.workflowId ?? childExecutionId(workflowId, runId, cmd.seq);
+      // An id the workflow chose is a claim, not a demand for a new execution:
+      // if something already holds it, correlate to that rather than starting a
+      // second. This is what makes "one child per calendar event" expressible.
+      const existing = await historyStore.get(childId);
+      if (existing) {
+        log('child.reused', {
+          workflowId,
+          seq: cmd.seq,
+          childId,
+          status: existing.status,
+        });
+      } else {
+        launch(childId, cmd.childName, cmd.childArgs);
+      }
       recordChild(workflowId, cmd.seq, childId);
       // Both kinds leave the marker — it is what stops replay re-launching the
       // child, and detached children need that as much as blocking ones do.
@@ -335,8 +355,20 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         detached: cmd.detached,
       });
       // Only a blocking child threads a completion back to its parent.
-      if (!cmd.detached)
-        parentOfChild.set(childId, { parentId: workflowId, seq: cmd.seq });
+      if (!cmd.detached) {
+        // A claimed id may already point at a finished execution, in which case
+        // no completion is ever coming and the parent would park forever. Settle
+        // it now, the same way `resumeFromHistory` settles a child that finished
+        // during an outage — and wake the parent, because unlike every other
+        // command here this one produces a completion the parent can consume
+        // immediately rather than something that will wake it later.
+        if (existing && existing.status !== 'running') {
+          await appendEvent(workflowId, childOutcomeEvent(cmd.seq, existing));
+          wake(workflowId);
+        } else {
+          parentOfChild.set(childId, { parentId: workflowId, seq: cmd.seq });
+        }
+      }
     } else if (cmd.type === 'cancelChild') {
       const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
       if (childId) await requestCancel(childId);
@@ -577,16 +609,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         if (ev.detached) continue;
         const child = byId.get(ev.childId);
         if (child && child.status !== 'running') {
-          await appendEvent(
-            rec.workflowId,
-            child.status === 'completed'
-              ? { type: 'childCompleted', seq: ev.seq, result: child.result }
-              : {
-                  type: 'childFailed',
-                  seq: ev.seq,
-                  error: errorMessage(child.failure),
-                },
-          );
+          await appendEvent(rec.workflowId, childOutcomeEvent(ev.seq, child));
         } else {
           parentOfChild.set(ev.childId, {
             parentId: rec.workflowId,

@@ -92,7 +92,8 @@ describe('crash recovery — resume from a durable store', () => {
       await sleep(30);
       return n;
     };
-    const parent = async () => (await executeChild<number>('child', 5)) * 2;
+    const parent = async () =>
+      (await executeChild<number>('child', { args: [5] })) * 2;
     try {
       const store1 = await FileHistoryStore.open(dir);
       const rt1 = createLocalRuntime({ historyStore: store1 })

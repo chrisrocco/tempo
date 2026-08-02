@@ -317,8 +317,8 @@ describe('local runtime — child workflows', () => {
         runActivity<number>('square', n),
       )
       .registerWorkflow('parent', async () => {
-        const a = await executeChild<number>('child', 3);
-        const b = await executeChild<number>('child', 4);
+        const a = await executeChild<number>('child', { args: [3] });
+        const b = await executeChild<number>('child', { args: [4] });
         return a + b;
       });
 
@@ -337,8 +337,8 @@ describe('local runtime — child workflows', () => {
       )
       .registerWorkflow('parent', async () =>
         Promise.all([
-          executeChild<number>('child', 1),
-          executeChild<number>('child', 2),
+          executeChild<number>('child', { args: [1] }),
+          executeChild<number>('child', { args: [2] }),
         ]),
       );
 
@@ -357,6 +357,80 @@ describe('local runtime — child workflows', () => {
 
     await expectAsync(rt.start('parent').result()).toBeRejectedWithError(
       /child-boom/,
+    );
+  });
+
+  it('gives a child the workflow id the parent chose', async () => {
+    const rt = createLocalRuntime()
+      .registerWorkflow('child', async () => 'done')
+      .registerWorkflow('parent', async () =>
+        executeChild('child', { workflowId: 'plan-for-event-42' }),
+      );
+
+    await rt.start('parent').result();
+    expect(rt.getHandle('plan-for-event-42').status()).toBe('completed');
+  });
+
+  /**
+   * The point of choosing the id: it is a claim on one execution, so asking
+   * twice for the same real-world thing gets the same child rather than a second
+   * one. A scanner that sees the same calendar event on two consecutive polls
+   * relies on this.
+   */
+  it('starts one child when the same workflow id is claimed twice', async () => {
+    let started = 0;
+    const rt = createLocalRuntime()
+      .registerWorkflow('child', async () => {
+        started += 1;
+        return started;
+      })
+      .registerWorkflow('parent', async () => {
+        const first = await executeChild<number>('child', {
+          workflowId: 'once',
+        });
+        const second = await executeChild<number>('child', {
+          workflowId: 'once',
+        });
+        return [first, second];
+      });
+
+    await expectAsync(rt.start('parent').result()).toBeResolvedTo([1, 1]);
+    expect(started).toBe(1);
+  });
+
+  // The scanner shape: spawn-and-forget, keyed on the thing being planned, so
+  // seeing the same item on two polls does not spawn two planners.
+  it('starts one fire-and-forget child when the same id is claimed twice', async () => {
+    let started = 0;
+    const rt = createLocalRuntime()
+      .registerWorkflow('planner', async () => {
+        started += 1;
+        return 'planned';
+      })
+      .registerWorkflow('scanner', async () => {
+        startChild('planner', { workflowId: 'plan-for-event-42' });
+        startChild('planner', { workflowId: 'plan-for-event-42' });
+        await condition(() => false);
+      });
+
+    rt.start('scanner');
+    await wait(40);
+
+    expect(started).toBe(1);
+    expect(rt.getHandle('plan-for-event-42').status()).toBe('completed');
+  });
+
+  it('delivers the result of an execution that already finished under that id', async () => {
+    const rt = createLocalRuntime()
+      .registerWorkflow('child', async () => 'earlier result')
+      .registerWorkflow('parent', async () =>
+        executeChild<string>('child', { workflowId: 'shared' }),
+      );
+
+    await rt.start('child', [], { workflowId: 'shared' }).result();
+
+    await expectAsync(rt.start('parent').result()).toBeResolvedTo(
+      'earlier result',
     );
   });
 });
@@ -426,7 +500,7 @@ describe('local runtime — cancellation', () => {
         }
       })
       .registerWorkflow('parent', async () => {
-        const child = startChild('ticker', 'c1');
+        const child = startChild('ticker', { args: ['c1'] });
         await sleep(15); // let the child tick a few times
         child.cancel();
         return 'parent-done';

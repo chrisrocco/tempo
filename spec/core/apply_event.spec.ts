@@ -235,6 +235,53 @@ describe('core applyEvent — marker validation', () => {
     ).toThrowError(NondeterminismError);
   });
 
+  /**
+   * A workflow-chosen child id is checkable in a way a derived one is not: it
+   * came from the workflow's own logic, so a different one this time means that
+   * logic moved. Unchecked, the parent would await the child history names while
+   * believing it started another.
+   */
+  it('rejects a child marker whose id disagrees with the id the workflow chose', () => {
+    const ctx = createContext([], []);
+    requested(ctx, {
+      type: 'startChild',
+      seq: 0,
+      childName: 'planner',
+      childArgs: [],
+      detached: false,
+      workflowId: 'plan-for-event-42',
+    });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'childStarted',
+        seq: 0,
+        childId: 'plan-for-event-7',
+        detached: false,
+      }),
+    ).toThrowError(/plan-for-event-42/);
+  });
+
+  it('accepts a derived child id, which the workflow never claimed', () => {
+    const ctx = createContext([], []);
+    requested(ctx, {
+      type: 'startChild',
+      seq: 0,
+      childName: 'planner',
+      childArgs: [],
+      detached: false,
+    });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'childStarted',
+        seq: 0,
+        childId: 'parent.0.0',
+        detached: false,
+      }),
+    ).not.toThrow();
+  });
+
   it('names the seq and both sides of the disagreement', () => {
     const ctx = createContext([], []);
     requested(ctx, { type: 'startTimer', seq: 3, ms: 5 });

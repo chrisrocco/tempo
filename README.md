@@ -32,7 +32,8 @@ on npm and makes no stability promises — clone it, read it, run it.
   and optional start-to-close timeouts
 - **Timers** — real wall-clock, durable, re-armed from history on restart
 - **Signals** and **`condition`** — event-driven waiting, no polling
-- **Child workflows**, both blocking and fire-and-forget
+- **Child workflows**, blocking or fire-and-forget, optionally keyed by a
+  `workflowId` you choose — claim the same id twice and you get one child
 - **Cancellation**, cascading to children, surfacing as a catchable failure —
   plus `terminate` for when cooperative cancellation cannot land
 - **`continueAsNew`** to bound history on long-lived workflows

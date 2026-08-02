@@ -60,21 +60,50 @@ export function sleep(ms: number): Promise<void> {
   return scheduleCommand({ type: 'startTimer', ms }) as Promise<void>;
 }
 
+/** How a child is started. Both child primitives take the same shape. */
+export interface ChildOptions {
+  /** Arguments for the child workflow function. */
+  args?: unknown[];
+  /**
+   * The child's execution id. Omit and the engine derives one from lineage,
+   * which is unique per call site and per run.
+   *
+   * Supply one to say *which* execution this is, and the id becomes a claim: a
+   * child is started only if nothing holds that id already, and otherwise this
+   * correlates to the existing execution. That turns "start a planner" into "make
+   * sure there is exactly one planner for calendar event X" — a dedup key drawn
+   * from the domain rather than from call order, which survives the parent
+   * replaying, restarting, or asking twice.
+   *
+   * **It must be deterministic.** It is computed during replay like everything
+   * else, so derive it from workflow arguments, activity results, or signals —
+   * never from a clock or a random. Choosing a different id on a later replay is
+   * a divergence, and `apply_event` will say so rather than silently start a
+   * second child.
+   */
+  workflowId?: string;
+}
+
 /**
  * Blocking child: start a child workflow and await its result. The parent parks
  * and is resumed by a `childCompleted` event correlated back by `seq` — the same
  * dispatch-and-park path an activity takes. Contrast `startChild`, whose detached
  * children carry no completion event at all, which is why they need no waiter.
+ *
+ * With an explicit `workflowId` that is already taken, this awaits the existing
+ * execution rather than starting a second one — including one that has already
+ * finished, whose result is delivered immediately.
  */
 export function executeChild<T = unknown>(
   name: string,
-  ...args: unknown[]
+  options: ChildOptions = {},
 ): Promise<T> {
   return scheduleCommand({
     type: 'startChild',
     childName: name,
-    childArgs: args,
+    childArgs: options.args ?? [],
     detached: false,
+    workflowId: options.workflowId,
   }) as Promise<T>;
 }
 
@@ -90,16 +119,26 @@ export interface ChildHandle {
  * items appear and disappear, spawn a child per item and cancel it when the item
  * goes away. Cancel is itself replay-safe: it emits a `cancelChild` command the
  * server acts on once.
+ *
+ * Pair it with an explicit `workflowId` and the spawn becomes idempotent against
+ * the *domain* rather than the call: a scanner that sees the same item twice
+ * claims the same id twice and starts one child. Worth doing even when the
+ * scanner already tracks what it has seen — that bookkeeping is in the workflow's
+ * own state, and this check is not.
  */
-export function startChild(name: string, ...args: unknown[]): ChildHandle {
+export function startChild(
+  name: string,
+  options: ChildOptions = {},
+): ChildHandle {
   const ctx = getContext();
   if (ctx.cancelled) return { cancel() {} };
   const targetSeq = ctx.seq++;
   issue(ctx, {
     type: 'startChild',
     childName: name,
-    childArgs: args,
+    childArgs: options.args ?? [],
     detached: true,
+    workflowId: options.workflowId,
     seq: targetSeq,
   });
   return {

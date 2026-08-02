@@ -207,7 +207,10 @@ phase.
   from lineage — `parent.run.seq`, including the run because continue-as-new
   resets `seq` — which needs no counter and no recovery. The counter that remains
   (client starts with no id) is seeded on resume, and a duplicate id no longer
-  escapes as an unhandled rejection.
+  escapes as an unhandled rejection. `executeChild`/`startChild` also take an
+  explicit `workflowId` now, which is a _claim_: the same id twice yields one
+  child, so "one planner per calendar event" is expressible in the workflow
+  rather than reconstructed from its own bookkeeping.
 - **The deployment CLI** — `server install`, `deploy`, `status`, `logs`,
   `rollback`. Surface designed in [`src/cli/cli.ts`](src/cli/cli.ts) and
   [`planning/sprints/01-deployment-api.md`](planning/sprints/01-deployment-api.md).

@@ -70,6 +70,12 @@ function markerMismatch(
   if (ev.type === 'childStarted') {
     if (cmd.type !== 'startChild' || cmd.detached !== ev.detached)
       return describeCommand(cmd);
+    // An id the workflow chose is checkable in a way a derived one is not: it
+    // came from the workflow's own logic, so a different one on this replay
+    // means that logic has moved. Left unchecked the parent would go on awaiting
+    // the child history names while believing it started another.
+    if (cmd.workflowId !== undefined && cmd.workflowId !== ev.childId)
+      return `startChild ${cmd.workflowId}`;
     return undefined;
   }
   return undefined;
@@ -79,7 +85,7 @@ function markerMismatch(
 function describeMarker(ev: HistoryEvent): string {
   if (ev.type === 'activityScheduled') return `activityScheduled ${ev.name}`;
   if (ev.type === 'childStarted')
-    return `childStarted${ev.detached ? ' (detached)' : ''}`;
+    return `childStarted ${ev.childId}${ev.detached ? ' (detached)' : ''}`;
   return ev.type;
 }
 
