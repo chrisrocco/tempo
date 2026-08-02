@@ -85,13 +85,45 @@ import { silentLogger, type Logger } from './ports/logger';
 
 const CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4;
 
+/**
+ * The id of the child dispatched by the `startChild` at `seq`, in `runId`, of
+ * `parentId`.
+ *
+ * Derived rather than generated, because a counter cannot survive what this has
+ * to survive. Server-side counters restart at zero on boot, so a long-running
+ * parent that spawns children — a poller, say — collides with its own earlier
+ * children the first time the server restarts, and `create` rejects an id that
+ * already exists. Lineage is stable across restarts by construction, so there is
+ * no state to reconstruct and nothing to get wrong.
+ *
+ * `runId` is in there because continue-as-new resets history, and with it the
+ * `seq` counter: without it, the child at seq 3 of run 0 and the child at seq 3
+ * of run 1 would be the same execution. A poller continues as new constantly, so
+ * that is the common case rather than an exotic one.
+ *
+ * Dots read as a path, so a grandchild id shows its whole ancestry:
+ * `poller-1.0.3` spawns `poller-1.0.3.0.1`.
+ */
+export function childExecutionId(
+  parentId: string,
+  runId: number,
+  seq: number,
+): string {
+  return `${parentId}.${runId}.${seq}`;
+}
+
 export interface ServerCoreDeps {
   historyStore: HistoryStore;
   workflowTaskQueue: WorkflowTaskQueue;
   activityTaskQueue: TaskQueue;
   timerService: TimerService;
-  /** Launch a child execution (non-blocking) and return its workflowId. */
-  launch(name: string, args: unknown[]): string;
+  /**
+   * Create a child execution under an id the core has already chosen, and queue
+   * its first task. The id is **not** the host's to invent: a generated one has
+   * to be stable across a restart, and only the core knows the lineage that makes
+   * it so (see `childExecutionId`).
+   */
+  launch(workflowId: string, name: string, args: unknown[]): void;
   /** Nudge the (async, in-proc) workflow worker to drain the workflow-task queue. */
   kickWorkflowWorker(): void;
   /** Nudge the (async, in-proc) activity worker to drain the activity-task queue. */
@@ -256,7 +288,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
 
   // Dispatch one command. Everything dispatch-and-parks; its completion arrives
   // later as its own event and wakes the workflow.
-  async function applyCommand(workflowId: string, cmd: Command): Promise<void> {
+  async function applyCommand(
+    workflowId: string,
+    runId: number,
+    cmd: Command,
+  ): Promise<void> {
     if (cmd.type === 'scheduleActivity') {
       await appendEvent(workflowId, {
         type: 'activityScheduled',
@@ -287,7 +323,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       });
       timerService.schedule(workflowId, cmd.seq, fireAt);
     } else if (cmd.type === 'startChild') {
-      const childId = launch(cmd.childName, cmd.childArgs);
+      const childId = childExecutionId(workflowId, runId, cmd.seq);
+      launch(childId, cmd.childName, cmd.childArgs);
       recordChild(workflowId, cmd.seq, childId);
       // Both kinds leave the marker — it is what stops replay re-launching the
       // child, and detached children need that as much as blocking ones do.
@@ -362,7 +399,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       return;
     }
     // Dispatch this batch; the execution then parks until a completion wakes it.
-    for (const cmd of result.commands) await applyCommand(workflowId, cmd);
+    for (const cmd of result.commands)
+      await applyCommand(workflowId, rec.runId, cmd);
   }
 
   /**

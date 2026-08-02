@@ -249,6 +249,7 @@ understand what the engine does.
 | [`server/activity_timeout`](spec/server/activity_timeout.spec.ts)     | Start-to-close bounds an attempt without duplicating the work         |
 | [`server/logging`](spec/server/logging.spec.ts)                       | Lifecycle events, their fields, and silence by default                |
 | [`server/activity_retry`](spec/server/activity_retry.spec.ts)         | Server-decided retry: one budget, durable across restarts             |
+| [`server/id_collision`](spec/server/id_collision.spec.ts)             | Ids stay unique across restarts, and children derive theirs           |
 | [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
 | [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
 | [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |

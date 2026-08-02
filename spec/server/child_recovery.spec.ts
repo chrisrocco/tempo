@@ -5,9 +5,9 @@
  * history can still reach its children to cancel them.
  *
  * Driven against a headless `server_core` with an injected `launch`, because that
- * is the only seam where a *duplicate dispatch* is directly observable — counting
- * executions instead would hide one behind the id-counter collision that
- * `resumeFromHistory` already has (see ROADMAP, "Counter-collision on resume").
+ * is the only seam where a *duplicate dispatch* is directly observable: a second
+ * dispatch of the same child now reuses its derived id, so counting executions
+ * would show one either way.
  *
  * The fire-and-forget case is the one that regressed: it has no completion event,
  * so its `childStarted` marker is the only thing standing between a resumed parent
@@ -21,6 +21,7 @@ import {
   MemoryTaskQueue,
   MemoryTimerService,
   MemoryWorkflowTaskQueue,
+  childExecutionId,
   createServerCore,
   type ServerCore,
 } from '../../src/server';
@@ -39,17 +40,15 @@ interface Harness {
  */
 function serverOver(store: MemoryHistoryStore): Harness {
   const launched: string[] = [];
-  let counter = 0;
   const core = createServerCore({
     historyStore: store,
     workflowTaskQueue: new MemoryWorkflowTaskQueue(),
     activityTaskQueue: new MemoryTaskQueue(),
     timerService: new MemoryTimerService(),
-    launch: (name, args) => {
+    // The core now picks the child's id; a host only creates the record.
+    launch: (workflowId, name, args) => {
       launched.push(name);
-      const childId = `${name}-${++counter}`;
-      void store.create(childId, name, args);
-      return childId;
+      void store.create(workflowId, name, args).catch(() => {});
     },
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
@@ -101,7 +100,12 @@ describe('server child dispatch — the fire-and-forget marker', () => {
 
     const history = (await store.get('par'))!.history;
     expect(history).toEqual([
-      { type: 'childStarted', seq: 0, childId: 'ticker-1', detached: true },
+      {
+        type: 'childStarted',
+        seq: 0,
+        childId: childExecutionId('par', 0, 0),
+        detached: true,
+      },
     ]);
   });
 
@@ -164,7 +168,12 @@ describe('server child dispatch — blocking children still correlate', () => {
     await runTask(serverOver(store).core, 'par', blocking);
 
     expect((await store.get('par'))!.history).toEqual([
-      { type: 'childStarted', seq: 0, childId: 'ticker-1', detached: false },
+      {
+        type: 'childStarted',
+        seq: 0,
+        childId: childExecutionId('par', 0, 0),
+        detached: false,
+      },
     ]);
   });
 
@@ -176,7 +185,9 @@ describe('server child dispatch — blocking children still correlate', () => {
     const store = new MemoryHistoryStore();
     await store.create('par', 'blocking', []);
     await runTask(serverOver(store).core, 'par', blocking);
-    await store.setStatus('ticker-1', 'completed', { result: 'child-result' });
+    await store.setStatus(childExecutionId('par', 0, 0), 'completed', {
+      result: 'child-result',
+    });
 
     const restarted = serverOver(store);
     await restarted.core.resumeFromHistory(await store.list());

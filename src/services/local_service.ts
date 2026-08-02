@@ -98,7 +98,11 @@ export function createLocalService(
     workflowTaskQueue,
     activityTaskQueue,
     timerService,
-    launch: (n, a) => launch(n, a),
+    // The core supplies the child's id; it is derived from lineage so it stays
+    // stable across a restart (see `server_core.childExecutionId`).
+    launch: (workflowId, name, args) => {
+      launch(name, args, { workflowId });
+    },
     kickWorkflowWorker,
     kickActivityWorker,
   });
@@ -236,6 +240,9 @@ export function createLocalService(
     args: unknown[],
     opts: StartWorkflowOptions = {},
   ): string {
+    // Unlike the remote host this already had a `.catch`, so a duplicate id
+    // rejects the caller's `getResult` rather than escaping as an unhandled
+    // rejection — an error someone sees, not a dead process.
     const workflowId = opts.workflowId ?? `${name}-${++counter}`;
     statusMirror.set(workflowId, 'running');
     ensureWaiter(workflowId);
@@ -313,6 +320,12 @@ export function createLocalService(
     },
     async resume() {
       const records = await historyStore.list();
+      // Same reason as ServerHost.resume: the counter restarts at zero, so
+      // without this a restart reissues an id the store already holds.
+      for (const rec of records) {
+        const match = /-(\d+)$/.exec(rec.workflowId);
+        if (match) counter = Math.max(counter, Number(match[1]));
+      }
       for (const rec of records) {
         statusMirror.set(rec.workflowId, rec.status);
         ensureWaiter(rec.workflowId);

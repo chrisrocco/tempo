@@ -42,6 +42,26 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * The largest trailing `-<n>` across existing ids — how far the generator must
+ * be advanced so a restart cannot reissue an id.
+ *
+ * It reads ids rather than persisting the counter, which is deliberate: the store
+ * is the only thing that survives a restart, and the ids in it are the actual
+ * constraint. A separately persisted counter would be a second source of truth
+ * that could disagree with the executions themselves. Ids the *client* supplied
+ * may also end in `-<n>` and will be counted; overshooting costs nothing, while
+ * undershooting collides.
+ */
+function highestGeneratedSuffix(records: { workflowId: string }[]): number {
+  let highest = 0;
+  for (const { workflowId } of records) {
+    const match = /-(\d+)$/.exec(workflowId);
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  return highest;
+}
+
 export interface ServerHost {
   start(
     name: string,
@@ -111,16 +131,27 @@ export function createServerHost(
     name: string,
     args: unknown[],
   ): void {
-    void historyStore.create(workflowId, name, args).then(() => {
-      workflowTaskQueue.enqueue(workflowId);
-      log('execution.started', { workflowId, name });
-    });
+    void historyStore
+      .create(workflowId, name, args)
+      .then(() => {
+        workflowTaskQueue.enqueue(workflowId);
+        log('execution.started', { workflowId, name });
+      })
+      // `create` rejects an id that already exists, and this is a floating
+      // promise: without a handler that reject is an unhandled rejection, which
+      // Node treats as fatal. A duplicate start must never be able to take the
+      // server down — it is a client-visible error at worst.
+      .catch((error: unknown) => {
+        log('execution.start_rejected', {
+          workflowId,
+          name,
+          error: errorMessage(error),
+        });
+      });
   }
 
-  function launch(name: string, args: unknown[]): string {
-    const workflowId = `${name}-${++counter}`;
+  function launch(workflowId: string, name: string, args: unknown[]): void {
     createAndEnqueue(workflowId, name, args);
-    return workflowId;
   }
 
   return {
@@ -175,7 +206,14 @@ export function createServerHost(
       return core.completeActivityTask(token, result);
     },
     async resume() {
-      await core.resumeFromHistory(await historyStore.list());
+      const records = await historyStore.list();
+      // Seed the id counter past everything already on disk. It restarts at zero
+      // on boot, so without this the next generated id repeats one the previous
+      // boot handed out, and `create` rejects it. Children no longer rely on the
+      // counter (their ids are derived from lineage), but a client that starts a
+      // workflow without naming it still does.
+      counter = Math.max(counter, highestGeneratedSuffix(records));
+      await core.resumeFromHistory(records);
     },
     shutdown() {
       timerService.stop();
