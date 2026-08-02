@@ -14,6 +14,18 @@ import * as http from 'node:http';
 import type { RpcRequest, RpcResponse } from '../protocol';
 import type { ServerHost } from './server_host';
 
+/**
+ * The compile-time half of the switch below: `request` narrows to `never` once
+ * every method is handled, so adding a case to `RpcRequest` without handling it
+ * here is a type error rather than a silent `null` on the wire. The throw is the
+ * runtime half, for a client sending a method this server does not know.
+ */
+function assertNever(request: never): never {
+  throw new Error(
+    `unknown RPC method: ${JSON.stringify((request as { method?: unknown }).method)}`,
+  );
+}
+
 async function dispatch(
   host: ServerHost,
   request: RpcRequest,
@@ -48,6 +60,8 @@ async function dispatch(
       return (await host.pollActivityTask()) ?? null;
     case 'completeActivityTask':
       return host.completeActivityTask(request.token, request.result);
+    default:
+      return assertNever(request);
   }
 }
 

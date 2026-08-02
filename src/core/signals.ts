@@ -44,6 +44,18 @@ export function defineSignal(name: string): SignalDef {
   return { name };
 }
 
+/**
+ * Register the handler for a signal, delivering anything that arrived before it
+ * was set (see the buffering note below).
+ *
+ * `payload` is `any` rather than `unknown` so an author can write
+ * `setHandler(approved, (id: string) => …)` without a cast: parameters are
+ * contravariant, so `(id: string) => void` is not assignable to
+ * `(payload: unknown) => void`. The payload genuinely is untyped — it crossed
+ * the wire as JSON — and the handler's own signature is the assertion about its
+ * shape. Making `SignalDef` generic would let this be checked properly and is
+ * the right long-term fix.
+ */
 export function setHandler(
   signalDef: SignalDef,
   fn: (payload: any) => void,

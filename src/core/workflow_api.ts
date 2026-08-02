@@ -154,7 +154,16 @@ export function workflowInfo(): WorkflowInfo {
   return { continueAsNewSuggested: ctx.continueAsNewSuggested };
 }
 
-type AnyFn = (...args: any[]) => any;
+/**
+ * Any callable, for filtering a module namespace down to its functions.
+ *
+ * The `any[]` rest parameter is load-bearing and cannot be `unknown[]`: under
+ * `strictFunctionTypes` a concrete `(name: string) => string` is **not**
+ * assignable to `(...args: unknown[]) => unknown`, so the filter would reject
+ * every real activity. The return type carries no such constraint, so it stays
+ * `unknown`.
+ */
+type AnyFn = (...args: any[]) => unknown;
 
 /**
  * A record of activity signatures, keyed by activity name — the shape to write

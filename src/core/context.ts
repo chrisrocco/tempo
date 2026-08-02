@@ -29,6 +29,13 @@ interface BlockedCondition {
   reject: (e: unknown) => void;
 }
 
+/**
+ * A registered workflow function. The `any[]` rest parameter is deliberate and
+ * cannot be `unknown[]`: `strictFunctionTypes` makes parameters contravariant, so
+ * an author's `(name: string) => Promise<string>` would not be assignable to a
+ * registry of `(...args: unknown[]) => …`. Arguments arrive from history as
+ * `unknown[]` and are checked by the workflow's own signature.
+ */
 export type WorkflowFn = (...args: any[]) => Promise<unknown>;
 
 export interface WorkflowContext {

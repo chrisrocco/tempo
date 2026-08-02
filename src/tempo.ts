@@ -63,7 +63,8 @@ export interface Worker {
   stop(): Promise<void>;
 }
 
-type AnyFn = (...args: any[]) => any;
+/** Any callable. `any[]` rest params are required for assignability — see `core/workflow_api`. */
+type AnyFn = (...args: any[]) => unknown;
 
 /**
  * A module namespace carries whatever the module exported — constants, classes,

@@ -8,7 +8,7 @@
  * server re-arms (or immediately fires past-due) every timer still in the table.
  * The durable adapter (a DB-backed table + a crash-tolerant sweep with failover)
  * is the Phase 4/5 swap; the server logic here does not change. Cross-process
- * sweep leader-election is still TODO.
+ * sweep leader-election is unbuilt (ROADMAP Phase 9).
  *
  * A timer is otherwise the *same mechanism as an activity*: `sleep(ms)` allocates
  * a seq, registers a completion promise, and emits a `startTimer` command that a

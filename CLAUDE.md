@@ -115,9 +115,32 @@ something that no longer exists.
 
 ## Code style
 
+The baseline is the
+[Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html).
+Most of it the repo already satisfies structurally — no default exports, no `var`,
+no `namespace`, no enums, `strict: true`, `snake_case` filenames, named function
+declarations, JSDoc on exported symbols — and Prettier's defaults line up with its
+formatting (80 columns, two spaces, single quotes, semicolons, trailing commas).
+Two rules need local judgement rather than literal application:
+
+- **`any` in rest-parameter positions is correct here and must stay.** `WorkflowFn`,
+  `ActivityFn`, and `AnyFn` take `(...args: any[])` because
+  `strictFunctionTypes` makes parameters contravariant: a real
+  `(name: string) => Promise<string>` is _not_ assignable to
+  `(...args: unknown[]) => …`, so a registry typed that way would accept nothing
+  anyone writes. Return types carry no such constraint and stay `unknown`. Each
+  such `any` is documented at its declaration — Google's rule is to justify it,
+  not to pretend it is avoidable.
+- **A `switch` over a discriminated union ends in `default: assertNever(x)`**, not
+  a bare `default`. Google requires a default case; an empty one would defeat the
+  exhaustiveness check that makes an unhandled variant a compile error. See
+  `services/rpc_server.ts`, where the alternative was a new RPC method silently
+  returning `null` on the wire.
+
 Prettier owns mechanical formatting — line width, indentation, quotes, trailing
 commas (`.prettierrc.json`: `printWidth: 80`, `singleQuote: true`). Run
-`npm run format`. What it does **not** enforce, apply yourself:
+`npm run format`. What neither Prettier nor the Google guide enforces, apply
+yourself:
 
 - **Every module opens with an `@fileoverview`** JSDoc block, blank line after it
   — not a plain `//` header. For what goes _in_ it, see
