@@ -46,16 +46,15 @@ and the interim mitigation live here, so neither repeats the other.
 | 3   | No workflow versioning               | Deploying changed workflow code while executions are in flight diverges replay from history, which lands in blocker 2.                                                                                                                                                                                             | Drain in-flight executions before deploying a changed workflow.                       | Unphased (needs design)          |
 | 4   | No auth or TLS; single server        | The RPC starts, signals, and cancels arbitrary workflows unauthenticated; the loopback bind is the only thing containing it. The server is also a single point of failure and a single writer.                                                                                                                     | Keep everything on one trusted host; do not widen the bind without a private network. | Unphased (auth) / Phase 9 (HA)   |
 | 5   | Nothing aggregates or alerts         | Per-execution state is inspectable (`tempo describe` / `list`) and the server emits structured lifecycle events, but nothing rolls them up or alerts: queue depth is not even measurable yet, since the queues expose no size.                                                                                     | `tempo describe`; pipe the server's JSONL stderr somewhere you can query.             | Phase 7 (instrumentation landed) |
-| 6   | Retry state is not durable           | Retry counters live in the activity worker's memory, so a worker lost mid-backoff restarts attempts at 0 on redelivery — `maximumAttempts` is best-effort under worker loss.                                                                                                                                       | Assume more attempts than configured; keep activities idempotent.                     | Phase 7                          |
+| 6   | ~~Retry state is not durable~~       | **Closed.** Attempts are counted on the execution record and the server decides retries, so the budget holds across worker loss and server restarts, and is applied identically in local and distributed mode.                                                                                                     | —                                                                                     | Done (Phase 7)                   |
 | 7   | Generated ids can collide on restart | `LocalService`/`ServerHost` counters restart at 0, so a fresh child id can collide with a resumed one.                                                                                                                                                                                                             | Pass explicit `workflowId`s.                                                          | Unphased                         |
 
 Blockers 1, 2, and 6 were one missing capability — **the server kept no account of
-attempts** — and Phase 6 built it: failures are reported, counted durably, backed
-off, and bounded. What is left of each is what that account cannot supply on its
-own. Blocker 6 needs the retry _decision_ moved server-side to use it (Phase 7);
-blocker 1 needs a heartbeat, so a long honest attempt can hold its claim rather
-than merely being cut off at a deadline; and blocker 2 is now a question of
-noticing rather than surviving, which is Phase 7's metrics.
+attempts** — and building it closed 6 outright and reduced the other two to what
+an attempt count cannot supply on its own. Blocker 1 needs a heartbeat, so a long
+honest attempt can hold its claim rather than merely being cut off at a deadline.
+Blocker 2 is now a question of noticing rather than surviving: the instrumentation
+exists, the aggregation does not.
 
 ## Phases 6–9
 
@@ -129,9 +128,14 @@ finish. Specs prove all three, the attempt count across a server restart.
 _You can see what the system is doing, and it can throttle itself._ Everything
 here needs Phase 6's durable attempt accounting to build on.
 
-- **Server-decided retry.** Retry is worker-side and in-memory today; moving it to
-  the server (re-enqueue with backoff) is what makes attempt counts durable
-  (blocker 6). It reuses Phase 6's accounting rather than inventing its own.
+- ~~**Server-decided retry**~~ — **landed** (closes blocker 6). The server counts
+  attempts per activity `seq` on the execution record and re-queues with backoff,
+  rebuilding the task from its `activityScheduled` marker. Two things this fixed
+  beyond durability: `maximumAttempts` was only ever applied by the local drain
+  loop, so a **distributed activity worker retried nothing at all** — the same
+  workflow behaved differently depending on how it was hosted — and an attempt
+  count in worker memory was refreshed by any worker or server restart. Both
+  modes now make one attempt per delivery and let the server decide.
 - **Metrics and tracing** — queue depth, task latency, history size (blocker 5,
   the rest of it). **Sink decided: plain structured logs.** The instrumentation
   has landed as JSON Lines on stderr — `execution.started` / `.settled`,

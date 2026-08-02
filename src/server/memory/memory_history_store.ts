@@ -30,6 +30,7 @@ export class MemoryHistoryStore implements HistoryStore {
       version: 0,
       status: 'running',
       taskFailures: 0,
+      activityAttempts: {},
     });
   }
 
@@ -76,6 +77,23 @@ export class MemoryHistoryStore implements HistoryStore {
     if (!rec || rec.taskFailures === 0) return;
     rec.taskFailures = 0;
     rec.lastTaskFailure = undefined;
+  }
+
+  async recordActivityAttempt(
+    workflowId: string,
+    seq: number,
+  ): Promise<number> {
+    const rec = this.records.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    const attempts = (rec.activityAttempts[seq] ?? 0) + 1;
+    rec.activityAttempts[seq] = attempts;
+    return attempts;
+  }
+
+  async clearActivityAttempts(workflowId: string, seq: number): Promise<void> {
+    const rec = this.records.get(workflowId);
+    if (!rec) return;
+    delete rec.activityAttempts[seq];
   }
 
   async setStatus(

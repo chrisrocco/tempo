@@ -61,6 +61,7 @@
 
 import type {
   ActivityResult,
+  ActivityScheduledEvent,
   Command,
   ContinueAsNewCommand,
   HistoryEvent,
@@ -74,7 +75,12 @@ import type { TaskQueue } from './ports/task_queue';
 import type { WorkflowTaskQueue } from './ports/workflow_task_queue';
 import type { TimerService } from './ports/timer_service';
 import { completedSeqs, pendingWork } from './pending_work';
-import { workflowTaskBackoffMs } from './retry_policy';
+import {
+  backoffMs,
+  maxAttempts,
+  shouldRetry,
+  workflowTaskBackoffMs,
+} from './retry_policy';
 import { silentLogger, type Logger } from './ports/logger';
 
 const CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4;
@@ -359,6 +365,39 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     for (const cmd of result.commands) await applyCommand(workflowId, cmd);
   }
 
+  /**
+   * Put an activity back on the queue for another attempt, after its backoff.
+   * The task is rebuilt from the `activityScheduled` marker rather than kept
+   * around, so a retry works identically whether the previous attempt failed a
+   * moment ago or the server has restarted since it was dispatched.
+   *
+   * The delay is an in-memory timer. Losing it to a restart costs nothing: the
+   * marker is still in history with no completion, so `resume` re-dispatches the
+   * activity anyway, and the durable attempt count means the retry budget is not
+   * refreshed by the restart.
+   */
+  function redispatchAfter(
+    workflowId: string,
+    scheduled: ActivityScheduledEvent,
+    delayMs: number,
+  ): void {
+    const enqueue = (): void => {
+      activityTaskQueue.enqueue({
+        workflowId,
+        seq: scheduled.seq,
+        name: scheduled.name,
+        args: scheduled.args,
+        options: scheduled.options,
+      });
+      kickActivityWorker();
+    };
+    if (delayMs <= 0) {
+      enqueue();
+      return;
+    }
+    setTimeout(enqueue, delayMs).unref?.();
+  }
+
   async function reportActivityResult(
     workflowId: string,
     seq: number,
@@ -377,12 +416,42 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       log('activity.duplicate_dropped', { workflowId, seq });
       return;
     }
+    // A failed attempt is not yet a failed activity. The retry decision is the
+    // server's: it holds the durable attempt count, so the budget survives a
+    // worker dying mid-backoff and a server restart, neither of which a
+    // worker-side loop can survive.
+    if (!result.ok) {
+      const scheduled = rec.history.find(
+        (e): e is ActivityScheduledEvent =>
+          e.type === 'activityScheduled' && e.seq === seq,
+      );
+      const retry = scheduled?.options.retry;
+      const attempts = await historyStore.recordActivityAttempt(
+        workflowId,
+        seq,
+      );
+      if (scheduled && shouldRetry(retry, attempts)) {
+        const delayMs = backoffMs(retry, attempts);
+        log('activity.retry_scheduled', {
+          workflowId,
+          seq,
+          name: scheduled.name,
+          attempts,
+          maxAttempts: maxAttempts(retry),
+          delayMs,
+          error: result.error,
+        });
+        redispatchAfter(workflowId, scheduled, delayMs);
+        return;
+      }
+    }
     await appendEvent(
       workflowId,
       result.ok
         ? { type: 'activityCompleted', seq, result: result.result }
         : { type: 'activityFailed', seq, error: result.error },
     );
+    await historyStore.clearActivityAttempts(workflowId, seq);
     log('activity.settled', {
       workflowId,
       seq,

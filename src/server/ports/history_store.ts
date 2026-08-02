@@ -36,6 +36,17 @@ export interface ExecutionRecord {
   taskFailures: number;
   /** Why the most recent workflow task failed; cleared alongside the count. */
   lastTaskFailure?: string;
+  /**
+   * Failed attempts so far per activity `seq`, for executions with a retry policy
+   * in flight. Cleared when the activity reaches a terminal event, so this holds
+   * only what is currently being retried rather than growing with history.
+   *
+   * Durable for the same reason `taskFailures` is: the queues are in-memory, so a
+   * count kept there would reset on a restart and quietly grant a fresh retry
+   * budget. Not in history, because one event per failed attempt would bloat it
+   * and skew the continue-as-new hint.
+   */
+  activityAttempts: Record<number, number>;
 }
 
 /** Thrown by `appendIfVersion` when the execution has moved on — a lost lease race. */
@@ -85,6 +96,14 @@ export interface HistoryStore {
    * and a durable adapter should not pay a write for the common case.
    */
   clearTaskFailures(workflowId: string): Promise<void>;
+  /**
+   * Count one failed attempt of the activity at `seq`, returning the new total so
+   * the caller can apply the retry policy. Like `recordTaskFailure`, this must not
+   * bump `version` — an attempt is not history.
+   */
+  recordActivityAttempt(workflowId: string, seq: number): Promise<number>;
+  /** Forget an activity's attempts once it reaches a terminal event. */
+  clearActivityAttempts(workflowId: string, seq: number): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */
   setStatus(
     workflowId: string,

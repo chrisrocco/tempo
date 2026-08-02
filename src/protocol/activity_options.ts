@@ -10,9 +10,14 @@
 
 export interface RetryPolicy {
   /**
-   * Total attempts including the first. Defaults to 1 (no retry) in the in-memory
-   * server, so an activity without an explicit policy fails on first error — the
-   * pre-Phase-3 behavior. Set > 1 to opt into retries.
+   * Total attempts including the first. Defaults to 1 (no retry), so an activity
+   * without an explicit policy fails on its first error. Set > 1 to opt in.
+   *
+   * Enforced by the **server**, which counts attempts on the execution record —
+   * so the budget is the same however the engine is hosted, and survives a worker
+   * dying mid-backoff or a server restart. It used to be applied by whichever
+   * loop happened to be running the activity, which meant local mode honoured it
+   * and distributed mode silently ignored it.
    */
   maximumAttempts?: number;
   /** Delay before the second attempt. Grows by `backoffCoefficient` each retry. */

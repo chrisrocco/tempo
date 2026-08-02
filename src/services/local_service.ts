@@ -45,7 +45,6 @@
 
 import type {
   ActivityResult,
-  ActivityTask,
   ExecutionStatus,
   LeasedActivityTask,
   StartWorkflowOptions,
@@ -59,24 +58,12 @@ import {
   MemoryTaskQueue,
   MemoryTimerService,
   MemoryWorkflowTaskQueue,
-  backoffMs,
   createServerCore,
   describeExecution,
-  shouldRetry,
   summarizeExecution,
   type HistoryStore,
 } from '../server';
 import type { ActivityWorker, WorkflowWorker } from '../worker';
-
-// A plain server-side wait between activity attempts. Distinct from TimerService
-// (durable, workflow-facing): retry backoff never touches history.
-function sleepMs(ms: number): Promise<void> {
-  return ms > 0
-    ? new Promise((r) => {
-        setTimeout(r, ms).unref?.();
-      })
-    : Promise.resolve();
-}
 
 interface ResultWaiter {
   promise: Promise<unknown>;
@@ -176,8 +163,9 @@ export function createLocalService(
     })();
   }
 
-  // In-proc activity worker: drain the activity-task queue, running (with retry)
-  // and reporting back. The workflow stays parked the whole time.
+  // In-proc activity worker: drain the activity-task queue, running one attempt
+  // per task and reporting back. The workflow stays parked the whole time, and
+  // whether a failure is retried is the server's call, not this loop's.
   let actDraining = false;
   let actPending = false;
   function kickActivityWorker(): void {
@@ -193,7 +181,11 @@ export function createLocalService(
           while (true) {
             const task = await core.pollActivityTask();
             if (!task) break;
-            const result = await runActivityWithRetry(task);
+            // One attempt per delivery, exactly like the out-of-process loop.
+            // Retry is the server's decision now, so both modes get the same
+            // policy from the same code — and the attempt count survives this
+            // process dying, which an in-loop retry never could.
+            const result = await activityWorker.runTask(task);
             await core.completeActivityTask(task.token, result); // acks + reports
           }
         } while (actPending);
@@ -201,19 +193,6 @@ export function createLocalService(
         actDraining = false;
       }
     })();
-  }
-
-  async function runActivityWithRetry(
-    task: ActivityTask,
-  ): Promise<ActivityResult> {
-    let attemptsMade = 0;
-    while (true) {
-      const result = await activityWorker.runTask(task);
-      attemptsMade += 1;
-      if (result.ok || !shouldRetry(task.options.retry, attemptsMade))
-        return result;
-      await sleepMs(backoffMs(task.options.retry, attemptsMade));
-    }
   }
 
   function ensureWaiter(workflowId: string): ResultWaiter {

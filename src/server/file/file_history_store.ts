@@ -36,6 +36,8 @@ interface PersistedMeta {
   /** Absent in data dirs written before task-failure tracking; reads as 0. */
   taskFailures?: number;
   lastTaskFailure?: string;
+  /** Absent in data dirs written before server-decided retry; reads as empty. */
+  activityAttempts?: Record<number, number>;
 }
 
 function errorMessage(e: unknown): string {
@@ -87,6 +89,7 @@ export class FileHistoryStore implements HistoryStore {
       version: 0,
       status: 'running',
       taskFailures: 0,
+      activityAttempts: {},
     };
     this.cache.set(workflowId, rec); // synchronous → immediately visible to get()
     await this.enqueue(workflowId, async () => {
@@ -156,6 +159,25 @@ export class FileHistoryStore implements HistoryStore {
     await this.enqueue(workflowId, () => this.writeMeta(rec));
   }
 
+  async recordActivityAttempt(
+    workflowId: string,
+    seq: number,
+  ): Promise<number> {
+    const rec = this.cache.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    const attempts = (rec.activityAttempts[seq] ?? 0) + 1;
+    rec.activityAttempts[seq] = attempts;
+    await this.enqueue(workflowId, () => this.writeMeta(rec));
+    return attempts;
+  }
+
+  async clearActivityAttempts(workflowId: string, seq: number): Promise<void> {
+    const rec = this.cache.get(workflowId);
+    if (!rec || rec.activityAttempts[seq] === undefined) return; // nothing to write
+    delete rec.activityAttempts[seq];
+    await this.enqueue(workflowId, () => this.writeMeta(rec));
+  }
+
   async setStatus(
     workflowId: string,
     status: ExecutionStatus,
@@ -220,6 +242,7 @@ export class FileHistoryStore implements HistoryStore {
         rec.failure !== undefined ? errorMessage(rec.failure) : undefined,
       taskFailures: rec.taskFailures,
       lastTaskFailure: rec.lastTaskFailure,
+      activityAttempts: rec.activityAttempts,
     };
     const metaPath = path.join(this.execDir(rec.workflowId), 'meta.json');
     const tmp = `${metaPath}.tmp`;
@@ -261,6 +284,7 @@ export class FileHistoryStore implements HistoryStore {
             : undefined,
         taskFailures: meta.taskFailures ?? 0,
         lastTaskFailure: meta.lastTaskFailure,
+        activityAttempts: meta.activityAttempts ?? {},
       });
     }
   }
