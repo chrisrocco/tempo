@@ -37,4 +37,8 @@ export class MemoryTaskQueue implements TaskQueue {
   complete(token: TaskToken): void {
     this.leases.ack(token); // expired token → no-op (task already redelivered)
   }
+
+  renew(token: TaskToken): boolean {
+    return this.leases.renew(token, this.leaseMs);
+  }
 }

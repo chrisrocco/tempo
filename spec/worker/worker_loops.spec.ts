@@ -32,6 +32,7 @@ function fakeService(overrides: Partial<WorkflowService>): WorkflowService {
     failWorkflowTask: async () => {},
     pollActivityTask: async () => undefined,
     completeActivityTask: async () => {},
+    heartbeatActivityTask: async () => {},
     ...overrides,
   };
 }

@@ -45,6 +45,7 @@ export type RpcRequest =
       result: WorkflowTaskResult;
     }
   | { method: 'failWorkflowTask'; token: TaskToken; reason: string }
+  | { method: 'heartbeatActivityTask'; token: TaskToken }
   | { method: 'pollActivityTask' }
   | {
       method: 'completeActivityTask';

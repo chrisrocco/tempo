@@ -33,4 +33,10 @@ export interface TaskQueue {
   poll(): LeasedActivityTask | undefined;
   /** Ack a leased task. A token whose lease already expired is a no-op (redelivered). */
   complete(token: TaskToken): void;
+  /**
+   * Extend a lease because the worker holding it says it is still working.
+   * Returns false if the lease had already expired, in which case the task is
+   * someone else's now and must not be reclaimed.
+   */
+  renew(token: TaskToken): boolean;
 }

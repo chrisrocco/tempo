@@ -155,8 +155,11 @@ export function runActivityWorker(
   return runPollLoop('activity worker', options, async () => {
     const task = await service.pollActivityTask();
     if (!task) return false;
-    // One attempt per delivery; the lease redelivers on failure/crash (at-least-once).
-    const result = await worker.runTask(task);
+    // One attempt per delivery; the lease redelivers on failure/crash
+    // (at-least-once), unless the attempt heartbeats to keep its claim.
+    const result = await worker.runTask(task, () => {
+      void service.heartbeatActivityTask(task.token).catch(() => {});
+    });
     await service.completeActivityTask(task.token, result);
     return true;
   });

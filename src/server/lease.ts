@@ -23,6 +23,23 @@ export class LeaseTable<T> {
     return token;
   }
 
+  /**
+   * Push a lease's deadline out by `timeoutMs` from now, reporting whether the
+   * lease was still held. This is what a heartbeat buys: an attempt that keeps
+   * proving it is alive keeps its claim, so elapsed time alone stops being
+   * evidence that a worker died.
+   *
+   * An expired token renews nothing and returns false — the task has already
+   * gone to someone else, and quietly reviving it here would hand the same work
+   * to two workers.
+   */
+  renew(token: string, timeoutMs: number): boolean {
+    const lease = this.leases.get(token);
+    if (!lease) return false;
+    lease.deadline = Date.now() + timeoutMs;
+    return true;
+  }
+
   /** Release a lease, returning its item — or undefined if the lease already expired. */
   ack(token: string): T | undefined {
     const lease = this.leases.get(token);

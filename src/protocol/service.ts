@@ -121,6 +121,14 @@ export interface WorkflowService {
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
+  /**
+   * Report that this attempt is still alive. Renews the task's lease so it is not
+   * redelivered, and resets the `heartbeatTimeoutMs` deadline if one is set.
+   *
+   * A no-op for an attempt the server has already given up on — the worker finds
+   * out when it reports a result and the completion is dropped, not here.
+   */
+  heartbeatActivityTask(token: TaskToken): Promise<void>;
 }
 
 // ── worker task contracts ───────────────────────────────────────────────

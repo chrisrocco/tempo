@@ -50,5 +50,23 @@ export interface ActivityOptions {
    * first and redelivers before this deadline is reached.
    */
   startToCloseTimeoutMs?: number;
-  // heartbeatTimeoutMs, taskQueue — later phases.
+  /**
+   * How long the server will tolerate *silence* from an attempt that is
+   * heartbeating. Unset means it will not expect one.
+   *
+   * This is the other half of `startToCloseTimeoutMs`, and they bound different
+   * things. Start-to-close bounds how long an attempt may take; a heartbeat
+   * timeout bounds how long it may go without saying anything. A long, honest
+   * activity — an agent that thinks for ten minutes — wants a generous
+   * start-to-close (or none) and a short heartbeat timeout: it keeps its claim
+   * for as long as it is demonstrably working, and is given up on within seconds
+   * of its worker dying.
+   *
+   * Each heartbeat also renews the task's lease, which is what stops the queue
+   * redelivering long work to a second worker. Without heartbeats that
+   * redelivery is the only outcome for anything slower than
+   * `ACTIVITY_LEASE_MS` — see `worker/activity_worker`.
+   */
+  heartbeatTimeoutMs?: number;
+  // taskQueue — later phases.
 }

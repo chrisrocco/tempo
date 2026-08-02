@@ -29,7 +29,7 @@ on npm and makes no stability promises — clone it, read it, run it.
 ## What it does
 
 - **Activities** with typed `proxyActivities`, server-decided retry with backoff,
-  and optional start-to-close timeouts
+  start-to-close timeouts, and `heartbeat()` for work of unbounded duration
 - **Timers** — real wall-clock, durable, re-armed from history on restart
 - **Signals** and **`condition`** — event-driven waiting, no polling
 - **Child workflows**, blocking or fire-and-forget, optionally keyed by a
@@ -190,6 +190,7 @@ src/
   client/         WorkflowService -> ergonomic handles
   cli/            the `tempo` CLI
   workflow.ts     ★ AUTHOR ENTRYPOINT — deterministic primitives only
+  activity.ts     ★ ACTIVITY ENTRYPOINT — heartbeat()
   index.ts        ★ HOST ENTRYPOINT — createLocalRuntime, types
   tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
 bin/              server-main (the server process) · tempo (the CLI)
@@ -197,11 +198,14 @@ examples/         greeter.ts — the reference deployable worker
 spec/             the executable documentation
 ```
 
-The three `★` entrypoints are load-bearing: workflow code imports only from
+The `★` entrypoints are load-bearing: workflow code imports only from
 `workflow.ts`, which is what makes the determinism boundary a structural fact
 rather than a convention. [`tools/boundaries.ts`](tools/boundaries.ts) enforces
 it mechanically — layering, core purity, and the author entrypoint — via
-`npm run lint` and the suite.
+`npm run lint` and the suite. `activity.ts` is the other side of that line and is
+deliberately _not_ enforced: activities are where I/O belongs, so there is
+nothing to forbid — it exists to say where `heartbeat()` makes sense, and where
+it does not.
 
 ## Documentation
 
@@ -251,6 +255,8 @@ understand what the engine does.
 | [`server/logging`](spec/server/logging.spec.ts)                       | Lifecycle events, their fields, and silence by default                |
 | [`server/activity_retry`](spec/server/activity_retry.spec.ts)         | Server-decided retry: one budget, durable across restarts             |
 | [`server/id_collision`](spec/server/id_collision.spec.ts)             | Ids stay unique across restarts, and children derive theirs           |
+| [`server/heartbeat`](spec/server/heartbeat.spec.ts)                   | A long attempt holds its claim; a silent one is caught fast           |
+| [`worker/activity_context`](spec/worker/activity_context.spec.ts)     | `heartbeat()` as an author meets it: ambient, throttled, inert        |
 | [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
 | [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
 | [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |
@@ -274,9 +280,9 @@ npm run lint
 Working and green: the suite, `tsc --noEmit`, and the boundary checker all pass.
 The full programming model runs in all three modes above.
 
-Not built: server HA, activity heartbeats and start-to-close timeouts, workflow
-versioning, poison-task dead-lettering, the workflow-worker sticky cache,
-cross-process timer-sweep failover, and the deployment half of the CLI. The RPC
-has no auth or TLS and binds loopback. [`ROADMAP.md`](ROADMAP.md) ranks these by
+Not built: server HA, workflow versioning, metrics and alerting on top of the
+lifecycle log, the workflow-worker sticky cache, cross-process timer-sweep
+failover, and the deployment half of the CLI. The RPC has no auth or TLS and
+binds loopback. [`ROADMAP.md`](ROADMAP.md) ranks these by
 how likely each is to bite a real deployment ("Adoption blockers") and tracks
 what's planned; [`planning/`](planning/) holds in-flight design work.

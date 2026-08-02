@@ -189,7 +189,9 @@ export function createLocalService(
             // Retry is the server's decision now, so both modes get the same
             // policy from the same code — and the attempt count survives this
             // process dying, which an in-loop retry never could.
-            const result = await activityWorker.runTask(task);
+            const result = await activityWorker.runTask(task, () => {
+              void core.heartbeatActivityTask(task.token);
+            });
             await core.completeActivityTask(task.token, result); // acks + reports
           }
         } while (actPending);
@@ -317,6 +319,9 @@ export function createLocalService(
       result: ActivityResult,
     ): Promise<void> {
       return core.completeActivityTask(token, result);
+    },
+    heartbeatActivityTask(token: TaskToken): Promise<void> {
+      return core.heartbeatActivityTask(token);
     },
     async resume() {
       const records = await historyStore.list();

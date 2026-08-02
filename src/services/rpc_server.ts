@@ -60,6 +60,8 @@ async function dispatch(
       return (await host.pollActivityTask()) ?? null;
     case 'completeActivityTask':
       return host.completeActivityTask(request.token, request.result);
+    case 'heartbeatActivityTask':
+      return host.heartbeatActivityTask(request.token);
     default:
       return assertNever(request);
   }

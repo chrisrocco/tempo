@@ -187,6 +187,11 @@ export interface ServerCore {
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
+  /**
+   * The attempt behind `token` is still alive: renew its lease and reset its
+   * silence deadline. Ignored once the server has given up on that attempt.
+   */
+  heartbeatActivityTask(token: TaskToken): Promise<void>;
 }
 
 export function createServerCore(deps: ServerCoreDeps): ServerCore {
@@ -215,12 +220,16 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     TaskToken,
     { workflowId: string; version: number; polledAt: number }
   >();
-  // Start-to-close deadlines for attempts currently out with a worker, so a
-  // completion can cancel the one that belongs to it.
-  const startToCloseTimers = new Map<
-    TaskToken,
-    ReturnType<typeof setTimeout>
-  >();
+  // Deadlines for attempts currently out with a worker, so a completion — or a
+  // heartbeat, for the silence deadline — can cancel the ones that belong to it.
+  interface AttemptTimers {
+    startToClose?: ReturnType<typeof setTimeout>;
+    heartbeat?: ReturnType<typeof setTimeout>;
+  }
+  const attemptTimers = new Map<TaskToken, AttemptTimers>();
+  // The task behind each live attempt, so a heartbeat can read its options
+  // without another trip to history.
+  const heartbeatTasks = new Map<TaskToken, LeasedActivityTask>();
 
   function recordChild(parentId: string, seq: number, childId: string): void {
     let kids = childrenByParent.get(parentId);
@@ -724,40 +733,67 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
 
   /**
-   * Start-to-close: the attempt is now running, so give up on it at the deadline.
+   * Stop waiting on an attempt and record it as failed.
    *
-   * The server cannot stop a worker mid-activity — there is no heartbeat and no
-   * channel back into a running attempt. What it can do is stop *waiting*, record
-   * the outcome, and take the task out of the queue so the lease does not later
-   * redeliver it into a second concurrent run. That ack is the part that turns a
-   * timeout into a bound rather than just an early failure.
+   * The server cannot stop a worker mid-activity — there is no channel back into
+   * a running attempt, with or without heartbeats. What it can do is stop
+   * *waiting*, record the outcome, and take the task out of the queue so the
+   * lease does not later redeliver it into a second concurrent run. That ack is
+   * what turns a deadline into a bound rather than just an early failure.
+   *
+   * Two deadlines end here and they mean different things: `startToClose` says
+   * the attempt took too long, `heartbeat` says it went quiet. Both are failures
+   * of the attempt, not of the activity — the retry policy applies to each.
    */
-  function armStartToClose(task: LeasedActivityTask, timeoutMs: number): void {
-    const timer = setTimeout(() => {
-      const lease = activityLeases.get(task.token);
-      if (!lease) return; // completed in time
-      activityLeases.delete(task.token);
-      activityTaskQueue.complete(task.token); // no redelivery for this attempt
-      log('activity.timed_out', {
-        workflowId: lease.workflowId,
-        seq: lease.seq,
-        name: task.name,
-        timeoutMs,
-      });
-      void reportActivityResult(lease.workflowId, lease.seq, {
-        ok: false,
-        error: `activity ${task.name} timed out after ${timeoutMs}ms`,
-      });
-    }, timeoutMs);
-    timer.unref?.(); // a pending deadline must not hold the process open
-    startToCloseTimers.set(task.token, timer);
+  function abandonAttempt(
+    task: LeasedActivityTask,
+    kind: 'startToClose' | 'heartbeat',
+    timeoutMs: number,
+  ): void {
+    const lease = activityLeases.get(task.token);
+    if (!lease) return; // already settled
+    activityLeases.delete(task.token);
+    clearAttemptTimers(task.token);
+    activityTaskQueue.complete(task.token); // no redelivery for this attempt
+    log('activity.timed_out', {
+      workflowId: lease.workflowId,
+      seq: lease.seq,
+      name: task.name,
+      kind,
+      timeoutMs,
+    });
+    void reportActivityResult(lease.workflowId, lease.seq, {
+      ok: false,
+      error:
+        kind === 'heartbeat'
+          ? `activity ${task.name} stopped heartbeating for ${timeoutMs}ms`
+          : `activity ${task.name} timed out after ${timeoutMs}ms`,
+    });
   }
 
-  function clearStartToClose(token: TaskToken): void {
-    const timer = startToCloseTimers.get(token);
-    if (timer === undefined) return;
-    clearTimeout(timer);
-    startToCloseTimers.delete(token);
+  /** Arm one of an attempt's deadlines, replacing any timer already set for it. */
+  function armAttemptTimer(
+    task: LeasedActivityTask,
+    kind: 'startToClose' | 'heartbeat',
+    timeoutMs: number,
+  ): void {
+    const timers = attemptTimers.get(task.token) ?? {};
+    if (timers[kind]) clearTimeout(timers[kind]);
+    const timer = setTimeout(
+      () => abandonAttempt(task, kind, timeoutMs),
+      timeoutMs,
+    );
+    timer.unref?.(); // a pending deadline must not hold the process open
+    timers[kind] = timer;
+    attemptTimers.set(task.token, timers);
+  }
+
+  function clearAttemptTimers(token: TaskToken): void {
+    const timers = attemptTimers.get(token);
+    if (!timers) return;
+    if (timers.startToClose) clearTimeout(timers.startToClose);
+    if (timers.heartbeat) clearTimeout(timers.heartbeat);
+    attemptTimers.delete(token);
   }
 
   async function pollActivityTask(): Promise<LeasedActivityTask | undefined> {
@@ -767,12 +803,35 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowId: task.workflowId,
       seq: task.seq,
     });
-    // Armed on poll, not on dispatch: start-to-close bounds the attempt, and the
+    // Armed on poll, not on dispatch: both deadlines bound the attempt, and the
     // attempt begins when a worker takes the task, not when it was queued.
-    const timeoutMs = task.options.startToCloseTimeoutMs;
-    if (timeoutMs !== undefined && timeoutMs > 0)
-      armStartToClose(task, timeoutMs);
+    const { startToCloseTimeoutMs, heartbeatTimeoutMs } = task.options;
+    if (startToCloseTimeoutMs !== undefined && startToCloseTimeoutMs > 0)
+      armAttemptTimer(task, 'startToClose', startToCloseTimeoutMs);
+    // The heartbeat clock starts now, so an attempt that never beats at all is
+    // caught just as surely as one that stops partway.
+    if (heartbeatTimeoutMs !== undefined && heartbeatTimeoutMs > 0)
+      armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
+    heartbeatTasks.set(task.token, task);
     return task;
+  }
+
+  async function heartbeatActivityTask(token: TaskToken): Promise<void> {
+    const lease = activityLeases.get(token);
+    const task = heartbeatTasks.get(token);
+    // Silence is the only signal the server has, so a heartbeat for an attempt
+    // it already gave up on must not resurrect anything: the task belongs to
+    // whoever holds it now.
+    if (!lease || !task) return;
+    if (!activityTaskQueue.renew(token)) return;
+    const timeoutMs = task.options.heartbeatTimeoutMs;
+    if (timeoutMs !== undefined && timeoutMs > 0)
+      armAttemptTimer(task, 'heartbeat', timeoutMs);
+    log('activity.heartbeat', {
+      workflowId: lease.workflowId,
+      seq: lease.seq,
+      name: task.name,
+    });
   }
 
   async function completeActivityTask(
@@ -780,7 +839,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     result: ActivityResult,
   ): Promise<void> {
     const lease = activityLeases.get(token);
-    clearStartToClose(token); // this attempt is over, whatever it reported
+    clearAttemptTimers(token); // this attempt is over, whatever it reported
+    heartbeatTasks.delete(token);
     activityTaskQueue.complete(token);
     // Nothing sweeps this map when the queue expires a lease, so an expired
     // token still resolves here — the redelivery case is caught downstream, by
@@ -804,5 +864,6 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     failWorkflowTask,
     pollActivityTask,
     completeActivityTask,
+    heartbeatActivityTask,
   };
 }

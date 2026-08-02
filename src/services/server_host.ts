@@ -86,6 +86,7 @@ export interface ServerHost {
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   pollActivityTask(): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
+  heartbeatActivityTask(token: TaskToken): Promise<void>;
   /** Re-drive persisted executions after a restart. */
   resume(): Promise<void>;
   /** Stop background timers so the process can exit. */
@@ -204,6 +205,9 @@ export function createServerHost(
     },
     completeActivityTask(token, result) {
       return core.completeActivityTask(token, result);
+    },
+    heartbeatActivityTask(token) {
+      return core.heartbeatActivityTask(token);
     },
     async resume() {
       const records = await historyStore.list();
