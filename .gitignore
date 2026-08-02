@@ -2,3 +2,11 @@ node_modules/
 *.log
 dist/
 .DS_Store
+
+# Secrets. API keys live in the environment, never in the repo — this remote is
+# on GitHub, so a committed key is a published key.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
