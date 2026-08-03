@@ -10,6 +10,8 @@ import {spawn, type ChildProcess} from 'node:child_process';
 import {forwardOutput, stopChild, waitForLine} from '../../src/cli/process';
 
 const WORKER = 'examples/greeter.ts';
+/** A worker whose workflow settles as failed; see its @fileoverview for why. */
+const FAILING_WORKER = 'spec/support/failing_worker.ts';
 
 function tempo(args: string[]): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx', 'bin/tempo.ts', ...args], {
@@ -60,6 +62,39 @@ describe('tempo CLI', () => {
     } finally {
       await stopChild(server);
     }
+  }, 60000);
+
+  /**
+   * One-shot mode: the whole round-trip as a single foreground command, which is
+   * the shortest path from "nothing running" to "a workflow ran on a real worker
+   * through a real server". It has to own port discovery and readiness itself —
+   * a shell script doing this would have to guess at both.
+   */
+  it('runs one workflow to completion and stops, with --run', async () => {
+    const {code, out} = await runTempo([
+      'up',
+      WORKER,
+      '--port=0',
+      '--run=greeter',
+      'world',
+    ]);
+
+    expect(code).toBe(0);
+    expect(out).toContain('Hello, world!');
+  }, 60000);
+
+  // The exit code is the workflow's outcome, so this composes in CI: a failed
+  // execution must fail the command rather than being reported only in the log.
+  it('exits non-zero when the one-shot workflow fails', async () => {
+    const {code, err} = await runTempo([
+      'up',
+      FAILING_WORKER,
+      '--port=0',
+      '--run=failer',
+    ]);
+
+    expect(code).toBe(1);
+    expect(err).toContain('activity exploded');
   }, 60000);
 
   // A workflow started without --wait returns its id immediately; `tempo result`

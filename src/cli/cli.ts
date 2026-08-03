@@ -4,9 +4,10 @@
  * modules; this file owns only the surface: which words map to which call, and
  * turning a thrown error into an exit code.
  *
- * Built today: `up <entry>` (run server + worker in the foreground), the
- * workflow-driving commands `start` / `result` / `signal` / `cancel`, and the
- * read-only `list` / `describe`.
+ * Built today: `up <entry>` (run server + worker in the foreground, or one
+ * workflow to completion with `--run`), the workflow-driving commands
+ * `start` / `result` / `signal` / `cancel`, and the read-only `list` /
+ * `describe`.
  *
  * The deployment half of the surface is designed but not built (tracked in
  * planning/sprints/01-deployment-api.md). The target:
@@ -45,6 +46,11 @@ const USAGE = `tempo — run and drive workflows
 Usage:
   tempo up <entry> [--port=N] [--data-dir=PATH]
       Run a server and worker in the foreground. Ctrl-C to stop.
+
+  tempo up <entry> --run=<workflow> [args...] [--task-queue=NAME]
+      One-shot: bring up a server and worker, run one workflow to completion,
+      print its result, and stop. The whole distributed round-trip in one
+      command — no ports to pick, no readiness to guess at.
 
   tempo start <workflow> [args...] [--wait] [--task-queue=NAME]
       Start a workflow. Arguments are parsed as JSON, else taken as strings.
@@ -103,10 +109,20 @@ async function dispatch(argv: string[]): Promise<number> {
   switch (command) {
     case 'up': {
       const port = flags.get('port');
+      const run = flags.get('run');
       return up({
         entry: required(rest[0], 'worker entrypoint'),
         port: port === undefined ? undefined : Number(port),
         dataDir: flags.get('data-dir') || undefined,
+        // Positionals after the entry are the workflow's arguments, parsed the
+        // same way `tempo start` parses them.
+        run: run
+          ? {
+              name: run,
+              args: rest.slice(1).map(parseWorkflowArg),
+              taskQueue: flags.get('task-queue') || undefined,
+            }
+          : undefined,
       });
     }
     case 'start':
