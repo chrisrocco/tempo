@@ -46,9 +46,10 @@ Usage:
   tempo up <entry> [--port=N] [--data-dir=PATH]
       Run a server and worker in the foreground. Ctrl-C to stop.
 
-  tempo start <workflow> [args...] [--wait]
+  tempo start <workflow> [args...] [--wait] [--task-queue=NAME]
       Start a workflow. Arguments are parsed as JSON, else taken as strings.
       --wait blocks and prints the result instead of the workflow id.
+      --task-queue picks the worker pool; default is "default".
 
   tempo result <workflow-id>       Fetch the outcome of an existing run.
   tempo signal <workflow-id> <name> [payload]
@@ -114,6 +115,7 @@ async function dispatch(argv: string[]): Promise<number> {
         required(rest[0], 'workflow name'),
         rest.slice(1).map(parseWorkflowArg),
         flags.has('wait'),
+        flags.get('task-queue') || undefined,
       );
     case 'result':
       return fetchResult(serverUrl, required(rest[0], 'workflow id'));

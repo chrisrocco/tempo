@@ -57,19 +57,22 @@ export function createWorkflowWorker(
       continueAsNewSuggested: boolean,
     ): Promise<WorkflowTaskResult> {
       const fn = registry.get(name);
-      // Report this as a failed task rather than throwing. A throw escapes to the
-      // poll loop, which cannot complete the task, so the lease expires and the
-      // task redelivers — forever, while the client waits on an execution that
-      // never settles. Failing the execution is both terminal and diagnosable,
-      // and mirrors how a missing *activity* is reported (activity_worker).
-      if (!fn)
-        return {
-          done: false,
-          result: undefined,
-          failed: true,
-          failure: new Error(`no workflow registered as ${name}`),
-          commands: [],
-        };
+      // Throw, so the poll loop reports this through `failWorkflowTask` and the
+      // execution keeps running.
+      //
+      // This used to fail the *execution* instead, and that was right when it was
+      // written: a throw escaped the loop, the task was never acked, and the
+      // lease redelivered it forever while the client waited on something that
+      // would never settle. Both premises have since changed. A task failure is
+      // now reported, counted, backed off, and named in `tempo describe`; and
+      // once tasks are routed by queue, an unregistered type usually means a
+      // deploy that has not finished rolling rather than a typo — so recovering
+      // when the right version arrives is worth far more than failing fast.
+      //
+      // A genuine typo now wedges rather than settling. That is the poison-task
+      // policy applied consistently: retry and surface, never give up on the
+      // author's behalf (planning/sprints/05).
+      if (!fn) throw new Error(`no workflow registered as ${name}`);
       const ctx = createContext(args, history, continueAsNewSuggested);
       await replay(ctx, fn);
       return {

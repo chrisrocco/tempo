@@ -160,11 +160,16 @@ describe('distributed — real server process over RPC', () => {
     }
   }, 30000);
 
-  // A workflow name the worker does not have is ordinary user error (a typo), so
-  // it must settle the execution rather than wedge the worker. Before this was a
-  // failed task result, replayTask threw, the task could never be completed, and
-  // the lease redelivered it forever while the client waited on `running`.
-  it('fails an execution whose workflow is not registered, rather than retrying forever', async () => {
+  /**
+   * A workflow the worker cannot run keeps its execution alive and reports why.
+   *
+   * This used to settle the execution as failed, on the reading that an
+   * unregistered name is a typo. Once tasks are routed by queue it far more often
+   * means a deploy still rolling, and a typo is no longer expensive to diagnose:
+   * the reason is on the record, `describe` prints it, and `terminate` ends it.
+   * Failing fast would trade a recoverable state for an unrecoverable one.
+   */
+  it('keeps an execution alive when no worker has its workflow, and says why', async () => {
     const { url, proc: server } = await spawnServer();
     const worker = spawnMain(WORKER, { TEMPO_SERVER_URL: url });
     try {
@@ -172,8 +177,19 @@ describe('distributed — real server process over RPC', () => {
 
       const service = remote(url);
       const { workflowId } = service.start('not-a-workflow');
-      await expectAsync(service.getResult(workflowId)).toBeRejectedWithError(
-        /no workflow registered as not-a-workflow/,
+
+      // Give the task a few attempts to be reported and counted.
+      let detail = await service.describeExecution(workflowId);
+      const deadline = Date.now() + 10000;
+      while ((detail?.taskFailures ?? 0) === 0 && Date.now() < deadline) {
+        await wait(100);
+        detail = await service.describeExecution(workflowId);
+      }
+
+      expect(detail?.status).toBe('running'); // not settled behind your back
+      expect(detail?.taskFailures).toBeGreaterThan(0);
+      expect(detail?.lastTaskFailure).toContain(
+        'no workflow registered as not-a-workflow',
       );
     } finally {
       await kill(worker);

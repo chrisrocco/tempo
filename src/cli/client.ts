@@ -59,10 +59,11 @@ export async function startWorkflow(
   name: string,
   args: unknown[],
   wait: boolean,
+  taskQueue?: string,
 ): Promise<number> {
   await assertReachable(serverUrl);
   const service = createRemoteService(serverUrl);
-  const { workflowId } = service.start(name, args);
+  const { workflowId } = service.start(name, args, { taskQueue });
   if (!wait) {
     process.stdout.write(`${workflowId}\n`);
     return 0;

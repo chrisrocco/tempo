@@ -51,13 +51,13 @@ async function dispatch(
     case 'listExecutions':
       return host.listExecutions();
     case 'pollWorkflowTask':
-      return (await host.pollWorkflowTask()) ?? null;
+      return (await host.pollWorkflowTask(request.taskQueue)) ?? null;
     case 'completeWorkflowTask':
       return host.completeWorkflowTask(request.token, request.result);
     case 'failWorkflowTask':
       return host.failWorkflowTask(request.token, request.reason);
     case 'pollActivityTask':
-      return (await host.pollActivityTask()) ?? null;
+      return (await host.pollActivityTask(request.taskQueue)) ?? null;
     case 'completeActivityTask':
       return host.completeActivityTask(request.token, request.result);
     case 'heartbeatActivityTask':

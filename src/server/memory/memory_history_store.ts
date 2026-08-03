@@ -7,7 +7,11 @@
  * writes. Powers LocalService and the fast test path.
  */
 
-import type { ExecutionStatus, HistoryEvent } from '../../protocol';
+import {
+  DEFAULT_TASK_QUEUE,
+  type ExecutionStatus,
+  type HistoryEvent,
+} from '../../protocol';
 import type { ExecutionRecord, HistoryStore } from '../ports/history_store';
 import { VersionConflictError } from '../ports/history_store';
 
@@ -18,6 +22,7 @@ export class MemoryHistoryStore implements HistoryStore {
     workflowId: string,
     name: string,
     args: unknown[],
+    taskQueue: string = DEFAULT_TASK_QUEUE,
   ): Promise<void> {
     if (this.records.has(workflowId))
       throw new Error(`execution ${workflowId} already exists`);
@@ -26,6 +31,7 @@ export class MemoryHistoryStore implements HistoryStore {
       runId: 0,
       name,
       args,
+      taskQueue,
       history: [],
       version: 0,
       status: 'running',

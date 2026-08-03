@@ -14,6 +14,7 @@
  * Phase 6 and not built.
  */
 
+import { DEFAULT_TASK_QUEUE } from '../protocol';
 import type {
   ActivityResult,
   ExecutionDetail,
@@ -78,13 +79,13 @@ export interface ServerHost {
   getOutcome(workflowId: string): Promise<WorkflowOutcome>;
   describeExecution(workflowId: string): Promise<ExecutionDetail | undefined>;
   listExecutions(): Promise<ExecutionSummary[]>;
-  pollWorkflowTask(): Promise<WorkflowTask | undefined>;
+  pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
     result: WorkflowTaskResult,
   ): Promise<void>;
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
-  pollActivityTask(): Promise<LeasedActivityTask | undefined>;
+  pollActivityTask(taskQueue?: string): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   heartbeatActivityTask(token: TaskToken): Promise<void>;
   /** Re-drive persisted executions after a restart. */
@@ -131,12 +132,13 @@ export function createServerHost(
     workflowId: string,
     name: string,
     args: unknown[],
+    taskQueue: string,
   ): void {
     void historyStore
-      .create(workflowId, name, args)
+      .create(workflowId, name, args, taskQueue)
       .then(() => {
-        workflowTaskQueue.enqueue(workflowId);
-        log('execution.started', { workflowId, name });
+        workflowTaskQueue.enqueue(workflowId, taskQueue);
+        log('execution.started', { workflowId, name, taskQueue });
       })
       // `create` rejects an id that already exists, and this is a floating
       // promise: without a handler that reject is an unhandled rejection, which
@@ -151,14 +153,24 @@ export function createServerHost(
       });
   }
 
-  function launch(workflowId: string, name: string, args: unknown[]): void {
-    createAndEnqueue(workflowId, name, args);
+  function launch(
+    workflowId: string,
+    name: string,
+    args: unknown[],
+    taskQueue: string,
+  ): void {
+    createAndEnqueue(workflowId, name, args, taskQueue);
   }
 
   return {
     start(name, args = [], opts = {}) {
       const workflowId = opts.workflowId ?? `${name}-${++counter}`;
-      createAndEnqueue(workflowId, name, args);
+      createAndEnqueue(
+        workflowId,
+        name,
+        args,
+        opts.taskQueue ?? DEFAULT_TASK_QUEUE,
+      );
       return { workflowId };
     },
     signal(workflowId, signalName, payload) {
@@ -191,8 +203,8 @@ export function createServerHost(
     async listExecutions() {
       return (await historyStore.list()).map(summarizeExecution);
     },
-    pollWorkflowTask() {
-      return core.pollWorkflowTask();
+    pollWorkflowTask(taskQueue) {
+      return core.pollWorkflowTask(taskQueue);
     },
     completeWorkflowTask(token, result) {
       return core.completeWorkflowTask(token, result);
@@ -200,8 +212,8 @@ export function createServerHost(
     failWorkflowTask(token, reason) {
       return core.failWorkflowTask(token, reason);
     },
-    pollActivityTask() {
-      return core.pollActivityTask();
+    pollActivityTask(taskQueue) {
+      return core.pollActivityTask(taskQueue);
     },
     completeActivityTask(token, result) {
       return core.completeActivityTask(token, result);

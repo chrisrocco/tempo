@@ -82,6 +82,12 @@ export interface ChildOptions {
    * second child.
    */
   workflowId?: string;
+  /**
+   * Which pool of workers runs the child. Defaults to the parent's queue, which
+   * is almost always right — a child is part of the same application. Name one
+   * to hand work to a different pool.
+   */
+  taskQueue?: string;
 }
 
 /**
@@ -104,6 +110,7 @@ export function executeChild<T = unknown>(
     childArgs: options.args ?? [],
     detached: false,
     workflowId: options.workflowId,
+    taskQueue: options.taskQueue,
   }) as Promise<T>;
 }
 
@@ -139,6 +146,7 @@ export function startChild(
     childArgs: options.args ?? [],
     detached: true,
     workflowId: options.workflowId,
+    taskQueue: options.taskQueue,
     seq: targetSeq,
   });
   return {

@@ -192,6 +192,25 @@ _Losing the server stops being an outage._ Only reachable once Phase 8 lands.
 **Exit criterion:** documented, tested behavior under worker loss, server
 failover, and store failover.
 
+### Landed alongside — task-queue routing
+
+Not a phase item, but it turned out to be a prerequisite for running more than one
+application against a server. With a single global queue, a workflow task for app
+A could be claimed by an app B worker, which has no such workflow registered — and
+that used to **settle the execution as failed**, nondeterministically, depending
+on which worker won the poll.
+
+Work is now routed by queue name: workers declare theirs (`TEMPO_TASK_QUEUE`),
+callers pick one (`--task-queue`), and activities and children inherit their
+execution's. An unregistered workflow type is now a _task_ failure rather than an
+execution failure — it usually means a deploy still rolling, and recovering when
+the right version lands is worth more than failing fast, which is the poison-task
+policy applied consistently.
+
+Still unbuilt, and deliberately: **sticky sessions** (routing a run of activities
+to one specific host, for local state that cannot be a commit) need a session
+lifecycle and host liveness on top of this, which is where the real difficulty is.
+
 ## Unphased
 
 Real work that does not sequence behind anything, so it is not worth pinning to a

@@ -34,6 +34,12 @@ export interface WorkerLoop {
 }
 
 export interface WorkerLoopOptions {
+  /**
+   * Which pool this worker serves. Every worker on a queue must be able to run
+   * everything routed to it, so this is a claim about what the process contains.
+   * Omitted means "any queue", which only the in-process runtime should use.
+   */
+  taskQueue?: string;
   /** Backoff when a poll returns no task. */
   pollIntervalMs?: number;
   /** Delay after the first failure; doubles per consecutive failure. Default 50ms. */
@@ -123,7 +129,7 @@ export function runWorkflowWorker(
   options: WorkerLoopOptions = {},
 ): WorkerLoop {
   return runPollLoop('workflow worker', options, async () => {
-    const task = await service.pollWorkflowTask();
+    const task = await service.pollWorkflowTask(options.taskQueue);
     if (!task) return false;
     let result;
     try {
@@ -153,7 +159,7 @@ export function runActivityWorker(
   options: WorkerLoopOptions = {},
 ): WorkerLoop {
   return runPollLoop('activity worker', options, async () => {
-    const task = await service.pollActivityTask();
+    const task = await service.pollActivityTask(options.taskQueue);
     if (!task) return false;
     // One attempt per delivery; the lease redelivers on failure/crash
     // (at-least-once), unless the attempt heartbeats to keep its claim.

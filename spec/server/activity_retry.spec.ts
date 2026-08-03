@@ -51,13 +51,10 @@ async function seed(
 }
 
 function enqueue(queue: MemoryTaskQueue, options: ActivityOptions): void {
-  queue.enqueue({
-    workflowId: 'wf',
-    seq: 0,
-    name: 'flaky',
-    args: [],
-    options,
-  });
+  queue.enqueue(
+    { workflowId: 'wf', seq: 0, name: 'flaky', args: [], options },
+    'default',
+  );
 }
 
 /** Take the task and report it failed, as a worker doing one attempt would. */

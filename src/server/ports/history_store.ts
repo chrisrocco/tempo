@@ -17,6 +17,13 @@ export interface ExecutionRecord {
   runId: number;
   name: string;
   args: unknown[];
+  /**
+   * The pool this execution runs on. Durable because routing has to outlive the
+   * process that decided it: every workflow task this execution ever produces
+   * must go to the same pool, including the ones a restart re-drives from
+   * history, and its activities inherit it.
+   */
+  taskQueue: string;
   history: HistoryEvent[];
   version: number;
   status: ExecutionStatus;
@@ -62,7 +69,12 @@ export class VersionConflictError extends Error {
 
 export interface HistoryStore {
   /** Register a fresh execution. Rejects if the id already exists. */
-  create(workflowId: string, name: string, args: unknown[]): Promise<void>;
+  create(
+    workflowId: string,
+    name: string,
+    args: unknown[],
+    taskQueue?: string,
+  ): Promise<void>;
   /** A snapshot of the record, or undefined if unknown. */
   get(workflowId: string): Promise<ExecutionRecord | undefined>;
   /** Every execution — used by the resume driver on boot to re-drive running ones. */

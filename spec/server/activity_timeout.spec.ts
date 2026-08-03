@@ -50,13 +50,10 @@ describe('an activity that outlives its lease, with no timeout set', () => {
     const historyStore = new MemoryHistoryStore();
     const { core, activityTaskQueue } = makeCore(historyStore, 30);
     await seedScheduledActivity(historyStore, {});
-    activityTaskQueue.enqueue({
-      workflowId: 'wf',
-      seq: 0,
-      name: 'slow',
-      args: [],
-      options: {},
-    });
+    activityTaskQueue.enqueue(
+      { workflowId: 'wf', seq: 0, name: 'slow', args: [], options: {} },
+      'default',
+    );
 
     const first = await core.pollActivityTask();
     await wait(60); // the first worker is still going; its lease has expired
@@ -74,13 +71,16 @@ describe('start-to-close timeout', () => {
     const { core, activityTaskQueue } = makeCore(historyStore, 5000);
     const options: ActivityOptions = { startToCloseTimeoutMs: 30 };
     await seedScheduledActivity(historyStore, options);
-    activityTaskQueue.enqueue({
-      workflowId: 'wf',
-      seq: 0,
-      name: 'slow',
-      args: [],
-      options,
-    });
+    activityTaskQueue.enqueue(
+      {
+        workflowId: 'wf',
+        seq: 0,
+        name: 'slow',
+        args: [],
+        options,
+      },
+      'default',
+    );
 
     await core.pollActivityTask();
     await wait(80); // the worker never reports back
@@ -101,13 +101,16 @@ describe('start-to-close timeout', () => {
     const { core, activityTaskQueue } = makeCore(historyStore, 60);
     const options: ActivityOptions = { startToCloseTimeoutMs: 20 };
     await seedScheduledActivity(historyStore, options);
-    activityTaskQueue.enqueue({
-      workflowId: 'wf',
-      seq: 0,
-      name: 'slow',
-      args: [],
-      options,
-    });
+    activityTaskQueue.enqueue(
+      {
+        workflowId: 'wf',
+        seq: 0,
+        name: 'slow',
+        args: [],
+        options,
+      },
+      'default',
+    );
 
     await core.pollActivityTask();
     await wait(150); // well past both the timeout and the lease
@@ -120,13 +123,16 @@ describe('start-to-close timeout', () => {
     const { core, activityTaskQueue } = makeCore(historyStore, 5000);
     const options: ActivityOptions = { startToCloseTimeoutMs: 100 };
     await seedScheduledActivity(historyStore, options);
-    activityTaskQueue.enqueue({
-      workflowId: 'wf',
-      seq: 0,
-      name: 'slow',
-      args: [],
-      options,
-    });
+    activityTaskQueue.enqueue(
+      {
+        workflowId: 'wf',
+        seq: 0,
+        name: 'slow',
+        args: [],
+        options,
+      },
+      'default',
+    );
 
     const task = await core.pollActivityTask();
     await core.completeActivityTask(task!.token, { ok: true, result: 'done' });
@@ -148,13 +154,16 @@ describe('start-to-close timeout', () => {
     const { core, activityTaskQueue } = makeCore(historyStore, 5000);
     const options: ActivityOptions = { startToCloseTimeoutMs: 20 };
     await seedScheduledActivity(historyStore, options);
-    activityTaskQueue.enqueue({
-      workflowId: 'wf',
-      seq: 0,
-      name: 'slow',
-      args: [],
-      options,
-    });
+    activityTaskQueue.enqueue(
+      {
+        workflowId: 'wf',
+        seq: 0,
+        name: 'slow',
+        args: [],
+        options,
+      },
+      'default',
+    );
 
     const task = await core.pollActivityTask();
     await wait(80); // times out
