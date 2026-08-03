@@ -54,6 +54,33 @@ export interface ExecutionSummary {
   name: string;
   status: ExecutionStatus;
   historyLength: number;
+  /**
+   * Consecutive workflow-task failures. Non-zero on a `running` execution is the
+   * signal that it is wedged rather than merely waiting — the engine cannot
+   * replay it, and is retrying on a backoff.
+   *
+   * This lives on the *summary* rather than only the detail because a wedged
+   * execution is otherwise indistinguishable from a healthy one in a listing:
+   * both read `running`. Finding them meant describing every running execution
+   * in turn and reading this field off each — one request per execution, each
+   * carrying a full history, to answer a question the listing should answer.
+   */
+  taskFailures: number;
+  /** Why the most recent workflow task failed. */
+  lastTaskFailure?: string;
+}
+
+/**
+ * Is this execution wedged — running, but failing to replay?
+ *
+ * Both halves matter. `taskFailures > 0` alone would flag a settled execution
+ * that recovered or was terminated after a rough patch, and `running` alone is
+ * the normal state of every healthy workflow that is merely waiting on a timer
+ * or an activity. Defined here, beside the type, so `tempo list` and any other
+ * client cannot drift into two different answers.
+ */
+export function isStuck(execution: ExecutionSummary): boolean {
+  return execution.status === 'running' && execution.taskFailures > 0;
 }
 
 /**
@@ -76,14 +103,6 @@ export interface ExecutionDetail extends ExecutionSummary {
   result?: unknown;
   /** A message, not an Error — failures cross the wire as text. */
   failure?: string;
-  /**
-   * Consecutive workflow-task failures. Non-zero on a `running` execution is the
-   * signal that it is wedged rather than merely waiting — the engine cannot
-   * replay it, and is retrying on a backoff.
-   */
-  taskFailures: number;
-  /** Why the most recent workflow task failed. */
-  lastTaskFailure?: string;
 }
 
 /**
@@ -162,8 +181,7 @@ export interface ActivityTask {
 
 /** What an activity worker reports back after running an activity function. */
 export type ActivityResult =
-  | {ok: true; result: unknown}
-  | {ok: false; error: string};
+  {ok: true; result: unknown} | {ok: false; error: string};
 
 /** An activity task handed to a worker, with the lease token to complete it. */
 export interface LeasedActivityTask extends ActivityTask {

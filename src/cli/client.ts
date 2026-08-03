@@ -16,7 +16,7 @@
  * anything that would rather parse than read.
  */
 
-import type {ExecutionDetail, HistoryEvent} from '../protocol';
+import {isStuck, type ExecutionDetail, type HistoryEvent} from '../protocol';
 import {createRemoteService} from '../services';
 import {DEFAULT_SERVER_URL} from '../tempo';
 
@@ -188,7 +188,7 @@ export async function describeExecution(
   // replay looks identical to a healthy parked one without this. Only while it
   // is still running, though — the count outlives the execution, and announcing
   // a retry schedule for something already settled is just wrong.
-  if (detail.status === 'running' && detail.taskFailures > 0) {
+  if (isStuck(detail)) {
     out.push(
       '',
       `STUCK — ${detail.taskFailures} consecutive task failure${detail.taskFailures === 1 ? '' : 's'}, retrying with backoff`,
@@ -206,15 +206,19 @@ export async function describeExecution(
 export async function listExecutions(
   serverUrl: string,
   asJson: boolean,
+  stuckOnly = false,
 ): Promise<number> {
   await assertReachable(serverUrl);
-  const rows = await createRemoteService(serverUrl).listExecutions();
+  const all = await createRemoteService(serverUrl).listExecutions();
+  const rows = stuckOnly ? all.filter(isStuck) : all;
   if (asJson) {
     process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
     return 0;
   }
   if (rows.length === 0) {
-    process.stdout.write('no executions\n');
+    process.stdout.write(
+      stuckOnly ? 'no stuck executions\n' : 'no executions\n',
+    );
     return 0;
   }
   const width = Math.max(...rows.map((r) => r.workflowId.length), 11);
@@ -222,8 +226,14 @@ export async function listExecutions(
     `${'WORKFLOW ID'.padEnd(width)}  ${'NAME'.padEnd(12)}  ${'STATUS'.padEnd(10)}  EVENTS\n`,
   );
   for (const r of rows) {
+    // The marker goes on the row rather than into STATUS: the status is
+    // genuinely `running`, and overwriting it would hide that this execution is
+    // still live and still retrying.
+    const note = isStuck(r)
+      ? `  STUCK (${r.taskFailures} task failures: ${r.lastTaskFailure})`
+      : '';
     process.stdout.write(
-      `${r.workflowId.padEnd(width)}  ${r.name.padEnd(12)}  ${r.status.padEnd(10)}  ${r.historyLength}\n`,
+      `${r.workflowId.padEnd(width)}  ${r.name.padEnd(12)}  ${r.status.padEnd(10)}  ${r.historyLength}${note}\n`,
     );
   }
   return 0;

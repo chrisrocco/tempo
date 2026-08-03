@@ -37,6 +37,8 @@ export function summarizeExecution(rec: ExecutionRecord): ExecutionSummary {
     name: rec.name,
     status: rec.status,
     historyLength: rec.history.length,
+    taskFailures: rec.taskFailures,
+    lastTaskFailure: rec.lastTaskFailure,
   };
 }
 
@@ -66,7 +68,5 @@ export function describeExecution(rec: ExecutionRecord): ExecutionDetail {
       rec.status === 'failed' || rec.status === 'terminated'
         ? errorMessage(rec.failure)
         : undefined,
-    taskFailures: rec.taskFailures,
-    lastTaskFailure: rec.lastTaskFailure,
   };
 }
