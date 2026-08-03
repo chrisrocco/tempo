@@ -28,9 +28,14 @@ import type {
 } from '../../protocol';
 
 export interface TaskQueue {
-  enqueue(task: ActivityTask): void;
-  /** The next task, leased with a token, or undefined when the queue is empty. */
-  poll(): LeasedActivityTask | undefined;
+  /** `taskQueue` names the pool that may serve this task. */
+  enqueue(task: ActivityTask, taskQueue: string): void;
+  /**
+   * The next task on `taskQueue`, leased with a token, or undefined when that
+   * pool has nothing waiting. Omitting the name matches **any** pool, which is
+   * how the in-process runtime serves every execution with one set of loops.
+   */
+  poll(taskQueue?: string): LeasedActivityTask | undefined;
   /** Ack a leased task. A token whose lease already expired is a no-op (redelivered). */
   complete(token: TaskToken): void;
   /**

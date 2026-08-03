@@ -72,9 +72,16 @@ export function createRemoteService(
       // Generate the id client-side so the handle is usable before the round trip lands.
       const workflowId = opts.workflowId ?? `wf-${Date.now()}-${++idCounter}`;
       statusCache.set(workflowId, 'running');
-      void call({ method: 'start', name, args, opts: { workflowId } }).catch(
-        () => {},
-      );
+      // Forward the whole options bag, not just the id. Rebuilding it here meant
+      // every option added later was silently dropped on the way to the server —
+      // `taskQueue` went missing exactly that way, and the symptom was a workflow
+      // that started on the default queue and waited forever for a worker.
+      void call({
+        method: 'start',
+        name,
+        args,
+        opts: { ...opts, workflowId },
+      }).catch(() => {});
       return { workflowId };
     },
     signal(workflowId, signalName, payload) {
@@ -120,10 +127,14 @@ export function createRemoteService(
     async listExecutions(): Promise<ExecutionSummary[]> {
       return (await call({ method: 'listExecutions' })) as ExecutionSummary[];
     },
-    async pollWorkflowTask(): Promise<WorkflowTask | undefined> {
+    async pollWorkflowTask(
+      taskQueue?: string,
+    ): Promise<WorkflowTask | undefined> {
       return (
-        ((await call({ method: 'pollWorkflowTask' })) as WorkflowTask | null) ??
-        undefined
+        ((await call({
+          method: 'pollWorkflowTask',
+          taskQueue,
+        })) as WorkflowTask | null) ?? undefined
       );
     },
     async completeWorkflowTask(
@@ -146,10 +157,13 @@ export function createRemoteService(
     async failWorkflowTask(token: TaskToken, reason: string): Promise<void> {
       await call({ method: 'failWorkflowTask', token, reason });
     },
-    async pollActivityTask(): Promise<LeasedActivityTask | undefined> {
+    async pollActivityTask(
+      taskQueue?: string,
+    ): Promise<LeasedActivityTask | undefined> {
       return (
         ((await call({
           method: 'pollActivityTask',
+          taskQueue,
         })) as LeasedActivityTask | null) ?? undefined
       );
     },

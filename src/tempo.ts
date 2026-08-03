@@ -13,15 +13,23 @@
  *
  *   TEMPO_SERVER_URL  server to connect to (default http://127.0.0.1:7233)
  *   TEMPO_ROLE        `workflow` | `activity` | unset (unset runs both loops)
+ *   TEMPO_TASK_QUEUE  which pool to serve (default `default`)
  *   --describe        print {name, workflows, activities} as JSON and exit
  *
  * Running the *same* binary twice with a different `TEMPO_ROLE` is how the two
  * worker tiers are deployed: workflow workers replay workflow code, activity
  * workers run activities (the only I/O in the system), and each scales
  * independently against one server.
+ *
+ * `TEMPO_TASK_QUEUE` is what lets more than one application share a server. A
+ * queue name is a contract — every worker on it must register the same workflows
+ * and activities — and it is not optional once a second app exists: with one
+ * global queue, whichever worker wins a poll decides whether the task can run at
+ * all, and one that cannot serve it fails the task rather than passing it on.
  */
 
 import type { WorkflowFn } from './core';
+import { DEFAULT_TASK_QUEUE } from './protocol';
 import { createJsonLogger } from './server';
 import { createRemoteService } from './services';
 import {
@@ -49,6 +57,16 @@ export type WorkerRole = 'workflow' | 'activity';
 export interface StartWorkerOptions {
   /** Service identity: the unit name, the `tempo status` row, the `tempo logs` target. */
   name: string;
+  /**
+   * Which pool this worker serves. `TEMPO_TASK_QUEUE` overrides it, so one binary
+   * can be deployed into several pools.
+   *
+   * A queue name is a **contract**: every worker on it must register the same
+   * workflows and activities. Two different applications sharing one queue is the
+   * failure this routing exists to prevent — whichever worker wins the poll
+   * decides whether the task can run at all.
+   */
+  taskQueue?: string;
   /** Module namespace of workflow functions, keyed by export name. */
   workflows?: object;
   /** Module namespace of activity functions, keyed by export name. */
@@ -143,6 +161,8 @@ export function startWorker(options: StartWorkerOptions): Worker {
   // emits, so one pipeline reads both. A poll failure is the fault most likely
   // to matter here — an unreachable server makes a worker look healthy to its
   // supervisor while doing nothing (planning/tickets/02).
+  const taskQueue =
+    process.env.TEMPO_TASK_QUEUE ?? options.taskQueue ?? DEFAULT_TASK_QUEUE;
   const log = createJsonLogger();
   const onError = (error: unknown, consecutive: number): void => {
     log('worker.poll_failed', {
@@ -158,7 +178,10 @@ export function startWorker(options: StartWorkerOptions): Worker {
     for (const [exported, fn] of workflows)
       registry.set(exported, fn as WorkflowFn);
     loops.push(
-      runWorkflowWorker(service, createWorkflowWorker(registry), { onError }),
+      runWorkflowWorker(service, createWorkflowWorker(registry), {
+        onError,
+        taskQueue,
+      }),
     );
   }
   if (roles.includes('activity')) {
@@ -166,7 +189,10 @@ export function startWorker(options: StartWorkerOptions): Worker {
     for (const [exported, fn] of activities)
       registry.set(exported, fn as ActivityFn);
     loops.push(
-      runActivityWorker(service, createActivityWorker(registry), { onError }),
+      runActivityWorker(service, createActivityWorker(registry), {
+        onError,
+        taskQueue,
+      }),
     );
   }
 
@@ -183,7 +209,7 @@ export function startWorker(options: StartWorkerOptions): Worker {
   };
 
   // Readiness line — a supervisor, `tempo up`, or a test can wait on it.
-  console.log(`WORKER_READY ${options.name} ${roles.join(',')}`);
+  console.log(`WORKER_READY ${options.name} ${roles.join(',')} ${taskQueue}`);
 
   function shutdown(): void {
     void worker.stop().then(() => process.exit(0));

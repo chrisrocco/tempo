@@ -26,8 +26,17 @@ import type { TaskToken } from './task_token';
  */
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'terminated';
 
+/** The pool every execution and activity falls back to when none is named. */
+export const DEFAULT_TASK_QUEUE = 'default';
+
 export interface StartWorkflowOptions {
   workflowId?: string;
+  /**
+   * Which pool of workers runs this execution. Recorded on the execution, so
+   * every workflow task it ever produces routes the same way, and its activities
+   * and children inherit it unless they say otherwise.
+   */
+  taskQueue?: string;
 }
 
 // ── inspection (read-only views) ─────────────────────────────────────────
@@ -106,7 +115,15 @@ export interface WorkflowService {
   /** Every execution the server knows about. */
   listExecutions(): Promise<ExecutionSummary[]>;
   // ── worker-facing (poll a task, respond when done) ──
-  pollWorkflowTask(): Promise<WorkflowTask | undefined>;
+  /**
+   * Claim the next workflow task on `taskQueue`.
+   *
+   * Omitting the queue means **any queue**, which exists for the in-process
+   * runtime: one set of loops there serves every execution regardless of how it
+   * was routed, so `createLocalRuntime` keeps working as a test harness whatever
+   * queue names a workflow uses. A deployed worker always names its queue.
+   */
+  pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
     result: WorkflowTaskResult,
@@ -119,7 +136,8 @@ export interface WorkflowService {
    * control flow. The execution keeps running and the task is retried.
    */
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
-  pollActivityTask(): Promise<LeasedActivityTask | undefined>;
+  /** Claim the next activity task on `taskQueue`; omitted means any (see above). */
+  pollActivityTask(taskQueue?: string): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /**
    * Report that this attempt is still alive. Renews the task's lease so it is not

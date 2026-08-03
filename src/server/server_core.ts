@@ -123,7 +123,12 @@ export interface ServerCoreDeps {
    * to be stable across a restart, and only the core knows the lineage that makes
    * it so (see `childExecutionId`).
    */
-  launch(workflowId: string, name: string, args: unknown[]): void;
+  launch(
+    workflowId: string,
+    name: string,
+    args: unknown[],
+    taskQueue: string,
+  ): void;
   /** Nudge the (async, in-proc) workflow worker to drain the workflow-task queue. */
   kickWorkflowWorker(): void;
   /** Nudge the (async, in-proc) activity worker to drain the activity-task queue. */
@@ -172,7 +177,7 @@ export interface ServerCore {
   /** Rebuild correlation + re-dispatch pending work from persisted history (crash recovery). */
   resumeFromHistory(records: ExecutionRecord[]): Promise<void>;
   // ── worker-facing seam (for out-of-process workers; see WorkflowService) ──
-  pollWorkflowTask(): Promise<WorkflowTask | undefined>;
+  pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
     result: WorkflowTaskResult,
@@ -185,7 +190,7 @@ export interface ServerCore {
    * (see planning/sprints/05-phase-6-scope.md).
    */
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
-  pollActivityTask(): Promise<LeasedActivityTask | undefined>;
+  pollActivityTask(taskQueue?: string): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /**
    * The attempt behind `token` is still alive: renew its lease and reset its
@@ -265,8 +270,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
 
   // Wake an execution: it needs another workflow task. The queue coalesces, so a
   // wake during an in-flight task becomes exactly one more task.
-  function wake(workflowId: string): void {
-    workflowTaskQueue.enqueue(workflowId);
+  // `taskQueue` is only supplied where it is newly known — creating an execution,
+  // or re-driving one after a restart. Every other wake omits it, because the
+  // queue remembers an execution's routing from the first enqueue.
+  function wake(workflowId: string, taskQueue?: string): void {
+    workflowTaskQueue.enqueue(workflowId, taskQueue);
     kickWorkflowWorker();
   }
 
@@ -306,6 +314,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   async function applyCommand(
     workflowId: string,
     runId: number,
+    taskQueue: string,
     cmd: Command,
   ): Promise<void> {
     if (cmd.type === 'scheduleActivity') {
@@ -316,17 +325,25 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         args: cmd.args,
         options: cmd.options,
       });
-      activityTaskQueue.enqueue({
-        workflowId,
-        seq: cmd.seq,
-        name: cmd.name,
-        args: cmd.args,
-        options: cmd.options,
-      });
+      // Inherit the execution's pool unless the activity names one. Defaulting
+      // to a global queue instead would send an app's activities to workers that
+      // have never heard of them, and the failure would look like a mystery.
+      const activityQueue = cmd.options.taskQueue ?? taskQueue;
+      activityTaskQueue.enqueue(
+        {
+          workflowId,
+          seq: cmd.seq,
+          name: cmd.name,
+          args: cmd.args,
+          options: cmd.options,
+        },
+        activityQueue,
+      );
       log('activity.scheduled', {
         workflowId,
         seq: cmd.seq,
         name: cmd.name,
+        taskQueue: activityQueue,
       });
       kickActivityWorker();
     } else if (cmd.type === 'startTimer') {
@@ -352,7 +369,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           status: existing.status,
         });
       } else {
-        launch(childId, cmd.childName, cmd.childArgs);
+        // A child is part of the same application unless told otherwise.
+        launch(
+          childId,
+          cmd.childName,
+          cmd.childArgs,
+          cmd.taskQueue ?? taskQueue,
+        );
       }
       recordChild(workflowId, cmd.seq, childId);
       // Both kinds leave the marker — it is what stops replay re-launching the
@@ -441,7 +464,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     }
     // Dispatch this batch; the execution then parks until a completion wakes it.
     for (const cmd of result.commands)
-      await applyCommand(workflowId, rec.runId, cmd);
+      await applyCommand(workflowId, rec.runId, rec.taskQueue, cmd);
   }
 
   /**
@@ -458,16 +481,20 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   function redispatchAfter(
     workflowId: string,
     scheduled: ActivityScheduledEvent,
+    taskQueue: string,
     delayMs: number,
   ): void {
     const enqueue = (): void => {
-      activityTaskQueue.enqueue({
-        workflowId,
-        seq: scheduled.seq,
-        name: scheduled.name,
-        args: scheduled.args,
-        options: scheduled.options,
-      });
+      activityTaskQueue.enqueue(
+        {
+          workflowId,
+          seq: scheduled.seq,
+          name: scheduled.name,
+          args: scheduled.args,
+          options: scheduled.options,
+        },
+        scheduled.options.taskQueue ?? taskQueue,
+      );
       kickActivityWorker();
     };
     if (delayMs <= 0) {
@@ -520,7 +547,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           delayMs,
           error: result.error,
         });
-        redispatchAfter(workflowId, scheduled, delayMs);
+        redispatchAfter(workflowId, scheduled, rec.taskQueue, delayMs);
         return;
       }
     }
@@ -600,13 +627,16 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // told this execution awaits is exactly what recovery re-dispatches.
       const pending = pendingWork(rec.history);
       for (const ev of pending.activities) {
-        activityTaskQueue.enqueue({
-          workflowId: rec.workflowId,
-          seq: ev.seq,
-          name: ev.name,
-          args: ev.args,
-          options: ev.options,
-        });
+        activityTaskQueue.enqueue(
+          {
+            workflowId: rec.workflowId,
+            seq: ev.seq,
+            name: ev.name,
+            args: ev.args,
+            options: ev.options,
+          },
+          ev.options.taskQueue ?? rec.taskQueue,
+        );
         anyActivity = true;
       }
       for (const ev of pending.timers)
@@ -626,7 +656,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           });
         }
       }
-      wake(rec.workflowId); // re-drive from history
+      wake(rec.workflowId, rec.taskQueue); // re-drive, on its own queue
     }
     if (anyActivity) kickActivityWorker();
   }
@@ -642,9 +672,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    * entry in the queue. A polling worker only paid a wasted idle interval for it,
    * which is why this went unnoticed while the seam had no in-process caller.
    */
-  async function pollWorkflowTask(): Promise<WorkflowTask | undefined> {
+  async function pollWorkflowTask(
+    taskQueue?: string,
+  ): Promise<WorkflowTask | undefined> {
     while (true) {
-      const leased = workflowTaskQueue.poll();
+      const leased = workflowTaskQueue.poll(taskQueue);
       if (!leased) return undefined;
       const rec = await historyStore.get(leased.workflowId);
       if (!rec || rec.status !== 'running') {
@@ -796,8 +828,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     attemptTimers.delete(token);
   }
 
-  async function pollActivityTask(): Promise<LeasedActivityTask | undefined> {
-    const task = activityTaskQueue.poll();
+  async function pollActivityTask(
+    taskQueue?: string,
+  ): Promise<LeasedActivityTask | undefined> {
+    const task = activityTaskQueue.poll(taskQueue);
     if (!task) return undefined;
     activityLeases.set(task.token, {
       workflowId: task.workflowId,

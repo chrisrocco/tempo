@@ -42,6 +42,8 @@ on npm and makes no stability promises — clone it, read it, run it.
   waiting on, derived from history rather than stored
 - **Structured lifecycle log** — JSON Lines on stderr, one event per fact, so a
   run can be aggregated without parsing prose
+- **Task queues** — route work to a pool of workers, so several applications can
+  share one server; activities and children inherit their execution's queue
 
 The same workflow code runs three ways, with no changes:
 
@@ -257,6 +259,7 @@ understand what the engine does.
 | [`server/id_collision`](spec/server/id_collision.spec.ts)             | Ids stay unique across restarts, and children derive theirs           |
 | [`server/heartbeat`](spec/server/heartbeat.spec.ts)                   | A long attempt holds its claim; a silent one is caught fast           |
 | [`worker/activity_context`](spec/worker/activity_context.spec.ts)     | `heartbeat()` as an author meets it: ambient, throttled, inert        |
+| [`server/task_queue_routing`](spec/server/task_queue_routing.spec.ts) | Work reaches the right pool; activities and children inherit theirs   |
 | [`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them |
 | [`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile                          |
 | [`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm                          |

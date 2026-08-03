@@ -43,6 +43,7 @@
  * activity that double-charges a card.
  */
 
+import { DEFAULT_TASK_QUEUE } from '../protocol';
 import type {
   ActivityResult,
   ExecutionStatus,
@@ -100,8 +101,8 @@ export function createLocalService(
     timerService,
     // The core supplies the child's id; it is derived from lineage so it stays
     // stable across a restart (see `server_core.childExecutionId`).
-    launch: (workflowId, name, args) => {
-      launch(name, args, { workflowId });
+    launch: (workflowId, name, args, taskQueue) => {
+      launch(name, args, { workflowId, taskQueue });
     },
     kickWorkflowWorker,
     kickActivityWorker,
@@ -246,12 +247,13 @@ export function createLocalService(
     // rejects the caller's `getResult` rather than escaping as an unhandled
     // rejection — an error someone sees, not a dead process.
     const workflowId = opts.workflowId ?? `${name}-${++counter}`;
+    const taskQueue = opts.taskQueue ?? DEFAULT_TASK_QUEUE;
     statusMirror.set(workflowId, 'running');
     ensureWaiter(workflowId);
     void historyStore
-      .create(workflowId, name, args)
+      .create(workflowId, name, args, taskQueue)
       .then(() => {
-        workflowTaskQueue.enqueue(workflowId);
+        workflowTaskQueue.enqueue(workflowId, taskQueue);
         kickWorkflowWorker();
       })
       .catch((err) => rejectWaiter(workflowId, err));
@@ -299,8 +301,8 @@ export function createLocalService(
       return (await historyStore.list()).map(summarizeExecution);
     },
     // ── worker-facing seam (for out-of-process workers; unused by the in-proc loops) ──
-    pollWorkflowTask(): Promise<WorkflowTask | undefined> {
-      return core.pollWorkflowTask();
+    pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined> {
+      return core.pollWorkflowTask(taskQueue);
     },
     completeWorkflowTask(
       token: TaskToken,
@@ -311,8 +313,10 @@ export function createLocalService(
     failWorkflowTask(token: TaskToken, reason: string): Promise<void> {
       return core.failWorkflowTask(token, reason);
     },
-    pollActivityTask(): Promise<LeasedActivityTask | undefined> {
-      return core.pollActivityTask();
+    pollActivityTask(
+      taskQueue?: string,
+    ): Promise<LeasedActivityTask | undefined> {
+      return core.pollActivityTask(taskQueue);
     },
     completeActivityTask(
       token: TaskToken,

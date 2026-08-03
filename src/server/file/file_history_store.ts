@@ -21,7 +21,11 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import type { ExecutionStatus, HistoryEvent } from '../../protocol';
+import {
+  DEFAULT_TASK_QUEUE,
+  type ExecutionStatus,
+  type HistoryEvent,
+} from '../../protocol';
 import type { ExecutionRecord, HistoryStore } from '../ports/history_store';
 import { VersionConflictError } from '../ports/history_store';
 
@@ -30,6 +34,8 @@ interface PersistedMeta {
   runId: number;
   name: string;
   args: unknown[];
+  /** Absent in data dirs written before routing existed; reads as the default. */
+  taskQueue?: string;
   status: ExecutionStatus;
   result?: unknown;
   failureMessage?: string;
@@ -77,6 +83,7 @@ export class FileHistoryStore implements HistoryStore {
     workflowId: string,
     name: string,
     args: unknown[],
+    taskQueue: string = DEFAULT_TASK_QUEUE,
   ): Promise<void> {
     if (this.cache.has(workflowId))
       throw new Error(`execution ${workflowId} already exists`);
@@ -85,6 +92,7 @@ export class FileHistoryStore implements HistoryStore {
       runId: 0,
       name,
       args,
+      taskQueue,
       history: [],
       version: 0,
       status: 'running',
@@ -236,6 +244,7 @@ export class FileHistoryStore implements HistoryStore {
       runId: rec.runId,
       name: rec.name,
       args: rec.args,
+      taskQueue: rec.taskQueue,
       status: rec.status,
       result: rec.result,
       failureMessage:
@@ -274,6 +283,7 @@ export class FileHistoryStore implements HistoryStore {
         runId: meta.runId,
         name: meta.name,
         args: meta.args,
+        taskQueue: meta.taskQueue ?? DEFAULT_TASK_QUEUE,
         history,
         version: history.length,
         status: meta.status,

@@ -92,6 +92,7 @@ describe('lifecycle events', () => {
       workflowId: 'wf',
       seq: 0,
       name: 'greet',
+      taskQueue: 'default',
     });
     expect(events[1].fields.ok).toBeTrue();
   });

@@ -38,7 +38,7 @@ export type RpcRequest =
   | { method: 'getOutcome'; workflowId: string }
   | { method: 'describeExecution'; workflowId: string }
   | { method: 'listExecutions' }
-  | { method: 'pollWorkflowTask' }
+  | { method: 'pollWorkflowTask'; taskQueue?: string }
   | {
       method: 'completeWorkflowTask';
       token: TaskToken;
@@ -46,7 +46,7 @@ export type RpcRequest =
     }
   | { method: 'failWorkflowTask'; token: TaskToken; reason: string }
   | { method: 'heartbeatActivityTask'; token: TaskToken }
-  | { method: 'pollActivityTask' }
+  | { method: 'pollActivityTask'; taskQueue?: string }
   | {
       method: 'completeActivityTask';
       token: TaskToken;

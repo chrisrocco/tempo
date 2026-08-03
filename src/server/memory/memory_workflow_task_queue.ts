@@ -8,7 +8,7 @@
  * version-checked append is then rejected by the server (see server_core).
  */
 
-import type { TaskToken } from '../../protocol';
+import { DEFAULT_TASK_QUEUE, type TaskToken } from '../../protocol';
 import type { WorkflowTaskQueue } from '../ports/workflow_task_queue';
 import { LeaseTable } from '../lease';
 
@@ -22,7 +22,16 @@ export class MemoryWorkflowTaskQueue implements WorkflowTaskQueue {
 
   constructor(private readonly leaseMs: number = DEFAULT_LEASE_MS) {}
 
-  enqueue(workflowId: string): void {
+  /**
+   * An execution's queue never changes, so it is remembered on first enqueue
+   * rather than repeated by every caller. `wake` fires from a dozen places —
+   * a signal, a timer, a completion, a backoff — and none of them should have to
+   * know how the execution was routed.
+   */
+  private readonly queueOf = new Map<string, string>();
+
+  enqueue(workflowId: string, taskQueue?: string): void {
+    if (taskQueue !== undefined) this.queueOf.set(workflowId, taskQueue);
     if (this.inFlight.has(workflowId)) {
       this.rerun.add(workflowId);
       return;
@@ -30,14 +39,22 @@ export class MemoryWorkflowTaskQueue implements WorkflowTaskQueue {
     if (!this.pending.includes(workflowId)) this.pending.push(workflowId);
   }
 
-  poll(): { token: TaskToken; workflowId: string } | undefined {
+  poll(
+    taskQueue?: string,
+  ): { token: TaskToken; workflowId: string } | undefined {
     for (const id of this.leases.reclaimExpired()) {
       // redeliver crashed workers' tasks
       this.inFlight.delete(id);
       this.enqueue(id);
     }
-    const workflowId = this.pending.shift();
-    if (workflowId === undefined) return undefined;
+    const index =
+      taskQueue === undefined
+        ? 0
+        : this.pending.findIndex(
+            (id) => (this.queueOf.get(id) ?? DEFAULT_TASK_QUEUE) === taskQueue,
+          );
+    if (index < 0 || this.pending.length === 0) return undefined;
+    const [workflowId] = this.pending.splice(index, 1);
     this.inFlight.add(workflowId);
     return { token: this.leases.lease(workflowId, this.leaseMs), workflowId };
   }

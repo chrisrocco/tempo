@@ -68,5 +68,15 @@ export interface ActivityOptions {
    * `ACTIVITY_LEASE_MS` — see `worker/activity_worker`.
    */
   heartbeatTimeoutMs?: number;
-  // taskQueue — later phases.
+  /**
+   * Which pool of workers may run this activity. Defaults to the queue its
+   * *execution* is running on — so an app's activities land on the app's own
+   * workers without anyone saying so, and only a step with different needs (a
+   * GPU, a particular network) has to name a queue.
+   *
+   * A queue name is a contract: every worker polling it must register the same
+   * activities. A worker that receives work it cannot serve fails the attempt,
+   * which is a routing bug wearing a retry's clothes.
+   */
+  taskQueue?: string;
 }

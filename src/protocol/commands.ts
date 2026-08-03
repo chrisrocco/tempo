@@ -49,6 +49,8 @@ export interface StartChildCommand extends CommandBase {
    * per calendar event — rather than one per call.
    */
   workflowId?: string;
+  /** Which pool runs the child. Defaults to the parent execution's queue. */
+  taskQueue?: string;
 }
 
 /** Cancel a fire-and-forget child, identified by the seq of its startChild command. */

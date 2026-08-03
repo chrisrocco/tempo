@@ -31,10 +31,20 @@
 import type { TaskToken } from '../../protocol';
 
 export interface WorkflowTaskQueue {
-  /** Mark an execution as needing a task. If one is in flight, coalesce (run once more). */
-  enqueue(workflowId: string): void;
-  /** Take the next ready execution, leased with a token, or undefined if none. */
-  poll(): { token: TaskToken; workflowId: string } | undefined;
+  /**
+   * Mark an execution as needing a task. If one is in flight, coalesce (run once
+   * more). `taskQueue` is remembered for the execution, so the many callers that
+   * merely wake it need not know how it was routed.
+   */
+  enqueue(workflowId: string, taskQueue?: string): void;
+  /**
+   * Take the next ready execution on `taskQueue`, leased with a token. Omitting
+   * the name matches any pool — how the in-process runtime serves everything
+   * with one set of loops.
+   */
+  poll(
+    taskQueue?: string,
+  ): { token: TaskToken; workflowId: string } | undefined;
   /** Ack a leased task; if a wake arrived while it was in-flight, re-enqueue it. */
   complete(token: TaskToken): void;
 }

@@ -69,7 +69,10 @@ describe('lease-expiry redelivery', () => {
 
   it('redelivers an activity task whose lease expires', async () => {
     const q = new MemoryTaskQueue(10);
-    q.enqueue({ workflowId: 'wf', seq: 0, name: 'a', args: [], options: {} });
+    q.enqueue(
+      { workflowId: 'wf', seq: 0, name: 'a', args: [], options: {} },
+      'default',
+    );
 
     const first = q.poll();
     expect(first?.name).toBe('a');
