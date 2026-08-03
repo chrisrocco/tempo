@@ -14,7 +14,9 @@ import {
 } from '../../src/worker';
 import { createWorkflowRegistry, createWorkflowWorker } from '../../src/worker';
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 /** A service that satisfies the seam; tests override only what they exercise. */
 function fakeService(overrides: Partial<WorkflowService>): WorkflowService {

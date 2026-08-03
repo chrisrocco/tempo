@@ -11,14 +11,20 @@
  */
 
 import type { ChildProcess } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import * as path from 'node:path';
 import { describeWorker } from './describe';
 import { forwardOutput, spawnEntry, stopChild, waitForLine } from './process';
 
-/** The framework's own server main — shipped with the CLI, never user-built. */
-const SERVER_ENTRY = fileURLToPath(
-  new URL('../../bin/server-main.ts', import.meta.url),
-);
+/**
+ * The framework's own server main — shipped with the CLI, never user-built.
+ *
+ * Resolved against the working directory rather than the module's own URL:
+ * `import.meta` is not available under every module target this has to build
+ * for, so it is banned repo-wide (`tools/style.ts`). The trade is real — this
+ * now assumes the CLI runs from the repo root, which `npm run tempo` does. A
+ * CLI installed elsewhere would need its entry passed in explicitly.
+ */
+const SERVER_ENTRY = path.resolve('bin/server-main.ts');
 
 export interface UpOptions {
   /** Path to the worker entrypoint or built binary. */

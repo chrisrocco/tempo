@@ -22,7 +22,9 @@ import {
 import { createWorkflowRegistry, createWorkflowWorker } from '../../src/worker';
 import { runActivity } from '../../src/workflow';
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 describe('optimistic version check (appendIfVersion)', () => {
   it('applies at the expected version and rejects a stale one', async () => {

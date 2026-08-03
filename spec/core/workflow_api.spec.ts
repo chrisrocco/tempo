@@ -160,7 +160,8 @@ describe('core primitives — continueAsNew', () => {
     const ctx = createContext([], []);
     let reachedAfter = false;
 
-    als.run(ctx, async () => {
+    // Voided: the body parks and never settles — that is what is under test.
+    void als.run(ctx, async () => {
       await continueAsNew('carried');
       reachedAfter = true;
     });

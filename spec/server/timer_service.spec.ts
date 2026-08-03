@@ -7,7 +7,9 @@
 
 import { MemoryTimerService } from '../../src/server/memory/memory_timer_service';
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 describe('MemoryTimerService', () => {
   it('fires a scheduled timer with its (workflowId, seq)', async () => {

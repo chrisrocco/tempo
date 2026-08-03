@@ -12,7 +12,9 @@ import {
 } from '../../src/worker';
 import type { ActivityTask } from '../../src/protocol';
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 function task(options: ActivityTask['options'] = {}): ActivityTask {
   return { workflowId: 'wf', seq: 0, name: 'agent', args: [], options };

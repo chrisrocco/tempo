@@ -8,7 +8,6 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   checkBoundaries,
   isWorkflowModule,
@@ -17,7 +16,8 @@ import {
   type SourceFile,
 } from '../tools/boundaries';
 
-const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// See tools/lint.ts — resolved from the working directory, not the module URL.
+const repoRoot = path.resolve('.');
 
 /** One synthetic file, so a rule can be tested without touching the real tree. */
 function file(filePath: string, text: string): SourceFile {

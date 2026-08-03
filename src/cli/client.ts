@@ -230,5 +230,5 @@ export async function listExecutions(
 }
 
 export function resolveServerUrl(flag: string | undefined): string {
-  return flag ?? process.env.TEMPO_SERVER_URL ?? DEFAULT_SERVER_URL;
+  return flag ?? process.env['TEMPO_SERVER_URL'] ?? DEFAULT_SERVER_URL;
 }

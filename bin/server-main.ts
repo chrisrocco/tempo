@@ -39,11 +39,11 @@ import { FileHistoryStore } from '../src';
 import { createJsonLogger } from '../src/server';
 import { createRpcServer, createServerHost } from '../src/services';
 
-const port = process.env.PORT ? Number(process.env.PORT) : 0;
-const activityLeaseMs = process.env.ACTIVITY_LEASE_MS
-  ? Number(process.env.ACTIVITY_LEASE_MS)
+const port = process.env['PORT'] ? Number(process.env['PORT']) : 0;
+const activityLeaseMs = process.env['ACTIVITY_LEASE_MS']
+  ? Number(process.env['ACTIVITY_LEASE_MS'])
   : undefined;
-const dataDir = process.env.DATA_DIR;
+const dataDir = process.env['DATA_DIR'];
 
 async function main(): Promise<void> {
   // Durable when DATA_DIR is set (a single-writer lockfile guards the dir);

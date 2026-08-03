@@ -12,7 +12,9 @@ import * as path from 'node:path';
 import { createLocalRuntime, FileHistoryStore } from '../../src';
 import { runActivity } from '../../src/workflow';
 
-const tmpDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'wf-fs-'));
+function tmpDir(): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'wf-fs-'));
+}
 
 describe('FileHistoryStore', () => {
   it('runs workflows against the durable store (behavior parity)', async () => {

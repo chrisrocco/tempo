@@ -30,7 +30,9 @@ import {
   setHandler,
 } from '../../src/workflow';
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 interface Harness {
   service: ReturnType<typeof createRemoteService>;

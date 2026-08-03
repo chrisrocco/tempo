@@ -12,8 +12,12 @@ import * as path from 'node:path';
 import { createLocalRuntime, FileHistoryStore, type Runtime } from '../../src';
 import { runActivity, sleep, executeChild } from '../../src/workflow';
 
-const tmpDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'wf-resume-'));
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function tmpDir(): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'wf-resume-'));
+}
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 describe('crash recovery — resume from a durable store', () => {
   it('resumes a workflow parked on a timer', async () => {

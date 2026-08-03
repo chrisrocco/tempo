@@ -23,7 +23,9 @@ import {
 } from '../../src/worker';
 import { runActivity } from '../../src/workflow';
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 const WORKER = 'examples/greeter.ts';
 
 function spawnMain(
@@ -109,8 +111,12 @@ async function spawnServer(
   return { url: `http://127.0.0.1:${m[1]}`, proc };
 }
 
-const remote = (url: string, opts?: RemoteServiceOptions) =>
-  createRemoteService(url, opts);
+function remote(
+  url: string,
+  opts?: RemoteServiceOptions,
+): ReturnType<typeof createRemoteService> {
+  return createRemoteService(url, opts);
+}
 
 describe('distributed — real server process over RPC', () => {
   // The deployed shape: one worker binary, started twice, each process taking a

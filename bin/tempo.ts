@@ -7,4 +7,11 @@
 
 import { runCli } from '../src/cli/cli';
 
-process.exitCode = await runCli(process.argv.slice(2));
+// `void … .then(…)` rather than top-level await: TLA is only legal under some
+// module targets (TS1378), and a binary should not constrain how the project is
+// compiled. The `void` is the floating-promise rule — nothing awaits this, and
+// saying so is the difference between a deliberate fire-and-forget and an
+// oversight (tools/style.ts).
+void runCli(process.argv.slice(2)).then((code) => {
+  process.exitCode = code;
+});

@@ -148,9 +148,37 @@ yourself:
 - **Every exported symbol carries a JSDoc comment**, unless the module's
   `@fileoverview` already documents it — a single-purpose module named after the
   thing it exports needs no second copy (`condition.ts`, `microtask_scheduler.ts`).
-- **`function` over arrow functions** for statement functions. Inline expressions
-  stay arrows.
+- **`function` over arrow functions** for statement functions — including helpers
+  in specs, which is where the exceptions used to collect. A `const` bound to an
+  arrow is still right when the arrow is a _value_ satisfying a declared type
+  (`export const silentLogger: Logger = () => {};`); the rule is about functions
+  declared to be called, not about every arrow. That distinction is why this one
+  is not machine-checked: a blanket check cannot tell the two apart.
 - **`while (true)`, never `for (;;)`.**
+
+### The rules that are checked
+
+`npm run lint` runs [`tools/boundaries.ts`](tools/boundaries.ts) for layering and
+[`tools/style.ts`](tools/style.ts) for three rules a regex cannot decide — it
+builds a real TypeScript program, because "is this a promise?" is a question
+about types and "is this await top-level?" is a question about scope. Its
+`@fileoverview` explains each rule and the failure it prevents; in short:
+
+- **A promise that is neither awaited nor `void`ed is an error.** An unhandled
+  rejection is fatal to a Node process, and this repo has already lost a server to
+  one. Writing `void` is how a deliberate fire-and-forget is distinguished from a
+  forgotten `await` — a distinction only the author can make, so each `void` here
+  carries a comment saying why.
+- **No top-level `await` in `bin/`, and no `import.meta` anywhere.** Both
+  constrain which module targets the project can compile under (TS1378; and
+  `import.meta` is a _syntax_ error under CommonJS, not a diagnostic). Entrypoints
+  use `void run().then(…)`, and paths resolve via `path.resolve()` from the
+  working directory.
+
+One more is enforced by the compiler rather than a tool:
+`noPropertyAccessFromIndexSignature` in `tsconfig.json` requires `obj['key']` for
+anything reached through an index signature, so `process.env['PORT']` and a
+declared field stop looking alike at the call site.
 
 ## Testing
 

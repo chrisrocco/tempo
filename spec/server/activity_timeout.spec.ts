@@ -17,7 +17,9 @@ import {
   createServerCore,
 } from '../../src/server';
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 function makeCore(historyStore: MemoryHistoryStore, leaseMs: number) {
   const activityTaskQueue = new MemoryTaskQueue(leaseMs);

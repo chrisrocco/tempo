@@ -49,10 +49,10 @@ describe('the JSON Lines log format', () => {
     expect(lines.length).toBe(1);
     expect(lines[0].endsWith('\n')).toBeTrue();
     const parsed = JSON.parse(lines[0]) as Record<string, unknown>;
-    expect(parsed.event).toBe('activity.scheduled');
-    expect(parsed.workflowId).toBe('wf');
-    expect(parsed.seq).toBe(0);
-    expect(typeof parsed.ts).toBe('string');
+    expect(parsed['event']).toBe('activity.scheduled');
+    expect(parsed['workflowId']).toBe('wf');
+    expect(parsed['seq']).toBe(0);
+    expect(typeof parsed['ts']).toBe('string');
   });
 
   it('emits an event with no fields as a valid line', () => {
@@ -94,7 +94,7 @@ describe('lifecycle events', () => {
       name: 'greet',
       taskQueue: 'default',
     });
-    expect(events[1].fields.ok).toBeTrue();
+    expect(events[1].fields['ok']).toBeTrue();
   });
 
   it('reports a failing workflow task with its consecutive count and next retry', async () => {
@@ -108,9 +108,9 @@ describe('lifecycle events', () => {
 
     const failed = events.find((e) => e.event === 'workflow_task.failed');
     expect(failed).toBeDefined();
-    expect(failed!.fields.reason).toBe('nondeterminism at seq 0');
-    expect(failed!.fields.consecutiveFailures).toBe(1);
-    expect(typeof failed!.fields.retryInMs).toBe('number');
+    expect(failed!.fields['reason']).toBe('nondeterminism at seq 0');
+    expect(failed!.fields['consecutiveFailures']).toBe(1);
+    expect(typeof failed!.fields['retryInMs']).toBe('number');
   });
 
   it('records a terminated execution with the reason and how long it was stuck', async () => {
@@ -124,9 +124,9 @@ describe('lifecycle events', () => {
     await core.terminate('wf', 'operator gave up');
 
     const settled = events.find((e) => e.event === 'execution.settled');
-    expect(settled!.fields.status).toBe('terminated');
-    expect(settled!.fields.reason).toBe('operator gave up');
-    expect(settled!.fields.taskFailures).toBe(1);
+    expect(settled!.fields['status']).toBe('terminated');
+    expect(settled!.fields['reason']).toBe('operator gave up');
+    expect(settled!.fields['taskFailures']).toBe(1);
   });
 
   // The dedup is invisible by construction — it drops work rather than doing it —

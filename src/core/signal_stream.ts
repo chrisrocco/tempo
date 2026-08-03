@@ -122,7 +122,8 @@ export function signalStream<T = unknown>(
   // backlog predates the window this consumer cares about.
   if ((opts.from ?? 'now') === 'now') queue.length = 0;
 
-  opts.until?.then(
+  // Voided: the stream only needs the side effect of `until` settling.
+  void opts.until?.then(
     () => {
       ended = true;
     },

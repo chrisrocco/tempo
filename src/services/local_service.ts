@@ -211,7 +211,9 @@ export function createLocalService(
         resolve = res;
         reject = rej;
       });
-      promise.catch(() => {}); // avoid unhandledRejection if getResult is never awaited
+      // Voided: attaching this catch IS the point — it stops an unobserved
+      // rejection becoming an unhandledRejection if getResult is never awaited.
+      void promise.catch(() => {});
       w = { promise, resolve, reject, settled: false };
       waiters.set(workflowId, w);
     }

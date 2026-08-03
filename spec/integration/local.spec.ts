@@ -31,7 +31,9 @@ import {
 } from '../../src/workflow';
 
 // real-time wait, for letting async drives / timers make progress in a test
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 describe('local runtime — activities', () => {
   it('runs a single activity and returns its result', async () => {

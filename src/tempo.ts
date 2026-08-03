@@ -148,13 +148,13 @@ export function startWorker(options: StartWorkerOptions): Worker {
   }
 
   const roles = resolveRoles(
-    process.env.TEMPO_ROLE,
+    process.env['TEMPO_ROLE'],
     options.name,
     workflows.length > 0,
     activities.length > 0,
   );
   const service = createRemoteService(
-    process.env.TEMPO_SERVER_URL ?? DEFAULT_SERVER_URL,
+    process.env['TEMPO_SERVER_URL'] ?? DEFAULT_SERVER_URL,
   );
 
   // The worker's own lifecycle log, in the same JSON Lines shape the server
@@ -162,7 +162,7 @@ export function startWorker(options: StartWorkerOptions): Worker {
   // to matter here — an unreachable server makes a worker look healthy to its
   // supervisor while doing nothing (planning/tickets/02).
   const taskQueue =
-    process.env.TEMPO_TASK_QUEUE ?? options.taskQueue ?? DEFAULT_TASK_QUEUE;
+    process.env['TEMPO_TASK_QUEUE'] ?? options.taskQueue ?? DEFAULT_TASK_QUEUE;
   const log = createJsonLogger();
   const onError = (error: unknown, consecutive: number): void => {
     log('worker.poll_failed', {

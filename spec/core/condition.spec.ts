@@ -75,7 +75,8 @@ describe('core condition — the unblock pass', () => {
     const ctx = createContext([], []);
     let flag = false;
     let woke = false;
-    als.run(ctx, async () => {
+    // Voided: the body parks and never settles — that is what is under test.
+    void als.run(ctx, async () => {
       await condition(() => flag);
       woke = true;
     });
@@ -124,7 +125,8 @@ describe('core condition — cancellation', () => {
   it('rejects a parked condition when the run is cancelled', async () => {
     const ctx = createContext([], []);
     let error: unknown;
-    als.run(ctx, async () => {
+    // Voided: the body parks and never settles — that is what is under test.
+    void als.run(ctx, async () => {
       try {
         await condition(() => false);
       } catch (e) {
