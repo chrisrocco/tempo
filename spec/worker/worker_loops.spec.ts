@@ -6,13 +6,14 @@
  * supervisor while doing no work at all (planning/tickets/02).
  */
 
-import type { WorkflowService } from '../../src/protocol';
+import type {WorkflowService} from '../../src/protocol';
 import {
   createErrorReporter,
+  createWorkflowRegistry,
+  createWorkflowWorker,
   errorBackoffMs,
   runWorkflowWorker,
 } from '../../src/worker';
-import { createWorkflowRegistry, createWorkflowWorker } from '../../src/worker';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -21,7 +22,7 @@ function wait(ms: number): Promise<void> {
 /** A service that satisfies the seam; tests override only what they exercise. */
 function fakeService(overrides: Partial<WorkflowService>): WorkflowService {
   return {
-    start: () => ({ workflowId: 'wf' }),
+    start: () => ({workflowId: 'wf'}),
     signal: () => {},
     cancel: () => {},
     terminate: () => {},
@@ -62,7 +63,7 @@ describe('worker loops — error backoff', () => {
 
 describe('worker loops — failure reporting', () => {
   it('reports each failure with a running count and keeps polling', async () => {
-    const seen: { message: string; consecutive: number }[] = [];
+    const seen: {message: string; consecutive: number}[] = [];
     let polls = 0;
     const service = fakeService({
       pollWorkflowTask: async () => {
@@ -80,7 +81,7 @@ describe('worker loops — failure reporting', () => {
         errorBackoffMs: 1,
         maxErrorBackoffMs: 1,
         onError: (error, consecutive) =>
-          seen.push({ message: (error as Error).message, consecutive }),
+          seen.push({message: (error as Error).message, consecutive}),
       },
     );
 

@@ -14,7 +14,7 @@
  * sort and diff predictably.
  */
 
-import type { LogFields, Logger } from './ports/logger';
+import type {LogFields, Logger} from './ports/logger';
 
 /**
  * @param write where a finished line goes — injectable so specs can assert on
@@ -25,7 +25,7 @@ export function createJsonLogger(
 ): Logger {
   return (event: string, fields: LogFields = {}) => {
     write(
-      `${JSON.stringify({ ts: new Date().toISOString(), event, ...fields })}\n`,
+      `${JSON.stringify({ts: new Date().toISOString(), event, ...fields})}\n`,
     );
   };
 }

@@ -19,4 +19,4 @@
  * author-entrypoint check. Importing from here is a convenience, not a boundary.
  */
 
-export { heartbeat } from './worker/activity_context';
+export {heartbeat} from './worker/activity_context';

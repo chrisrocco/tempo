@@ -6,7 +6,7 @@
  * launch shape to interrogate a built artifact.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import {spawn, type ChildProcess} from 'node:child_process';
 
 export interface SpawnEntryOptions {
   args?: string[];
@@ -37,7 +37,7 @@ export function spawnEntry(
     commandArgs = args;
   }
   return spawn(command, commandArgs, {
-    env: { ...process.env, ...options.env },
+    env: {...process.env, ...options.env},
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }

@@ -6,17 +6,29 @@
  * A `shutdown()` (stopping timers) + `close()` stands in for the process dying.
  */
 
-import { promises as fs } from 'node:fs';
+import {promises as fs} from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createLocalRuntime, FileHistoryStore, type Runtime } from '../../src';
-import { runActivity, sleep, executeChild } from '../../src/workflow';
+import {createLocalRuntime, FileHistoryStore} from '../../src';
+import {executeChild, runActivity, sleep} from '../../src/workflow';
 
 function tmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'wf-resume-'));
 }
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+async function waitFor(
+  fn: () => Promise<boolean>,
+  timeoutMs = 2000,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await fn()) return;
+    await wait(5);
+  }
+  throw new Error('waitFor timed out');
 }
 
 describe('crash recovery — resume from a durable store', () => {
@@ -29,18 +41,21 @@ describe('crash recovery — resume from a durable store', () => {
     try {
       // process 1: dispatch the timer, then "crash"
       const store1 = await FileHistoryStore.open(dir);
-      const rt1 = createLocalRuntime({ historyStore: store1 }).registerWorkflow(
+      const rt1 = createLocalRuntime({historyStore: store1}).registerWorkflow(
         'napper',
         napper,
       );
-      rt1.start('napper', [], { workflowId: 'nap-1' });
-      await wait(15); // let timerStarted persist
+      rt1.start('napper', [], {workflowId: 'nap-1'});
+      await waitFor(async () => {
+        const rec = await store1.get('nap-1');
+        return rec?.history.some((e) => e.type === 'timerStarted') ?? false;
+      });
       rt1.shutdown();
       await store1.close();
 
       // process 2: fresh runtime rebuilds from disk and re-arms the timer
       const store2 = await FileHistoryStore.open(dir);
-      const rt2 = createLocalRuntime({ historyStore: store2 }).registerWorkflow(
+      const rt2 = createLocalRuntime({historyStore: store2}).registerWorkflow(
         'napper',
         napper,
       );
@@ -52,7 +67,7 @@ describe('crash recovery — resume from a durable store', () => {
       rt2.shutdown();
       await store2.close();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 
@@ -61,17 +76,22 @@ describe('crash recovery — resume from a durable store', () => {
     const doer = async () => runActivity<string>('work');
     try {
       const store1 = await FileHistoryStore.open(dir);
-      const rt1 = createLocalRuntime({ historyStore: store1 })
+      const rt1 = createLocalRuntime({historyStore: store1})
         .registerActivity('work', () => new Promise<string>(() => {})) // never settles: crash mid-activity
         .registerWorkflow('doer', doer);
-      rt1.start('doer', [], { workflowId: 'do-1' });
-      await wait(15); // let activityScheduled persist
+      rt1.start('doer', [], {workflowId: 'do-1'});
+      await waitFor(async () => {
+        const rec = await store1.get('do-1');
+        return (
+          rec?.history.some((e) => e.type === 'activityScheduled') ?? false
+        );
+      });
       rt1.shutdown();
       await store1.close();
 
       let ran = 0;
       const store2 = await FileHistoryStore.open(dir);
-      const rt2 = createLocalRuntime({ historyStore: store2 })
+      const rt2 = createLocalRuntime({historyStore: store2})
         .registerActivity('work', () => {
           ran += 1;
           return 'worked';
@@ -86,7 +106,7 @@ describe('crash recovery — resume from a durable store', () => {
       rt2.shutdown();
       await store2.close();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 
@@ -97,19 +117,22 @@ describe('crash recovery — resume from a durable store', () => {
       return n;
     };
     const parent = async () =>
-      (await executeChild<number>('child', { args: [5] })) * 2;
+      (await executeChild<number>('child', {args: [5]})) * 2;
     try {
       const store1 = await FileHistoryStore.open(dir);
-      const rt1 = createLocalRuntime({ historyStore: store1 })
+      const rt1 = createLocalRuntime({historyStore: store1})
         .registerWorkflow('child', child)
         .registerWorkflow('parent', parent);
-      rt1.start('parent', [], { workflowId: 'par-1' });
-      await wait(15); // let childStarted (parent) + timerStarted (child) persist
+      rt1.start('parent', [], {workflowId: 'par-1'});
+      await waitFor(async () => {
+        const rec = await store1.get('par-1');
+        return rec?.history.some((e) => e.type === 'childStarted') ?? false;
+      });
       rt1.shutdown();
       await store1.close();
 
       const store2 = await FileHistoryStore.open(dir);
-      const rt2 = createLocalRuntime({ historyStore: store2 })
+      const rt2 = createLocalRuntime({historyStore: store2})
         .registerWorkflow('child', child)
         .registerWorkflow('parent', parent);
       await rt2.resume(); // rebuilds parent<->child link, re-arms the child's timer
@@ -120,7 +143,7 @@ describe('crash recovery — resume from a durable store', () => {
       rt2.shutdown();
       await store2.close();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 });

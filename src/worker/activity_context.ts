@@ -20,7 +20,7 @@
  * to hear often enough to keep the deadline from firing.
  */
 
-import { AsyncLocalStorage } from 'node:async_hooks';
+import {AsyncLocalStorage} from 'node:async_hooks';
 
 /** The ambient state of the activity attempt currently running on this stack. */
 interface ActivityContext {
@@ -71,5 +71,5 @@ export function withActivityContext<T>(
     lastSentAt = now;
     send();
   };
-  return als.run({ beat }, fn);
+  return als.run({beat}, fn);
 }

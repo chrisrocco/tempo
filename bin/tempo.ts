@@ -5,7 +5,7 @@
  * argv in and an exit code out.
  */
 
-import { runCli } from '../src/cli/cli';
+import {runCli} from '../src/cli/cli';
 
 // `void … .then(…)` rather than top-level await: TLA is only legal under some
 // module targets (TS1378), and a binary should not constrain how the project is

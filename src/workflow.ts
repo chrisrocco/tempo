@@ -48,33 +48,33 @@
  * not?" The answer names the layer.
  */
 
+export {condition} from './core/condition';
+export {CancelledFailure} from './core/errors';
 export {
-  runActivity,
-  proxyActivities,
-  sleep,
-  executeChild,
-  startChild,
-  type ChildHandle,
-  type ChildOptions,
-  continueAsNew,
-  workflowInfo,
-  type WorkflowInfo,
-} from './core/workflow_api';
+  background,
+  firstSignal,
+  signalStream,
+  type Branch,
+  type StreamOptions,
+} from './core/signal_stream';
 export {
+  clearHandler,
   defineSignal,
   setHandler,
-  clearHandler,
   type SignalDef,
 } from './core/signals';
 export {
-  signalStream,
-  firstSignal,
-  background,
-  type StreamOptions,
-  type Branch,
-} from './core/signal_stream';
-export { condition } from './core/condition';
-export { CancelledFailure } from './core/errors';
+  continueAsNew,
+  executeChild,
+  proxyActivities,
+  runActivity,
+  sleep,
+  startChild,
+  workflowInfo,
+  type ChildHandle,
+  type ChildOptions,
+  type WorkflowInfo,
+} from './core/workflow_api';
 
 // author-facing option types (erased at runtime; safe on the deterministic surface)
-export type { ActivityOptions, RetryPolicy } from './protocol';
+export type {ActivityOptions, RetryPolicy} from './protocol';

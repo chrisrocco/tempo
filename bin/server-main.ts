@@ -34,10 +34,10 @@
  *   children reconnect (proved in spec/integration/resume.spec.ts).
  */
 
-import type { AddressInfo } from 'node:net';
-import { FileHistoryStore } from '../src';
-import { createJsonLogger } from '../src/server';
-import { createRpcServer, createServerHost } from '../src/services';
+import type {AddressInfo} from 'node:net';
+import {FileHistoryStore} from '../src';
+import {createJsonLogger} from '../src/server';
+import {createRpcServer, createServerHost} from '../src/services';
 
 const port = process.env['PORT'] ? Number(process.env['PORT']) : 0;
 const activityLeaseMs = process.env['ACTIVITY_LEASE_MS']
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
 
   function shutdown(): void {
     host.shutdown();
-    (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+    (server as {closeAllConnections?: () => void}).closeAllConnections?.();
     server.close(() => {
       void Promise.resolve(store?.close()).finally(() => process.exit(0)); // release the lockfile
     });

@@ -21,9 +21,9 @@
  * the failure becomes a message.
  */
 
-import type { ExecutionDetail, ExecutionSummary } from '../protocol';
-import type { ExecutionRecord } from './ports/history_store';
-import { pendingWork } from './pending_work';
+import type {ExecutionDetail, ExecutionSummary} from '../protocol';
+import {pendingWork} from './pending_work';
+import type {ExecutionRecord} from './ports/history_store';
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -52,8 +52,8 @@ export function describeExecution(rec: ExecutionRecord): ExecutionDetail {
     args: rec.args,
     history: rec.history.slice(),
     pending: {
-      activities: pending.activities.map((e) => ({ seq: e.seq, name: e.name })),
-      timers: pending.timers.map((e) => ({ seq: e.seq, fireAt: e.fireAt })),
+      activities: pending.activities.map((e) => ({seq: e.seq, name: e.name})),
+      timers: pending.timers.map((e) => ({seq: e.seq, fireAt: e.fireAt})),
       children: pending.children.map((e) => ({
         seq: e.seq,
         childId: e.childId,

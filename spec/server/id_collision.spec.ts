@@ -10,8 +10,8 @@
  * such option, so whatever the server generates is what a child gets.
  */
 
-import { childExecutionId, MemoryHistoryStore } from '../../src/server';
-import { createServerHost } from '../../src/services';
+import {childExecutionId, MemoryHistoryStore} from '../../src/server';
+import {createServerHost} from '../../src/services';
 
 /** Collect unhandled rejections raised while `run` executes. */
 async function unhandledDuring(run: () => Promise<void>): Promise<unknown[]> {
@@ -115,7 +115,7 @@ describe('child ids derived from lineage', () => {
       for (const seq of [0, 1]) {
         const id = childExecutionId('poller', run, seq);
         ids.push(id);
-        host.start('planner', [], { workflowId: id });
+        host.start('planner', [], {workflowId: id});
       }
       await new Promise<void>((r) => setTimeout(r, 10));
       host.shutdown();

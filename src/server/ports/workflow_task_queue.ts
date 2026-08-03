@@ -28,7 +28,7 @@
  * a burst of redundant replays.
  */
 
-import type { TaskToken } from '../../protocol';
+import type {TaskToken} from '../../protocol';
 
 export interface WorkflowTaskQueue {
   /**
@@ -42,9 +42,7 @@ export interface WorkflowTaskQueue {
    * the name matches any pool — how the in-process runtime serves everything
    * with one set of loops.
    */
-  poll(
-    taskQueue?: string,
-  ): { token: TaskToken; workflowId: string } | undefined;
+  poll(taskQueue?: string): {token: TaskToken; workflowId: string} | undefined;
   /** Ack a leased task; if a wake arrived while it was in-flight, re-enqueue it. */
   complete(token: TaskToken): void;
 }

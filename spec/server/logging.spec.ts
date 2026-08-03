@@ -34,9 +34,9 @@ function capturingCore(historyStore: MemoryHistoryStore) {
     launch: () => 'child',
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
-    log: (event, fields = {}) => events.push({ event, fields }),
+    log: (event, fields = {}) => events.push({event, fields}),
   });
-  return { core, workflowTaskQueue, events };
+  return {core, workflowTaskQueue, events};
 }
 
 describe('the JSON Lines log format', () => {
@@ -44,7 +44,7 @@ describe('the JSON Lines log format', () => {
     const lines: string[] = [];
     const log = createJsonLogger((line) => lines.push(line));
 
-    log('activity.scheduled', { workflowId: 'wf', seq: 0 });
+    log('activity.scheduled', {workflowId: 'wf', seq: 0});
 
     expect(lines.length).toBe(1);
     expect(lines[0].endsWith('\n')).toBeTrue();
@@ -58,14 +58,15 @@ describe('the JSON Lines log format', () => {
   it('emits an event with no fields as a valid line', () => {
     const lines: string[] = [];
     createJsonLogger((line) => lines.push(line))('server.started');
-    expect(JSON.parse(lines[0]).event).toBe('server.started');
+    const parsed = JSON.parse(lines[0]) as Record<string, unknown>;
+    expect(parsed['event']).toBe('server.started');
   });
 });
 
 describe('lifecycle events', () => {
   it('records an activity being scheduled and then settling', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, events } = capturingCore(historyStore);
+    const {core, events} = capturingCore(historyStore);
     await historyStore.create('wf', 'w', []);
     await core.applyWorkflowTaskResult('wf', {
       done: false,
@@ -82,7 +83,7 @@ describe('lifecycle events', () => {
         },
       ],
     });
-    await core.reportActivityResult('wf', 0, { ok: true, result: 'hi' });
+    await core.reportActivityResult('wf', 0, {ok: true, result: 'hi'});
 
     expect(events.map((e) => e.event)).toEqual([
       'activity.scheduled',
@@ -99,7 +100,7 @@ describe('lifecycle events', () => {
 
   it('reports a failing workflow task with its consecutive count and next retry', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue, events } = capturingCore(historyStore);
+    const {core, workflowTaskQueue, events} = capturingCore(historyStore);
     await historyStore.create('wf', 'w', []);
     workflowTaskQueue.enqueue('wf');
 
@@ -115,7 +116,7 @@ describe('lifecycle events', () => {
 
   it('records a terminated execution with the reason and how long it was stuck', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue, events } = capturingCore(historyStore);
+    const {core, workflowTaskQueue, events} = capturingCore(historyStore);
     await historyStore.create('wf', 'w', []);
     workflowTaskQueue.enqueue('wf');
     const task = await core.pollWorkflowTask();
@@ -133,14 +134,14 @@ describe('lifecycle events', () => {
   // so without an event the only evidence would be an absence in history.
   it('records a duplicate activity completion being dropped', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, events } = capturingCore(historyStore);
+    const {core, events} = capturingCore(historyStore);
     await historyStore.create('wf', 'w', []);
     await historyStore.append('wf', [
-      { type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {} },
-      { type: 'activityCompleted', seq: 0, result: 'first' },
+      {type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {}},
+      {type: 'activityCompleted', seq: 0, result: 'first'},
     ]);
 
-    await core.reportActivityResult('wf', 0, { ok: true, result: 'second' });
+    await core.reportActivityResult('wf', 0, {ok: true, result: 'second'});
 
     expect(events.map((e) => e.event)).toContain('activity.duplicate_dropped');
   });

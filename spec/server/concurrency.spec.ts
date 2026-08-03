@@ -10,7 +10,7 @@
  * replayable.
  */
 
-import type { WorkflowTaskResult } from '../../src';
+import type {WorkflowTaskResult} from '../../src';
 import {
   MemoryHistoryStore,
   MemoryTaskQueue,
@@ -19,8 +19,8 @@ import {
   VersionConflictError,
   createServerCore,
 } from '../../src/server';
-import { createWorkflowRegistry, createWorkflowWorker } from '../../src/worker';
-import { runActivity } from '../../src/workflow';
+import {createWorkflowRegistry, createWorkflowWorker} from '../../src/worker';
+import {runActivity} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -34,13 +34,13 @@ describe('optimistic version check (appendIfVersion)', () => {
 
     await store.appendIfVersion(
       'wf',
-      [{ type: 'signal', name: 'a', payload: 1 }],
+      [{type: 'signal', name: 'a', payload: 1}],
       v0,
     ); // v0 -> v0+1
     await expectAsync(
       store.appendIfVersion(
         'wf',
-        [{ type: 'signal', name: 'b', payload: 2 }],
+        [{type: 'signal', name: 'b', payload: 2}],
         v0,
       ),
     ).toBeRejectedWithError(VersionConflictError);
@@ -72,7 +72,7 @@ describe('lease-expiry redelivery', () => {
   it('redelivers an activity task whose lease expires', async () => {
     const q = new MemoryTaskQueue(10);
     q.enqueue(
-      { workflowId: 'wf', seq: 0, name: 'a', args: [], options: {} },
+      {workflowId: 'wf', seq: 0, name: 'a', args: [], options: {}},
       'default',
     );
 
@@ -118,7 +118,7 @@ describe('lease race resolved by the version check', () => {
       failed: false,
       failure: undefined,
       commands: [
-        { type: 'scheduleActivity', seq: 0, name: 'a', args: [], options: {} },
+        {type: 'scheduleActivity', seq: 0, name: 'a', args: [], options: {}},
       ],
     };
 
@@ -189,12 +189,12 @@ describe('late activity ack after redelivery', () => {
     const second = await core.pollActivityTask();
     expect(second?.name).toBe('work'); // redelivered to worker B
 
-    await core.completeActivityTask(second!.token, { ok: true, result: 'w' });
+    await core.completeActivityTask(second!.token, {ok: true, result: 'w'});
     await driveWorkflow(); // seq 0 resolves; the workflow schedules 'more'
 
     // Worker A was not dead, only slow: its ack for seq 0 lands now, behind the
     // `activityScheduled` for seq 1.
-    await core.completeActivityTask(first!.token, { ok: true, result: 'w' });
+    await core.completeActivityTask(first!.token, {ok: true, result: 'w'});
 
     const mid = await historyStore.get('wf');
     expect(
@@ -204,7 +204,7 @@ describe('late activity ack after redelivery', () => {
 
     const more = await core.pollActivityTask();
     expect(more?.name).toBe('more');
-    await core.completeActivityTask(more!.token, { ok: true, result: 'm' });
+    await core.completeActivityTask(more!.token, {ok: true, result: 'm'});
 
     // A duplicate completion mid-history replays as `nondeterminism: history
     // event for unknown seq 0` — the seq-0 waiter is gone by then — so running

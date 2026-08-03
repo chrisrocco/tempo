@@ -6,9 +6,9 @@
  */
 
 import {
+  backoffMs,
   maxAttempts,
   shouldRetry,
-  backoffMs,
 } from '../../src/server/retry_policy';
 
 describe('retry_policy', () => {
@@ -19,15 +19,15 @@ describe('retry_policy', () => {
   });
 
   it('retries up to maximumAttempts', () => {
-    const retry = { maximumAttempts: 3 };
+    const retry = {maximumAttempts: 3};
     expect(shouldRetry(retry, 1)).toBe(true);
     expect(shouldRetry(retry, 2)).toBe(true);
     expect(shouldRetry(retry, 3)).toBe(false);
   });
 
   it('treats a non-positive maximumAttempts as one attempt', () => {
-    expect(maxAttempts({ maximumAttempts: 0 })).toBe(1);
-    expect(maxAttempts({ maximumAttempts: -5 })).toBe(1);
+    expect(maxAttempts({maximumAttempts: 0})).toBe(1);
+    expect(maxAttempts({maximumAttempts: -5})).toBe(1);
   });
 
   it('has no backoff without a policy', () => {

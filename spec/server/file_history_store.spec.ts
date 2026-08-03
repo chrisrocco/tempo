@@ -6,11 +6,11 @@
  * single-writer lock). Each test uses a throwaway temp dir.
  */
 
-import { promises as fs } from 'node:fs';
+import {promises as fs} from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createLocalRuntime, FileHistoryStore } from '../../src';
-import { runActivity } from '../../src/workflow';
+import {createLocalRuntime, FileHistoryStore} from '../../src';
+import {runActivity} from '../../src/workflow';
 
 function tmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'wf-fs-'));
@@ -21,7 +21,7 @@ describe('FileHistoryStore', () => {
     const dir = await tmpDir();
     const store = await FileHistoryStore.open(dir);
     try {
-      const rt = createLocalRuntime({ historyStore: store })
+      const rt = createLocalRuntime({historyStore: store})
         .registerActivity('greet', (n: string) => `hi ${n}`)
         .registerWorkflow('greeter', async () =>
           runActivity<string>('greet', 'world'),
@@ -32,7 +32,7 @@ describe('FileHistoryStore', () => {
       );
     } finally {
       await store.close();
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 
@@ -40,13 +40,13 @@ describe('FileHistoryStore', () => {
     const dir = await tmpDir();
     try {
       const store1 = await FileHistoryStore.open(dir);
-      const rt = createLocalRuntime({ historyStore: store1 })
+      const rt = createLocalRuntime({historyStore: store1})
         .registerActivity('double', (n: number) => n * 2)
         .registerWorkflow('doubler', async () =>
           runActivity<number>('double', 21),
         );
 
-      await rt.start<number>('doubler', [], { workflowId: 'wf-1' }).result();
+      await rt.start<number>('doubler', [], {workflowId: 'wf-1'}).result();
       await store1.close(); // flush + release lock
 
       // A brand-new store rebuilds its cache from disk — nothing in memory carried over.
@@ -62,7 +62,7 @@ describe('FileHistoryStore', () => {
       );
       await store2.close();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 
@@ -87,7 +87,7 @@ describe('FileHistoryStore', () => {
       expect(rec?.lastTaskFailure).toBe('nondeterminism at seq 0');
       await store2.close();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 
@@ -106,7 +106,7 @@ describe('FileHistoryStore', () => {
       expect(rec?.lastTaskFailure).toBeUndefined();
       await store2.close();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 
@@ -122,7 +122,7 @@ describe('FileHistoryStore', () => {
       const store2 = await FileHistoryStore.open(dir);
       await store2.close();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 
@@ -136,7 +136,7 @@ describe('FileHistoryStore', () => {
       expect(await store.list()).toEqual([]);
       await store.close();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, {recursive: true, force: true});
     }
   });
 });

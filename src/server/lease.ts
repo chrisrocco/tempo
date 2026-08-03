@@ -11,7 +11,7 @@
  */
 
 export class LeaseTable<T> {
-  private readonly leases = new Map<string, { item: T; deadline: number }>();
+  private readonly leases = new Map<string, {item: T; deadline: number}>();
   private counter = 0;
 
   constructor(private readonly prefix: string) {}
@@ -19,7 +19,7 @@ export class LeaseTable<T> {
   /** Lease an item for `timeoutMs`, returning its token. */
   lease(item: T, timeoutMs: number): string {
     const token = `${this.prefix}-${++this.counter}`;
-    this.leases.set(token, { item, deadline: Date.now() + timeoutMs });
+    this.leases.set(token, {item, deadline: Date.now() + timeoutMs});
     return token;
   }
 

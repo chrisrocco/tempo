@@ -7,7 +7,7 @@
  * single `type === 'signal'` check instead of hunting for the seq-bearing ones.
  */
 
-import type { ActivityOptions } from './activity_options';
+import type {ActivityOptions} from './activity_options';
 
 /** Fields common to events that complete a specific command. */
 export interface CompletionEventBase {

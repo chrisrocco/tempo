@@ -8,10 +8,10 @@
 import type {
   ActivityResult,
   ExecutionStatus,
+  StartWorkflowOptions,
   WorkflowTaskResult,
 } from './service';
-import type { StartWorkflowOptions } from './service';
-import type { TaskToken } from './task_token';
+import type {TaskToken} from './task_token';
 
 /** The client-visible outcome of an execution — how a failure crosses the wire (as a message). */
 export interface WorkflowOutcome {
@@ -33,20 +33,20 @@ export type RpcRequest =
       signalName: string;
       payload: unknown;
     }
-  | { method: 'cancel'; workflowId: string }
-  | { method: 'terminate'; workflowId: string; reason: string }
-  | { method: 'getOutcome'; workflowId: string }
-  | { method: 'describeExecution'; workflowId: string }
-  | { method: 'listExecutions' }
-  | { method: 'pollWorkflowTask'; taskQueue?: string }
+  | {method: 'cancel'; workflowId: string}
+  | {method: 'terminate'; workflowId: string; reason: string}
+  | {method: 'getOutcome'; workflowId: string}
+  | {method: 'describeExecution'; workflowId: string}
+  | {method: 'listExecutions'}
+  | {method: 'pollWorkflowTask'; taskQueue?: string}
   | {
       method: 'completeWorkflowTask';
       token: TaskToken;
       result: WorkflowTaskResult;
     }
-  | { method: 'failWorkflowTask'; token: TaskToken; reason: string }
-  | { method: 'heartbeatActivityTask'; token: TaskToken }
-  | { method: 'pollActivityTask'; taskQueue?: string }
+  | {method: 'failWorkflowTask'; token: TaskToken; reason: string}
+  | {method: 'heartbeatActivityTask'; token: TaskToken}
+  | {method: 'pollActivityTask'; taskQueue?: string}
   | {
       method: 'completeActivityTask';
       token: TaskToken;
@@ -54,4 +54,5 @@ export type RpcRequest =
     };
 
 export type RpcResponse =
-  { ok: true; value: unknown } | { ok: false; error: string };
+  | {ok: true; value: unknown}
+  | {ok: false; error: string};

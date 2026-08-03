@@ -24,8 +24,8 @@
  * history whether or not the cache lands.
  */
 
-import { createContext, replay, type WorkflowFn } from '../core';
-import type { HistoryEvent, WorkflowTaskResult } from '../protocol';
+import {createContext, replay, type WorkflowFn} from '../core';
+import type {HistoryEvent, WorkflowTaskResult} from '../protocol';
 
 export type WorkflowRegistry = Map<string, WorkflowFn>;
 

@@ -7,7 +7,7 @@
  * anything; `tempo deploy` will use it to decide which role services to install.
  */
 
-import { spawnEntry } from './process';
+import {spawnEntry} from './process';
 
 export interface WorkerManifest {
   name: string;
@@ -36,7 +36,7 @@ export function describeWorker(
   timeoutMs = 20000,
 ): Promise<WorkerManifest> {
   return new Promise((resolve, reject) => {
-    const child = spawnEntry(entry, { args: ['--describe'] });
+    const child = spawnEntry(entry, {args: ['--describe']});
     let out = '';
     let err = '';
     const timer = setTimeout(() => {

@@ -16,9 +16,9 @@
  * anything that would rather parse than read.
  */
 
-import type { ExecutionDetail, HistoryEvent } from '../protocol';
-import { createRemoteService } from '../services';
-import { DEFAULT_SERVER_URL } from '../tempo';
+import type {ExecutionDetail, HistoryEvent} from '../protocol';
+import {createRemoteService} from '../services';
+import {DEFAULT_SERVER_URL} from '../tempo';
 
 /** Print a string result bare; anything else as JSON. */
 function formatResult(value: unknown): string {
@@ -46,7 +46,7 @@ async function assertReachable(serverUrl: string): Promise<void> {
   try {
     await fetch(serverUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {'content-type': 'application/json'},
       body: '{}',
     });
   } catch {
@@ -63,7 +63,7 @@ export async function startWorkflow(
 ): Promise<number> {
   await assertReachable(serverUrl);
   const service = createRemoteService(serverUrl);
-  const { workflowId } = service.start(name, args, { taskQueue });
+  const {workflowId} = service.start(name, args, {taskQueue});
   if (!wait) {
     process.stdout.write(`${workflowId}\n`);
     return 0;

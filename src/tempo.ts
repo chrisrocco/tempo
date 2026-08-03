@@ -28,10 +28,10 @@
  * all, and one that cannot serve it fails the task rather than passing it on.
  */
 
-import type { WorkflowFn } from './core';
-import { DEFAULT_TASK_QUEUE } from './protocol';
-import { createJsonLogger } from './server';
-import { createRemoteService } from './services';
+import type {WorkflowFn} from './core';
+import {DEFAULT_TASK_QUEUE} from './protocol';
+import {createJsonLogger} from './server';
+import {createRemoteService} from './services';
 import {
   createActivityRegistry,
   createActivityWorker,
@@ -144,7 +144,7 @@ export function startWorker(options: StartWorkerOptions): Worker {
         activities: activities.map(([exported]) => exported),
       }),
     );
-    return { name: options.name, roles: [], stop: () => Promise.resolve() };
+    return {name: options.name, roles: [], stop: () => Promise.resolve()};
   }
 
   const roles = resolveRoles(
@@ -221,4 +221,4 @@ export function startWorker(options: StartWorkerOptions): Worker {
 }
 
 /** The namespace a worker entrypoint imports: `Tempo.startWorker({...})`. */
-export const Tempo = { startWorker };
+export const Tempo = {startWorker};

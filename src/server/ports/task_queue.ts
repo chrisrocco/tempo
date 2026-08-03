@@ -21,11 +21,7 @@
  * expires, and the server owns every policy about when an attempt is over.
  */
 
-import type {
-  ActivityTask,
-  LeasedActivityTask,
-  TaskToken,
-} from '../../protocol';
+import type {ActivityTask, LeasedActivityTask, TaskToken} from '../../protocol';
 
 export interface TaskQueue {
   /** `taskQueue` names the pool that may serve this task. */

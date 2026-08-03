@@ -14,7 +14,6 @@
  * Phase 6 and not built.
  */
 
-import { DEFAULT_TASK_QUEUE } from '../protocol';
 import type {
   ActivityResult,
   ExecutionDetail,
@@ -26,7 +25,9 @@ import type {
   WorkflowTask,
   WorkflowTaskResult,
 } from '../protocol';
+import {DEFAULT_TASK_QUEUE} from '../protocol';
 import {
+  MemoryHistoryStore,
   MemoryTaskQueue,
   MemoryTimerService,
   MemoryWorkflowTaskQueue,
@@ -34,7 +35,6 @@ import {
   describeExecution,
   silentLogger,
   summarizeExecution,
-  MemoryHistoryStore,
   type HistoryStore,
   type Logger,
 } from '../server';
@@ -54,9 +54,9 @@ function errorMessage(e: unknown): string {
  * may also end in `-<n>` and will be counted; overshooting costs nothing, while
  * undershooting collides.
  */
-function highestGeneratedSuffix(records: { workflowId: string }[]): number {
+function highestGeneratedSuffix(records: {workflowId: string}[]): number {
   let highest = 0;
-  for (const { workflowId } of records) {
+  for (const {workflowId} of records) {
     const match = /-(\d+)$/.exec(workflowId);
     if (match) highest = Math.max(highest, Number(match[1]));
   }
@@ -68,7 +68,7 @@ export interface ServerHost {
     name: string,
     args?: unknown[],
     opts?: StartWorkflowOptions,
-  ): { workflowId: string };
+  ): {workflowId: string};
   signal(
     workflowId: string,
     signalName: string,
@@ -138,7 +138,7 @@ export function createServerHost(
       .create(workflowId, name, args, taskQueue)
       .then(() => {
         workflowTaskQueue.enqueue(workflowId, taskQueue);
-        log('execution.started', { workflowId, name, taskQueue });
+        log('execution.started', {workflowId, name, taskQueue});
       })
       // `create` rejects an id that already exists, and this is a floating
       // promise: without a handler that reject is an unhandled rejection, which
@@ -171,7 +171,7 @@ export function createServerHost(
         args,
         opts.taskQueue ?? DEFAULT_TASK_QUEUE,
       );
-      return { workflowId };
+      return {workflowId};
     },
     signal(workflowId, signalName, payload) {
       return core.appendSignal(workflowId, signalName, payload);
@@ -184,7 +184,7 @@ export function createServerHost(
     },
     async getOutcome(workflowId) {
       const rec = await historyStore.get(workflowId);
-      if (!rec) return { status: 'running' }; // not created yet — client keeps polling
+      if (!rec) return {status: 'running'}; // not created yet — client keeps polling
       return {
         status: rec.status,
         result: rec.result,

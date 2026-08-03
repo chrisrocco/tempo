@@ -134,7 +134,7 @@ describe('core condition — cancellation', () => {
       }
     });
 
-    applyEvent(ctx, { type: 'cancelRequested' });
+    applyEvent(ctx, {type: 'cancelRequested'});
     await drainMicrotasks();
 
     expect(error).toBeInstanceOf(CancelledFailure);

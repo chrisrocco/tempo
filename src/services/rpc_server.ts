@@ -11,8 +11,8 @@
  */
 
 import * as http from 'node:http';
-import type { RpcRequest, RpcResponse } from '../protocol';
-import type { ServerHost } from './server_host';
+import type {RpcRequest, RpcResponse} from '../protocol';
+import type {ServerHost} from './server_host';
 
 /**
  * The compile-time half of the switch below: `request` narrows to `never` once
@@ -22,7 +22,7 @@ import type { ServerHost } from './server_host';
  */
 function assertNever(request: never): never {
   throw new Error(
-    `unknown RPC method: ${JSON.stringify((request as { method?: unknown }).method)}`,
+    `unknown RPC method: ${JSON.stringify((request as {method?: unknown}).method)}`,
   );
 }
 
@@ -77,14 +77,14 @@ export function createRpcServer(host: ServerHost): http.Server {
       let response: RpcResponse;
       try {
         const value = await dispatch(host, JSON.parse(body) as RpcRequest);
-        response = { ok: true, value: value ?? null };
+        response = {ok: true, value: value ?? null};
       } catch (e) {
         response = {
           ok: false,
           error: e instanceof Error ? e.message : String(e),
         };
       }
-      res.writeHead(200, { 'content-type': 'application/json' });
+      res.writeHead(200, {'content-type': 'application/json'});
       res.end(JSON.stringify(response));
     });
   });

@@ -28,8 +28,8 @@
  * (see apply_event); and calling `condition` after cancellation rejects at once.
  */
 
-import { getContext, type WorkflowContext } from './context';
-import { CancelledFailure } from './errors';
+import {getContext, type WorkflowContext} from './context';
+import {CancelledFailure} from './errors';
 
 export function condition(fn: () => boolean): Promise<void> {
   const ctx = getContext();
@@ -43,7 +43,7 @@ export function condition(fn: () => boolean): Promise<void> {
       return;
     } // eager fast-path
     const seq = ctx.condSeq++;
-    ctx.blockedConditions.set(seq, { fn, resolve, reject });
+    ctx.blockedConditions.set(seq, {fn, resolve, reject});
   });
 }
 

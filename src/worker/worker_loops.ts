@@ -12,9 +12,9 @@
  * while doing no work and hammering a dead endpoint. See planning/tickets/02.
  */
 
-import type { WorkflowService } from '../protocol';
-import type { ActivityWorker } from './activity_worker';
-import type { WorkflowWorker } from './workflow_worker';
+import type {WorkflowService} from '../protocol';
+import type {ActivityWorker} from './activity_worker';
+import type {WorkflowWorker} from './workflow_worker';
 
 // Ref'd on purpose: a worker process must stay alive between polls. The loops are
 // bounded by an explicit stop(), so this never keeps a process alive spuriously.

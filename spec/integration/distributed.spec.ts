@@ -8,7 +8,7 @@
  * lease expire and is redelivered — so it runs at-least-once.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import {spawn, type ChildProcess} from 'node:child_process';
 import {
   createRemoteService,
   type RemoteServiceOptions,
@@ -21,7 +21,7 @@ import {
   runWorkflowWorker,
   type WorkerLoop,
 } from '../../src/worker';
-import { runActivity } from '../../src/workflow';
+import {runActivity} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -34,7 +34,7 @@ function spawnMain(
   args: string[] = [],
 ): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx', script, ...args], {
-    env: { ...process.env, ...env },
+    env: {...process.env, ...env},
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -105,10 +105,10 @@ async function pollUntil<T>(
 
 async function spawnServer(
   env: Record<string, string> = {},
-): Promise<{ url: string; proc: ChildProcess }> {
+): Promise<{url: string; proc: ChildProcess}> {
   const proc = spawnMain('bin/server-main.ts', env);
   const m = await waitForLine(proc, /LISTENING (\d+)/);
-  return { url: `http://127.0.0.1:${m[1]}`, proc };
+  return {url: `http://127.0.0.1:${m[1]}`, proc};
 }
 
 function remote(
@@ -122,7 +122,7 @@ describe('distributed — real server process over RPC', () => {
   // The deployed shape: one worker binary, started twice, each process taking a
   // single role from TEMPO_ROLE — what the generated systemd units do.
   it('runs a workflow across a server and the worker binary in each role', async () => {
-    const { url, proc: server } = await spawnServer();
+    const {url, proc: server} = await spawnServer();
     const wf = spawnMain(WORKER, {
       TEMPO_SERVER_URL: url,
       TEMPO_ROLE: 'workflow',
@@ -136,7 +136,7 @@ describe('distributed — real server process over RPC', () => {
       await waitForLine(act, /WORKER_READY greeter activity/);
 
       const service = remote(url);
-      const { workflowId } = service.start('greeter', ['world']);
+      const {workflowId} = service.start('greeter', ['world']);
       await expectAsync(service.getResult(workflowId)).toBeResolvedTo(
         'Hello, world!',
       );
@@ -150,13 +150,13 @@ describe('distributed — real server process over RPC', () => {
   // The dev shape: TEMPO_ROLE unset, so one process serves both roles. This is
   // what `tempo up` and a hand-run binary do.
   it('runs a workflow with one worker process serving both roles', async () => {
-    const { url, proc: server } = await spawnServer();
-    const worker = spawnMain(WORKER, { TEMPO_SERVER_URL: url });
+    const {url, proc: server} = await spawnServer();
+    const worker = spawnMain(WORKER, {TEMPO_SERVER_URL: url});
     try {
       await waitForLine(worker, /WORKER_READY greeter workflow,activity/);
 
       const service = remote(url);
-      const { workflowId } = service.start('greeter', ['world']);
+      const {workflowId} = service.start('greeter', ['world']);
       await expectAsync(service.getResult(workflowId)).toBeResolvedTo(
         'Hello, world!',
       );
@@ -176,13 +176,13 @@ describe('distributed — real server process over RPC', () => {
    * Failing fast would trade a recoverable state for an unrecoverable one.
    */
   it('keeps an execution alive when no worker has its workflow, and says why', async () => {
-    const { url, proc: server } = await spawnServer();
-    const worker = spawnMain(WORKER, { TEMPO_SERVER_URL: url });
+    const {url, proc: server} = await spawnServer();
+    const worker = spawnMain(WORKER, {TEMPO_SERVER_URL: url});
     try {
       await waitForLine(worker, /WORKER_READY/);
 
       const service = remote(url);
-      const { workflowId } = service.start('not-a-workflow');
+      const {workflowId} = service.start('not-a-workflow');
 
       // Give the task a few attempts to be reported and counted.
       let detail = await service.describeExecution(workflowId);
@@ -220,7 +220,7 @@ describe('distributed — real server process over RPC', () => {
   }, 30000);
 
   it('redelivers an activity after its lease expires, running it at-least-once', async () => {
-    const { url, proc: server } = await spawnServer({
+    const {url, proc: server} = await spawnServer({
       ACTIVITY_LEASE_MS: '60',
     });
     const service = remote(url);
@@ -244,7 +244,7 @@ describe('distributed — real server process over RPC', () => {
         createWorkflowWorker(workflowRegistry),
       );
 
-      const { workflowId } = service.start('doer');
+      const {workflowId} = service.start('doer');
 
       const first = await pollUntil(() => service.pollActivityTask());
       await activityWorker.runTask(first); // ran once, but we never complete it → "crash"

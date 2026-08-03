@@ -39,9 +39,9 @@
  * where a run stops allocating seqs the moment `cancelRequested` is applied.
  */
 
-import type { Command, HistoryEvent } from '../protocol';
-import type { WorkflowContext } from './context';
-import { CancelledFailure, NondeterminismError } from './errors';
+import type {Command, HistoryEvent} from '../protocol';
+import type {WorkflowContext} from './context';
+import {CancelledFailure, NondeterminismError} from './errors';
 
 /** How a command reads in an error message. */
 function describeCommand(cmd: Command): string {
@@ -57,7 +57,7 @@ function describeCommand(cmd: Command): string {
  * event's own description is built in one place.
  */
 function markerMismatch(
-  ev: HistoryEvent & { seq: number },
+  ev: HistoryEvent & {seq: number},
   cmd: Command,
 ): string | undefined {
   if (ev.type === 'activityScheduled') {

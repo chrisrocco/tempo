@@ -16,7 +16,7 @@ import {
   createServerCore,
   workflowTaskBackoffMs,
 } from '../../src/server';
-import { createWorkflowRegistry, createWorkflowWorker } from '../../src/worker';
+import {createWorkflowRegistry, createWorkflowWorker} from '../../src/worker';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -33,7 +33,7 @@ function makeCore(historyStore: MemoryHistoryStore) {
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
   });
-  return { core, workflowTaskQueue };
+  return {core, workflowTaskQueue};
 }
 
 describe('workflow-task backoff', () => {
@@ -51,7 +51,7 @@ describe('workflow-task backoff', () => {
 describe('a workflow task the worker could not replay', () => {
   it('records the failure against the execution with its reason', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
     workflowTaskQueue.enqueue('wf');
 
@@ -65,7 +65,7 @@ describe('a workflow task the worker could not replay', () => {
 
   it('leaves the execution running rather than settling it', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
     workflowTaskQueue.enqueue('wf');
 
@@ -78,7 +78,7 @@ describe('a workflow task the worker could not replay', () => {
 
   it('counts consecutive failures rather than overwriting the last', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
 
     for (const reason of ['first', 'second', 'third']) {
@@ -95,7 +95,7 @@ describe('a workflow task the worker could not replay', () => {
 
   it('re-queues the execution after a backoff instead of dropping it', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
     workflowTaskQueue.enqueue('wf');
 
@@ -111,7 +111,7 @@ describe('a workflow task the worker could not replay', () => {
   // wrong now, and the backoff would keep growing after the trouble passed.
   it('forgets past failures once a task succeeds', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
     workflowTaskQueue.enqueue('wf');
 
@@ -135,7 +135,7 @@ describe('a workflow task the worker could not replay', () => {
 
   it('does not bump the version, so a racing worker can still complete', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
     workflowTaskQueue.enqueue('wf');
     const before = (await historyStore.get('wf'))!.version;
@@ -150,7 +150,7 @@ describe('a workflow task the worker could not replay', () => {
 describe('terminate — the escape hatch cancel cannot be', () => {
   it('settles a wedged execution without replaying it', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
     workflowTaskQueue.enqueue('wf');
     const task = await core.pollWorkflowTask();
@@ -171,7 +171,7 @@ describe('terminate — the escape hatch cancel cannot be', () => {
    */
   it('ends an execution that cancellation leaves running', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     const broken = createWorkflowRegistry();
     broken.set('doer', () => {
       throw new Error('replay is broken');
@@ -205,7 +205,7 @@ describe('terminate — the escape hatch cancel cannot be', () => {
 
   it('is idempotent, so terminating a settled execution changes nothing', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core } = makeCore(historyStore);
+    const {core} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
 
     await core.terminate('wf', 'first');
@@ -218,7 +218,7 @@ describe('terminate — the escape hatch cancel cannot be', () => {
 
   it('stops the retry loop, since a terminated task is no longer handed out', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
     await historyStore.create('wf', 'w', []);
     await core.terminate('wf', 'done with it');
 
@@ -236,7 +236,7 @@ describe('recovering a wedged execution', () => {
    */
   it('completes after the broken workflow code is replaced', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, workflowTaskQueue } = makeCore(historyStore);
+    const {core, workflowTaskQueue} = makeCore(historyStore);
 
     const broken = createWorkflowRegistry();
     broken.set('doer', () => {

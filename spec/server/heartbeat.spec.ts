@@ -11,7 +11,7 @@
  * itself.
  */
 
-import type { ActivityOptions } from '../../src';
+import type {ActivityOptions} from '../../src';
 import {
   MemoryHistoryStore,
   MemoryTaskQueue,
@@ -35,7 +35,7 @@ function coreWith(leaseMs: number, historyStore = new MemoryHistoryStore()) {
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
   });
-  return { core, activityTaskQueue, historyStore };
+  return {core, activityTaskQueue, historyStore};
 }
 
 async function seed(
@@ -44,13 +44,13 @@ async function seed(
 ): Promise<void> {
   await historyStore.create('wf', 'w', []);
   await historyStore.append('wf', [
-    { type: 'activityScheduled', seq: 0, name: 'agent', args: [], options },
+    {type: 'activityScheduled', seq: 0, name: 'agent', args: [], options},
   ]);
 }
 
 function enqueue(queue: MemoryTaskQueue, options: ActivityOptions): void {
   queue.enqueue(
-    { workflowId: 'wf', seq: 0, name: 'agent', args: [], options },
+    {workflowId: 'wf', seq: 0, name: 'agent', args: [], options},
     'default',
   );
 }
@@ -71,8 +71,8 @@ describe('an attempt that keeps heartbeating', () => {
    * the only outcomes were a duplicate run or an early failure.
    */
   it('holds its claim past the lease, so no second worker gets the task', async () => {
-    const options: ActivityOptions = { heartbeatTimeoutMs: 200 };
-    const { core, activityTaskQueue, historyStore } = coreWith(40);
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
     await seed(historyStore, options);
     enqueue(activityTaskQueue, options);
 
@@ -88,8 +88,8 @@ describe('an attempt that keeps heartbeating', () => {
   });
 
   it('still completes normally when the work finally finishes', async () => {
-    const options: ActivityOptions = { heartbeatTimeoutMs: 200 };
-    const { core, activityTaskQueue, historyStore } = coreWith(40);
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
     await seed(historyStore, options);
     enqueue(activityTaskQueue, options);
 
@@ -109,8 +109,8 @@ describe('an attempt that keeps heartbeating', () => {
 
 describe('an attempt that stops heartbeating', () => {
   it('is failed once the silence passes its heartbeat timeout', async () => {
-    const options: ActivityOptions = { heartbeatTimeoutMs: 40 };
-    const { core, activityTaskQueue, historyStore } = coreWith(5000);
+    const options: ActivityOptions = {heartbeatTimeoutMs: 40};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
     await seed(historyStore, options);
     enqueue(activityTaskQueue, options);
 
@@ -119,7 +119,7 @@ describe('an attempt that stops heartbeating', () => {
 
     const terminal = await terminalEvents(historyStore);
     expect(terminal.length).toBe(1);
-    expect((terminal[0] as { error: string }).error).toContain(
+    expect((terminal[0] as {error: string}).error).toContain(
       'stopped heartbeating',
     );
   });
@@ -130,8 +130,8 @@ describe('an attempt that stops heartbeating', () => {
    * short because a healthy attempt is expected to speak.
    */
   it('is caught long before its lease would have expired', async () => {
-    const options: ActivityOptions = { heartbeatTimeoutMs: 40 };
-    const { core, activityTaskQueue, historyStore } = coreWith(10_000);
+    const options: ActivityOptions = {heartbeatTimeoutMs: 40};
+    const {core, activityTaskQueue, historyStore} = coreWith(10_000);
     await seed(historyStore, options);
     enqueue(activityTaskQueue, options);
 
@@ -142,8 +142,8 @@ describe('an attempt that stops heartbeating', () => {
   });
 
   it('does not redeliver the abandoned attempt to a second worker', async () => {
-    const options: ActivityOptions = { heartbeatTimeoutMs: 30 };
-    const { core, activityTaskQueue, historyStore } = coreWith(60);
+    const options: ActivityOptions = {heartbeatTimeoutMs: 30};
+    const {core, activityTaskQueue, historyStore} = coreWith(60);
     await seed(historyStore, options);
     enqueue(activityTaskQueue, options);
 
@@ -154,7 +154,7 @@ describe('an attempt that stops heartbeating', () => {
   });
 
   it('leaves an activity alone when it declares no heartbeat timeout', async () => {
-    const { core, activityTaskQueue, historyStore } = coreWith(5000);
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
     await seed(historyStore, {});
     enqueue(activityTaskQueue, {});
 
@@ -172,8 +172,8 @@ describe('heartbeats for an attempt the server gave up on', () => {
    * run the timeout prevented would reappear by the back door.
    */
   it('are ignored rather than reviving the claim', async () => {
-    const options: ActivityOptions = { heartbeatTimeoutMs: 30 };
-    const { core, activityTaskQueue, historyStore } = coreWith(5000);
+    const options: ActivityOptions = {heartbeatTimeoutMs: 30};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
     await seed(historyStore, options);
     enqueue(activityTaskQueue, options);
 
@@ -187,7 +187,7 @@ describe('heartbeats for an attempt the server gave up on', () => {
   });
 
   it('are a no-op for a token that was never leased', async () => {
-    const { core } = coreWith(5000);
+    const {core} = coreWith(5000);
     await expectAsync(
       core.heartbeatActivityTask('act-never-issued'),
     ).toBeResolved();

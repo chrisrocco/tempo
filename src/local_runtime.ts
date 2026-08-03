@@ -10,8 +10,10 @@
  * either way.
  */
 
-import type { WorkflowFn } from './core';
-import type { HistoryStore } from './server';
+import {createClient, type WorkflowHandle} from './client';
+import type {WorkflowFn} from './core';
+import type {HistoryStore} from './server';
+import {createLocalService} from './services';
 import {
   createActivityRegistry,
   createActivityWorker,
@@ -19,8 +21,6 @@ import {
   createWorkflowWorker,
   type ActivityFn,
 } from './worker';
-import { createLocalService } from './services';
-import { createClient, type WorkflowHandle } from './client';
 
 export interface Runtime {
   registerWorkflow(name: string, fn: WorkflowFn): Runtime;
@@ -28,7 +28,7 @@ export interface Runtime {
   start<T = unknown>(
     name: string,
     args?: unknown[],
-    opts?: { workflowId?: string },
+    opts?: {workflowId?: string},
   ): WorkflowHandle<T>;
   /** A handle to an existing execution — e.g. one resumed from a durable store. */
   getHandle<T = unknown>(workflowId: string): WorkflowHandle<T>;
@@ -69,7 +69,7 @@ export function createLocalRuntime(options: LocalRuntimeOptions = {}): Runtime {
     start<T = unknown>(
       name: string,
       args: unknown[] = [],
-      opts: { workflowId?: string } = {},
+      opts: {workflowId?: string} = {},
     ): WorkflowHandle<T> {
       if (!workflowWorker.has(name))
         throw new Error(`no workflow registered as ${name}`);

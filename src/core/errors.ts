@@ -40,7 +40,7 @@ export class NondeterminismError extends Error {
   /** What history records at this seq. */
   readonly actual: string;
 
-  constructor(detail: { seq: number; expected: string; actual: string }) {
+  constructor(detail: {seq: number; expected: string; actual: string}) {
     super(
       `nondeterminism at seq ${detail.seq}: history has ${detail.actual}, but the workflow ${detail.expected}`,
     );

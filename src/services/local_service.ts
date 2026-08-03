@@ -43,7 +43,6 @@
  * activity that double-charges a card.
  */
 
-import { DEFAULT_TASK_QUEUE } from '../protocol';
 import type {
   ActivityResult,
   ExecutionStatus,
@@ -54,6 +53,7 @@ import type {
   WorkflowTask,
   WorkflowTaskResult,
 } from '../protocol';
+import {DEFAULT_TASK_QUEUE} from '../protocol';
 import {
   MemoryHistoryStore,
   MemoryTaskQueue,
@@ -64,7 +64,7 @@ import {
   summarizeExecution,
   type HistoryStore,
 } from '../server';
-import type { ActivityWorker, WorkflowWorker } from '../worker';
+import type {ActivityWorker, WorkflowWorker} from '../worker';
 
 interface ResultWaiter {
   promise: Promise<unknown>;
@@ -102,7 +102,7 @@ export function createLocalService(
     // The core supplies the child's id; it is derived from lineage so it stays
     // stable across a restart (see `server_core.childExecutionId`).
     launch: (workflowId, name, args, taskQueue) => {
-      launch(name, args, { workflowId, taskQueue });
+      launch(name, args, {workflowId, taskQueue});
     },
     kickWorkflowWorker,
     kickActivityWorker,
@@ -214,7 +214,7 @@ export function createLocalService(
       // Voided: attaching this catch IS the point — it stops an unobserved
       // rejection becoming an unhandledRejection if getResult is never awaited.
       void promise.catch(() => {});
-      w = { promise, resolve, reject, settled: false };
+      w = {promise, resolve, reject, settled: false};
       waiters.set(workflowId, w);
     }
     return w;
@@ -264,7 +264,7 @@ export function createLocalService(
 
   return {
     start(name, args = [], opts = {}) {
-      return { workflowId: launch(name, args, opts) };
+      return {workflowId: launch(name, args, opts)};
     },
     signal(workflowId, signalName, payload) {
       if (!statusMirror.has(workflowId))

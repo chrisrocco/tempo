@@ -15,19 +15,19 @@
  * import them across the determinism boundary (see `src/workflow.ts`).
  */
 
-import { createLocalRuntime } from '../../src';
+import {createLocalRuntime} from '../../src';
 import {
-  runActivity,
-  proxyActivities,
-  sleep,
-  executeChild,
-  startChild,
-  defineSignal,
-  setHandler,
+  CancelledFailure,
   condition,
   continueAsNew,
+  defineSignal,
+  executeChild,
+  proxyActivities,
+  runActivity,
+  setHandler,
+  sleep,
+  startChild,
   workflowInfo,
-  CancelledFailure,
 } from '../../src/workflow';
 
 // real-time wait, for letting async drives / timers make progress in a test
@@ -161,11 +161,11 @@ describe('local runtime — activities', () => {
 
 describe('local runtime — proxyActivities & retries', () => {
   it('calls activities through a typed proxy', async () => {
-    const activities = { add: (a: number, b: number) => a + b };
+    const activities = {add: (a: number, b: number) => a + b};
     const rt = createLocalRuntime()
       .registerActivity('add', activities.add)
       .registerWorkflow('sum', async () => {
-        const { add } = proxyActivities<typeof activities>();
+        const {add} = proxyActivities<typeof activities>();
         return add(2, 3);
       });
 
@@ -223,8 +223,8 @@ describe('local runtime — proxyActivities & retries', () => {
     const rt = createLocalRuntime()
       .registerActivity('flaky', activities.flaky)
       .registerWorkflow('wf', async () => {
-        const { flaky } = proxyActivities<typeof activities>({
-          retry: { maximumAttempts: 3 },
+        const {flaky} = proxyActivities<typeof activities>({
+          retry: {maximumAttempts: 3},
         });
         return flaky();
       });
@@ -246,8 +246,8 @@ describe('local runtime — proxyActivities & retries', () => {
     const rt = createLocalRuntime()
       .registerActivity('always', activities.always)
       .registerWorkflow('wf', async () => {
-        const { always } = proxyActivities<typeof activities>({
-          retry: { maximumAttempts: 2 },
+        const {always} = proxyActivities<typeof activities>({
+          retry: {maximumAttempts: 2},
         });
         return always();
       });
@@ -319,8 +319,8 @@ describe('local runtime — child workflows', () => {
         runActivity<number>('square', n),
       )
       .registerWorkflow('parent', async () => {
-        const a = await executeChild<number>('child', { args: [3] });
-        const b = await executeChild<number>('child', { args: [4] });
+        const a = await executeChild<number>('child', {args: [3]});
+        const b = await executeChild<number>('child', {args: [4]});
         return a + b;
       });
 
@@ -339,8 +339,8 @@ describe('local runtime — child workflows', () => {
       )
       .registerWorkflow('parent', async () =>
         Promise.all([
-          executeChild<number>('child', { args: [1] }),
-          executeChild<number>('child', { args: [2] }),
+          executeChild<number>('child', {args: [1]}),
+          executeChild<number>('child', {args: [2]}),
         ]),
       );
 
@@ -366,7 +366,7 @@ describe('local runtime — child workflows', () => {
     const rt = createLocalRuntime()
       .registerWorkflow('child', async () => 'done')
       .registerWorkflow('parent', async () =>
-        executeChild('child', { workflowId: 'plan-for-event-42' }),
+        executeChild('child', {workflowId: 'plan-for-event-42'}),
       );
 
     await rt.start('parent').result();
@@ -410,8 +410,8 @@ describe('local runtime — child workflows', () => {
         return 'planned';
       })
       .registerWorkflow('scanner', async () => {
-        startChild('planner', { workflowId: 'plan-for-event-42' });
-        startChild('planner', { workflowId: 'plan-for-event-42' });
+        startChild('planner', {workflowId: 'plan-for-event-42'});
+        startChild('planner', {workflowId: 'plan-for-event-42'});
         await condition(() => false);
       });
 
@@ -426,10 +426,10 @@ describe('local runtime — child workflows', () => {
     const rt = createLocalRuntime()
       .registerWorkflow('child', async () => 'earlier result')
       .registerWorkflow('parent', async () =>
-        executeChild<string>('child', { workflowId: 'shared' }),
+        executeChild<string>('child', {workflowId: 'shared'}),
       );
 
-    await rt.start('child', [], { workflowId: 'shared' }).result();
+    await rt.start('child', [], {workflowId: 'shared'}).result();
 
     await expectAsync(rt.start('parent').result()).toBeResolvedTo(
       'earlier result',
@@ -502,7 +502,7 @@ describe('local runtime — cancellation', () => {
         }
       })
       .registerWorkflow('parent', async () => {
-        const child = startChild('ticker', { args: ['c1'] });
+        const child = startChild('ticker', {args: ['c1']});
         await sleep(15); // let the child tick a few times
         child.cancel();
         return 'parent-done';
