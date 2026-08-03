@@ -12,8 +12,8 @@ import {
   type ExecutionStatus,
   type HistoryEvent,
 } from '../../protocol';
-import type { ExecutionRecord, HistoryStore } from '../ports/history_store';
-import { VersionConflictError } from '../ports/history_store';
+import type {ExecutionRecord, HistoryStore} from '../ports/history_store';
+import {VersionConflictError} from '../ports/history_store';
 
 export class MemoryHistoryStore implements HistoryStore {
   private readonly records = new Map<string, ExecutionRecord>();
@@ -105,7 +105,7 @@ export class MemoryHistoryStore implements HistoryStore {
   async setStatus(
     workflowId: string,
     status: ExecutionStatus,
-    outcome?: { result?: unknown; failure?: unknown },
+    outcome?: {result?: unknown; failure?: unknown},
   ): Promise<void> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);

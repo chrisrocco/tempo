@@ -21,14 +21,14 @@ import {
   setHandler,
   signalStream,
 } from '../../src/core';
-import type { HistoryEvent } from '../../src/protocol';
+import type {HistoryEvent} from '../../src/protocol';
 
 const comment = defineSignal('comment');
 const stop = defineSignal('stop');
 
 /** A signal event, since these specs are mostly lists of them. */
 function sig(name: string, payload: unknown): HistoryEvent {
-  return { type: 'signal', name, payload };
+  return {type: 'signal', name, payload};
 }
 
 describe('signalStream — consuming', () => {
@@ -83,7 +83,7 @@ describe('signalStream — consuming', () => {
   it('holds signals that arrive while the body is busy', async () => {
     const events: HistoryEvent[] = [
       sig('comment', 'a'),
-      { type: 'activityCompleted', seq: 0, result: null }, // body finishes 'a'
+      {type: 'activityCompleted', seq: 0, result: null}, // body finishes 'a'
       sig('comment', 'b'),
     ];
     const ctx = createContext([], events);
@@ -130,7 +130,7 @@ describe('signalStream — ending', () => {
     const events: HistoryEvent[] = [
       sig('comment', 'a'),
       sig('comment', 'b'),
-      { type: 'activityCompleted', seq: 0, result: null },
+      {type: 'activityCompleted', seq: 0, result: null},
     ];
     const ctx = createContext([], events);
     const seen: unknown[] = [];
@@ -185,7 +185,7 @@ describe('signalStream — start position', () => {
   it('ignores signals buffered before the call by default', async () => {
     const events: HistoryEvent[] = [
       sig('comment', 'before'),
-      { type: 'activityCompleted', seq: 0, result: null },
+      {type: 'activityCompleted', seq: 0, result: null},
     ];
     const ctx = createContext([], events);
     const seen: unknown[] = [];
@@ -205,7 +205,7 @@ describe('signalStream — start position', () => {
   it('includes the buffered backlog when asked for `from: start`', async () => {
     const events: HistoryEvent[] = [
       sig('comment', 'before'),
-      { type: 'activityCompleted', seq: 0, result: null },
+      {type: 'activityCompleted', seq: 0, result: null},
     ];
     const ctx = createContext([], events);
     const seen: unknown[] = [];
@@ -260,7 +260,7 @@ describe('signalStream — determinism', () => {
 
     expect(ctx.commands.length).toBe(1);
     expect(ctx.commands[0]).toEqual(
-      jasmine.objectContaining({ name: 'probe', args: ['a'] }),
+      jasmine.objectContaining({name: 'probe', args: ['a']}),
     );
   });
 
@@ -268,7 +268,7 @@ describe('signalStream — determinism', () => {
   it('emits identical commands when the same history is replayed twice', async () => {
     const events: HistoryEvent[] = [
       sig('comment', 'a'),
-      { type: 'activityCompleted', seq: 0, result: null },
+      {type: 'activityCompleted', seq: 0, result: null},
       sig('comment', 'b'),
     ];
     const workflow = async (): Promise<void> => {
@@ -293,7 +293,7 @@ describe('signalStream — determinism', () => {
   it('reproduces command interleaving across two concurrent branches', async () => {
     const events: HistoryEvent[] = [
       sig('comment', 'a'),
-      { type: 'activityCompleted', seq: 1, result: null }, // the branch's activity
+      {type: 'activityCompleted', seq: 1, result: null}, // the branch's activity
       sig('comment', 'b'),
     ];
     const order: string[] = [];
@@ -375,7 +375,7 @@ describe('firstSignal', () => {
   it('catches a signal that arrives before the promise is awaited', async () => {
     const events: HistoryEvent[] = [
       sig('stop', 'early'), // lands while the workflow is inside the activity
-      { type: 'activityCompleted', seq: 0, result: null },
+      {type: 'activityCompleted', seq: 0, result: null},
     ];
     const ctx = createContext([], events);
     let got: unknown;

@@ -7,6 +7,6 @@
  */
 
 export * from './local_service';
-export * from './server_host';
-export * from './rpc_server';
 export * from './remote_service';
+export * from './rpc_server';
+export * from './server_host';

@@ -5,19 +5,19 @@
  * ordinary function you can call from a test.
  */
 
+import type {ActivityTask} from '../../src/protocol';
 import {
   createActivityRegistry,
   createActivityWorker,
   heartbeat,
 } from '../../src/worker';
-import type { ActivityTask } from '../../src/protocol';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
 function task(options: ActivityTask['options'] = {}): ActivityTask {
-  return { workflowId: 'wf', seq: 0, name: 'agent', args: [], options };
+  return {workflowId: 'wf', seq: 0, name: 'agent', args: [], options};
 }
 
 describe('heartbeat from inside an activity', () => {
@@ -33,7 +33,7 @@ describe('heartbeat from inside an activity', () => {
       beats.push(Date.now()),
     );
 
-    expect(result).toEqual({ ok: true, result: 'done' });
+    expect(result).toEqual({ok: true, result: 'done'});
     expect(beats.length).toBe(1);
   });
 
@@ -74,7 +74,7 @@ describe('heartbeat from inside an activity', () => {
     });
 
     await createActivityWorker(registry).runTask(
-      task({ heartbeatTimeoutMs: 10_000 }),
+      task({heartbeatTimeoutMs: 10_000}),
       () => {
         sends += 1;
       },
@@ -95,7 +95,7 @@ describe('heartbeat from inside an activity', () => {
 
     // Window is half the timeout, so 20ms — the 40ms wait clears it.
     await createActivityWorker(registry).runTask(
-      task({ heartbeatTimeoutMs: 40 }),
+      task({heartbeatTimeoutMs: 40}),
       () => {
         sends += 1;
       },
@@ -118,6 +118,6 @@ describe('heartbeat from inside an activity', () => {
 
     const result = await createActivityWorker(registry).runTask(task());
 
-    expect(result).toEqual({ ok: true, result: 'done' });
+    expect(result).toEqual({ok: true, result: 'done'});
   });
 });

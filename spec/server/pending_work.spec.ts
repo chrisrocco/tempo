@@ -6,8 +6,8 @@
  * catch a disagreement in whichever path it happened to exercise.
  */
 
-import type { HistoryEvent } from '../../src';
-import { pendingWork } from '../../src/server';
+import type {HistoryEvent} from '../../src';
+import {pendingWork} from '../../src/server';
 
 describe('pendingWork', () => {
   it('reports a dispatched activity whose completion has not arrived', () => {
@@ -34,7 +34,7 @@ describe('pendingWork', () => {
         args: [],
         options: {},
       },
-      { type: 'activityCompleted', seq: 0, result: 'hi' },
+      {type: 'activityCompleted', seq: 0, result: 'hi'},
     ];
     expect(pendingWork(history).activities).toEqual([]);
   });
@@ -48,17 +48,17 @@ describe('pendingWork', () => {
         args: [],
         options: {},
       },
-      { type: 'activityFailed', seq: 0, error: 'boom' },
+      {type: 'activityFailed', seq: 0, error: 'boom'},
     ];
     expect(pendingWork(history).activities).toEqual([]);
   });
 
   it('reports an unfired timer with the absolute time it fires at', () => {
     const history: HistoryEvent[] = [
-      { type: 'timerStarted', seq: 1, fireAt: 1234 },
+      {type: 'timerStarted', seq: 1, fireAt: 1234},
     ];
     expect(pendingWork(history).timers).toEqual([
-      { type: 'timerStarted', seq: 1, fireAt: 1234 },
+      {type: 'timerStarted', seq: 1, fireAt: 1234},
     ]);
   });
 
@@ -67,8 +67,8 @@ describe('pendingWork', () => {
   // filters on the flag itself.
   it('reports both blocking and detached children, flagged', () => {
     const history: HistoryEvent[] = [
-      { type: 'childStarted', seq: 0, childId: 'c1', detached: false },
-      { type: 'childStarted', seq: 1, childId: 'c2', detached: true },
+      {type: 'childStarted', seq: 0, childId: 'c1', detached: false},
+      {type: 'childStarted', seq: 1, childId: 'c2', detached: true},
     ];
     expect(
       pendingWork(history).children.map((e) => [e.childId, e.detached]),
@@ -80,10 +80,10 @@ describe('pendingWork', () => {
 
   it('keeps outstanding work in the order it was dispatched', () => {
     const history: HistoryEvent[] = [
-      { type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {} },
-      { type: 'activityScheduled', seq: 1, name: 'b', args: [], options: {} },
-      { type: 'activityCompleted', seq: 0, result: null },
-      { type: 'activityScheduled', seq: 2, name: 'c', args: [], options: {} },
+      {type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {}},
+      {type: 'activityScheduled', seq: 1, name: 'b', args: [], options: {}},
+      {type: 'activityCompleted', seq: 0, result: null},
+      {type: 'activityScheduled', seq: 2, name: 'c', args: [], options: {}},
     ];
     expect(pendingWork(history).activities.map((e) => e.name)).toEqual([
       'b',
@@ -93,8 +93,8 @@ describe('pendingWork', () => {
 
   it('surfaces a cancellation request, which no completion event clears', () => {
     const history: HistoryEvent[] = [
-      { type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {} },
-      { type: 'cancelRequested' },
+      {type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {}},
+      {type: 'cancelRequested'},
     ];
     expect(pendingWork(history).cancelRequested).toBe(true);
   });

@@ -21,7 +21,7 @@ const repoRoot = path.resolve('.');
 
 /** One synthetic file, so a rule can be tested without touching the real tree. */
 function file(filePath: string, text: string): SourceFile {
-  return { path: filePath, text };
+  return {path: filePath, text};
 }
 
 describe('architecture — the repo obeys its own boundary', () => {

@@ -11,7 +11,7 @@
  * the kind of failure that reads as a mystery rather than a misconfiguration.
  */
 
-import type { ActivityOptions } from '../../src';
+import type {ActivityOptions} from '../../src';
 import {
   MemoryHistoryStore,
   MemoryTaskQueue,
@@ -23,14 +23,14 @@ import {
 function makeCore(historyStore = new MemoryHistoryStore()) {
   const workflowTaskQueue = new MemoryWorkflowTaskQueue();
   const activityTaskQueue = new MemoryTaskQueue();
-  const launched: { workflowId: string; taskQueue: string }[] = [];
+  const launched: {workflowId: string; taskQueue: string}[] = [];
   const core = createServerCore({
     historyStore,
     workflowTaskQueue,
     activityTaskQueue,
     timerService: new MemoryTimerService(),
     launch: (workflowId, name, args, taskQueue) => {
-      launched.push({ workflowId, taskQueue });
+      launched.push({workflowId, taskQueue});
       void historyStore
         .create(workflowId, name, args, taskQueue)
         .catch(() => {});
@@ -39,7 +39,7 @@ function makeCore(historyStore = new MemoryHistoryStore()) {
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
   });
-  return { core, workflowTaskQueue, activityTaskQueue, historyStore, launched };
+  return {core, workflowTaskQueue, activityTaskQueue, historyStore, launched};
 }
 
 function scheduleActivity(seq: number, options: ActivityOptions = {}) {
@@ -62,7 +62,7 @@ function scheduleActivity(seq: number, options: ActivityOptions = {}) {
 
 describe('workflow tasks route to their execution', () => {
   it('is offered only to a worker polling its queue', async () => {
-    const { core, workflowTaskQueue, historyStore } = makeCore();
+    const {core, workflowTaskQueue, historyStore} = makeCore();
     await historyStore.create('wf', 'w', [], 'gpu');
     workflowTaskQueue.enqueue('wf', 'gpu');
 
@@ -73,7 +73,7 @@ describe('workflow tasks route to their execution', () => {
   // The in-process runtime serves everything with one set of loops, so it must
   // keep working whatever queue names a workflow is started on.
   it('is offered to a poller that names no queue at all', async () => {
-    const { core, workflowTaskQueue, historyStore } = makeCore();
+    const {core, workflowTaskQueue, historyStore} = makeCore();
     await historyStore.create('wf', 'w', [], 'gpu');
     workflowTaskQueue.enqueue('wf', 'gpu');
 
@@ -81,7 +81,7 @@ describe('workflow tasks route to their execution', () => {
   });
 
   it('keeps its routing across a wake that does not mention a queue', async () => {
-    const { core, workflowTaskQueue, historyStore } = makeCore();
+    const {core, workflowTaskQueue, historyStore} = makeCore();
     await historyStore.create('wf', 'w', [], 'gpu');
     workflowTaskQueue.enqueue('wf', 'gpu');
     const first = await core.pollWorkflowTask('gpu');
@@ -98,7 +98,7 @@ describe('workflow tasks route to their execution', () => {
 
 describe('activities inherit their execution queue', () => {
   it('goes to the execution queue when the activity names none', async () => {
-    const { core, historyStore } = makeCore();
+    const {core, historyStore} = makeCore();
     await historyStore.create('wf', 'w', [], 'agents');
 
     await core.applyWorkflowTaskResult('wf', scheduleActivity(0));
@@ -108,12 +108,12 @@ describe('activities inherit their execution queue', () => {
   });
 
   it('goes to the queue the activity names, overriding its execution', async () => {
-    const { core, historyStore } = makeCore();
+    const {core, historyStore} = makeCore();
     await historyStore.create('wf', 'w', [], 'agents');
 
     await core.applyWorkflowTaskResult(
       'wf',
-      scheduleActivity(0, { taskQueue: 'gpu' }),
+      scheduleActivity(0, {taskQueue: 'gpu'}),
     );
 
     expect(await core.pollActivityTask('agents')).toBeUndefined();
@@ -145,7 +145,7 @@ describe('activities inherit their execution queue', () => {
 
 describe('children inherit their parent queue', () => {
   it('runs on the parent queue when the child names none', async () => {
-    const { core, historyStore, launched } = makeCore();
+    const {core, historyStore, launched} = makeCore();
     await historyStore.create('parent', 'w', [], 'agents');
 
     await core.applyWorkflowTaskResult('parent', {
@@ -164,13 +164,11 @@ describe('children inherit their parent queue', () => {
       ],
     });
 
-    expect(launched).toEqual([
-      { workflowId: 'parent.0.0', taskQueue: 'agents' },
-    ]);
+    expect(launched).toEqual([{workflowId: 'parent.0.0', taskQueue: 'agents'}]);
   });
 
   it('runs on the queue the child names', async () => {
-    const { core, historyStore, launched } = makeCore();
+    const {core, historyStore, launched} = makeCore();
     await historyStore.create('parent', 'w', [], 'agents');
 
     await core.applyWorkflowTaskResult('parent', {

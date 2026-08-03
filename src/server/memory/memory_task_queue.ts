@@ -7,13 +7,9 @@
  * idempotent against. Lease/expiry semantics come from the shared LeaseTable.
  */
 
-import type {
-  ActivityTask,
-  LeasedActivityTask,
-  TaskToken,
-} from '../../protocol';
-import type { TaskQueue } from '../ports/task_queue';
-import { LeaseTable } from '../lease';
+import type {ActivityTask, LeasedActivityTask, TaskToken} from '../../protocol';
+import {LeaseTable} from '../lease';
+import type {TaskQueue} from '../ports/task_queue';
 
 const DEFAULT_LEASE_MS = 30_000;
 
@@ -30,7 +26,7 @@ export class MemoryTaskQueue implements TaskQueue {
   constructor(private readonly leaseMs: number = DEFAULT_LEASE_MS) {}
 
   enqueue(task: ActivityTask, taskQueue: string): void {
-    this.queue.push({ task, taskQueue });
+    this.queue.push({task, taskQueue});
   }
 
   /**
@@ -49,7 +45,7 @@ export class MemoryTaskQueue implements TaskQueue {
         : this.queue.findIndex((e) => e.taskQueue === taskQueue);
     if (index < 0 || this.queue.length === 0) return undefined;
     const [entry] = this.queue.splice(index, 1);
-    return { ...entry.task, token: this.leases.lease(entry, this.leaseMs) };
+    return {...entry.task, token: this.leases.lease(entry, this.leaseMs)};
   }
 
   complete(token: TaskToken): void {

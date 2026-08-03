@@ -70,13 +70,8 @@
  * promise the main line can resolve, so bounding a stream needs no new primitive.
  */
 
-import { condition } from './condition';
-import {
-  claimSignal,
-  clearHandler,
-  setHandler,
-  type SignalDef,
-} from './signals';
+import {condition} from './condition';
+import {claimSignal, clearHandler, setHandler, type SignalDef} from './signals';
 
 /** How a `signalStream` starts and how it ends. */
 export interface StreamOptions {

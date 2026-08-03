@@ -12,7 +12,7 @@
  *   it survive both worker loss and a server restart.
  */
 
-import type { ActivityOptions } from '../../src';
+import type {ActivityOptions} from '../../src';
 import {
   MemoryHistoryStore,
   MemoryTaskQueue,
@@ -39,7 +39,7 @@ function coreOver(
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
   });
-  return { core, activityTaskQueue };
+  return {core, activityTaskQueue};
 }
 
 async function seed(
@@ -48,13 +48,13 @@ async function seed(
 ): Promise<void> {
   await historyStore.create('wf', 'w', []);
   await historyStore.append('wf', [
-    { type: 'activityScheduled', seq: 0, name: 'flaky', args: [], options },
+    {type: 'activityScheduled', seq: 0, name: 'flaky', args: [], options},
   ]);
 }
 
 function enqueue(queue: MemoryTaskQueue, options: ActivityOptions): void {
   queue.enqueue(
-    { workflowId: 'wf', seq: 0, name: 'flaky', args: [], options },
+    {workflowId: 'wf', seq: 0, name: 'flaky', args: [], options},
     'default',
   );
 }
@@ -65,7 +65,7 @@ async function failOnce(
 ): Promise<void> {
   const task = await core.pollActivityTask();
   if (!task) throw new Error('expected a task to be queued');
-  await core.completeActivityTask(task.token, { ok: false, error: 'boom' });
+  await core.completeActivityTask(task.token, {ok: false, error: 'boom'});
 }
 
 function terminalEvents(historyStore: MemoryHistoryStore) {
@@ -79,11 +79,11 @@ function terminalEvents(historyStore: MemoryHistoryStore) {
 }
 
 describe('retry decided by the server', () => {
-  const policy: ActivityOptions = { retry: { maximumAttempts: 3 } };
+  const policy: ActivityOptions = {retry: {maximumAttempts: 3}};
 
   it('re-queues a failed activity instead of failing it immediately', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = coreOver(historyStore);
+    const {core, activityTaskQueue} = coreOver(historyStore);
     await seed(historyStore, policy);
     enqueue(activityTaskQueue, policy);
 
@@ -95,7 +95,7 @@ describe('retry decided by the server', () => {
 
   it('fails the activity once the attempt budget is spent', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = coreOver(historyStore);
+    const {core, activityTaskQueue} = coreOver(historyStore);
     await seed(historyStore, policy);
     enqueue(activityTaskQueue, policy);
 
@@ -111,7 +111,7 @@ describe('retry decided by the server', () => {
 
   it('makes exactly one attempt when no retry policy is set', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = coreOver(historyStore);
+    const {core, activityTaskQueue} = coreOver(historyStore);
     await seed(historyStore, {});
     enqueue(activityTaskQueue, {});
 
@@ -122,7 +122,7 @@ describe('retry decided by the server', () => {
 
   it('forgets the attempts once the activity succeeds', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = coreOver(historyStore);
+    const {core, activityTaskQueue} = coreOver(historyStore);
     await seed(historyStore, policy);
     enqueue(activityTaskQueue, policy);
 
@@ -143,9 +143,9 @@ describe('retry decided by the server', () => {
   it('waits the backoff before offering the task again', async () => {
     const historyStore = new MemoryHistoryStore();
     const slow: ActivityOptions = {
-      retry: { maximumAttempts: 3, initialIntervalMs: 40 },
+      retry: {maximumAttempts: 3, initialIntervalMs: 40},
     };
-    const { core, activityTaskQueue } = coreOver(historyStore);
+    const {core, activityTaskQueue} = coreOver(historyStore);
     await seed(historyStore, slow);
     enqueue(activityTaskQueue, slow);
 
@@ -185,10 +185,10 @@ describe('retry decided by the server', () => {
   it('spends an attempt when the attempt times out rather than fails', async () => {
     const historyStore = new MemoryHistoryStore();
     const timed: ActivityOptions = {
-      retry: { maximumAttempts: 2 },
+      retry: {maximumAttempts: 2},
       startToCloseTimeoutMs: 20,
     };
-    const { core, activityTaskQueue } = coreOver(historyStore);
+    const {core, activityTaskQueue} = coreOver(historyStore);
     await seed(historyStore, timed);
     enqueue(activityTaskQueue, timed);
 

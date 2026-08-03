@@ -14,46 +14,46 @@
  * it.
  */
 
+export type {Client, WorkflowHandle} from './client';
+export type {WorkflowContext, WorkflowFn} from './core';
 export {
   createLocalRuntime,
-  type Runtime,
   type LocalRuntimeOptions,
+  type Runtime,
 } from './local_runtime';
+export {FileHistoryStore} from './server';
+export type {ExecutionRecord, HistoryStore} from './server';
 export {
+  DEFAULT_SERVER_URL,
   Tempo,
   startWorker,
-  DEFAULT_SERVER_URL,
   type StartWorkerOptions,
   type Worker,
   type WorkerRole,
 } from './tempo';
-export { FileHistoryStore } from './server';
-export type { HistoryStore, ExecutionRecord } from './server';
-export type { WorkflowHandle, Client } from './client';
-export type { ActivityFn } from './worker';
-export type { WorkflowFn, WorkflowContext } from './core';
+export type {ActivityFn} from './worker';
 // NondeterminismError is exported here but deliberately NOT from `workflow.ts`:
 // a host may want to distinguish a diverged execution from an ordinary failure,
 // while a workflow cannot do anything useful about its own history diverging.
-export { CancelledFailure, NondeterminismError } from './core';
+export {CancelledFailure, NondeterminismError} from './core';
 
 // the service seam + worker task contracts
 export type {
-  WorkflowService,
+  ActivityResult,
+  ActivityTask,
   ExecutionStatus,
   StartWorkflowOptions,
-  ActivityTask,
-  ActivityResult,
+  WorkflowService,
   WorkflowTaskResult,
 } from './protocol';
 
 // the protocol vocabulary — the wire format consumers may reference
 export type {
+  ActivityOptions,
   Command,
   CommandSpec,
-  ActivityOptions,
-  RetryPolicy,
-  HistoryEvent,
-  SignalEvent,
   CompletionEvent,
+  HistoryEvent,
+  RetryPolicy,
+  SignalEvent,
 } from './protocol';

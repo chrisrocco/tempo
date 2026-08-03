@@ -7,8 +7,8 @@
  * through HTTP.
  */
 
-import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
+import type {Server} from 'node:http';
+import type {AddressInfo} from 'node:net';
 import {
   createRemoteService,
   createRpcServer,
@@ -48,7 +48,7 @@ async function startHarness(): Promise<Harness> {
   const host = createServerHost();
   const server = createRpcServer(host);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const { port } = server.address() as AddressInfo;
+  const {port} = server.address() as AddressInfo;
   const service = createRemoteService(`http://127.0.0.1:${port}`);
 
   const workflowRegistry = createWorkflowRegistry();
@@ -66,7 +66,7 @@ async function startHarness(): Promise<Harness> {
       await Promise.all(loops.map((l) => l.stop()));
       host.shutdown();
       (
-        server as Server & { closeAllConnections?: () => void }
+        server as Server & {closeAllConnections?: () => void}
       ).closeAllConnections?.();
       await new Promise<void>((r) => server.close(() => r()));
     },
@@ -82,7 +82,7 @@ describe('distributed — client + workers over RPC', () => {
         runActivity<string>('greet', 'world'),
       );
 
-      const { workflowId } = h.service.start('greeter');
+      const {workflowId} = h.service.start('greeter');
       await expectAsync(h.service.getResult(workflowId)).toBeResolvedTo(
         'hi world',
       );
@@ -101,7 +101,7 @@ describe('distributed — client + workers over RPC', () => {
         throw new Error('kaboom');
       });
 
-      const { workflowId } = h.service.start('boom');
+      const {workflowId} = h.service.start('boom');
       await expectAsync(h.service.getResult(workflowId)).toBeRejectedWithError(
         /kaboom/,
       );
@@ -122,7 +122,7 @@ describe('distributed — client + workers over RPC', () => {
         return 'went';
       });
 
-      const { workflowId } = h.service.start('waiter');
+      const {workflowId} = h.service.start('waiter');
       await wait(30); // let the execution be created + park before signalling
       h.service.signal(workflowId, 'go');
 

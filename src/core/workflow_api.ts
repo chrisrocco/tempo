@@ -13,9 +13,9 @@
  * make replay irreproducible and belongs on the runtime/host side instead.
  */
 
-import type { ActivityOptions, Command, CommandSpec } from '../protocol';
-import { getContext, type WorkflowContext } from './context';
-import { CancelledFailure } from './errors';
+import type {ActivityOptions, Command, CommandSpec} from '../protocol';
+import {getContext, type WorkflowContext} from './context';
+import {CancelledFailure} from './errors';
 
 /**
  * The one place a command becomes real. Every site that mints a `Command` must go
@@ -35,9 +35,9 @@ function scheduleCommand(spec: CommandSpec): Promise<unknown> {
   const ctx = getContext();
   if (ctx.cancelled) return Promise.reject(new CancelledFailure()); // no new work after cancel
   const seq = ctx.seq++;
-  issue(ctx, { ...spec, seq } as Command);
+  issue(ctx, {...spec, seq} as Command);
   return new Promise<unknown>((resolve, reject) =>
-    ctx.completions.set(seq, { resolve, reject }),
+    ctx.completions.set(seq, {resolve, reject}),
   );
 }
 
@@ -46,7 +46,7 @@ function scheduleActivity(
   options: ActivityOptions,
   args: unknown[],
 ): Promise<unknown> {
-  return scheduleCommand({ type: 'scheduleActivity', name, args, options });
+  return scheduleCommand({type: 'scheduleActivity', name, args, options});
 }
 
 export function runActivity<T = unknown>(
@@ -57,7 +57,7 @@ export function runActivity<T = unknown>(
 }
 
 export function sleep(ms: number): Promise<void> {
-  return scheduleCommand({ type: 'startTimer', ms }) as Promise<void>;
+  return scheduleCommand({type: 'startTimer', ms}) as Promise<void>;
 }
 
 /** How a child is started. Both child primitives take the same shape. */
@@ -138,7 +138,7 @@ export function startChild(
   options: ChildOptions = {},
 ): ChildHandle {
   const ctx = getContext();
-  if (ctx.cancelled) return { cancel() {} };
+  if (ctx.cancelled) return {cancel() {}};
   const targetSeq = ctx.seq++;
   issue(ctx, {
     type: 'startChild',
@@ -154,7 +154,7 @@ export function startChild(
       const c = getContext();
       if (c.cancelled) return;
       const seq = c.seq++;
-      issue(c, { type: 'cancelChild', targetSeq, seq });
+      issue(c, {type: 'cancelChild', targetSeq, seq});
     },
   };
 }
@@ -178,7 +178,7 @@ export function startChild(
  * run at a time.
  */
 export function continueAsNew(...args: unknown[]): Promise<never> {
-  return scheduleCommand({ type: 'continueAsNew', args }) as Promise<never>;
+  return scheduleCommand({type: 'continueAsNew', args}) as Promise<never>;
 }
 
 export interface WorkflowInfo {
@@ -198,7 +198,7 @@ export interface WorkflowInfo {
 /** Read server-provided facts about the current run off the context. */
 export function workflowInfo(): WorkflowInfo {
   const ctx = getContext();
-  return { continueAsNewSuggested: ctx.continueAsNewSuggested };
+  return {continueAsNewSuggested: ctx.continueAsNewSuggested};
 }
 
 /**

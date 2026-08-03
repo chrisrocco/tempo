@@ -56,7 +56,7 @@ export function completedSeqs(history: HistoryEvent[]): CompletedSeqs {
     else if (ev.type === 'childCompleted' || ev.type === 'childFailed')
       children.add(ev.seq);
   }
-  return { activities, timers, children };
+  return {activities, timers, children};
 }
 
 /**
@@ -79,5 +79,5 @@ export function pendingWork(history: HistoryEvent[]): PendingWork {
       children.push(ev);
     else if (ev.type === 'cancelRequested') cancelRequested = true;
   }
-  return { activities, timers, children, cancelRequested };
+  return {activities, timers, children, cancelRequested};
 }

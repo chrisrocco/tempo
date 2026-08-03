@@ -38,7 +38,7 @@ import {
   startWorkflow,
   terminateWorkflow,
 } from './client';
-import { up } from './up';
+import {up} from './up';
 
 const USAGE = `tempo — run and drive workflows
 
@@ -87,7 +87,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (eq === -1) flags.set(body, '');
     else flags.set(body.slice(0, eq), body.slice(eq + 1));
   }
-  return { positionals, flags };
+  return {positionals, flags};
 }
 
 function required(value: string | undefined, what: string): string {
@@ -96,7 +96,7 @@ function required(value: string | undefined, what: string): string {
 }
 
 async function dispatch(argv: string[]): Promise<number> {
-  const { positionals, flags } = parseArgs(argv);
+  const {positionals, flags} = parseArgs(argv);
   const [command, ...rest] = positionals;
   const serverUrl = resolveServerUrl(flags.get('server') || undefined);
 

@@ -32,9 +32,9 @@
  * deadline bounds what the *engine* does, not what the activity already did.
  */
 
-import type { ActivityResult, ActivityTask } from '../protocol';
-import type { ActivityRegistry } from './activity_registry';
-import { withActivityContext } from './activity_context';
+import type {ActivityResult, ActivityTask} from '../protocol';
+import {withActivityContext} from './activity_context';
+import type {ActivityRegistry} from './activity_registry';
 
 export interface ActivityWorker {
   /**
@@ -57,15 +57,15 @@ export function createActivityWorker(
       sendHeartbeat: () => void = () => {},
     ): Promise<ActivityResult> {
       const fn = registry.get(task.name);
-      if (!fn) return { ok: false, error: `no activity ${task.name}` };
+      if (!fn) return {ok: false, error: `no activity ${task.name}`};
       return withActivityContext(
         sendHeartbeat,
         task.options.heartbeatTimeoutMs,
         async () => {
           try {
-            return { ok: true, result: await fn(...task.args) };
+            return {ok: true, result: await fn(...task.args)};
           } catch (e) {
-            return { ok: false, error: (e as Error).message };
+            return {ok: false, error: (e as Error).message};
           }
         },
       );

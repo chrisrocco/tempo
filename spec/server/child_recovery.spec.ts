@@ -14,8 +14,8 @@
  * and a second child. Internals specs, for contributors.
  */
 
-import { createContext, replay, type WorkflowFn } from '../../src/core';
-import type { ExecutionRecord } from '../../src/server';
+import {createContext, replay, type WorkflowFn} from '../../src/core';
+import type {ExecutionRecord} from '../../src/server';
 import {
   MemoryHistoryStore,
   MemoryTaskQueue,
@@ -25,7 +25,7 @@ import {
   createServerCore,
   type ServerCore,
 } from '../../src/server';
-import { condition, executeChild, startChild } from '../../src/workflow';
+import {condition, executeChild, startChild} from '../../src/workflow';
 
 interface Harness {
   core: ServerCore;
@@ -53,7 +53,7 @@ function serverOver(store: MemoryHistoryStore): Harness {
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
   });
-  return { core, launched };
+  return {core, launched};
 }
 
 /** One workflow task, exactly as a worker runs it: build, replay, apply. */
@@ -154,7 +154,7 @@ describe('server child dispatch — the fire-and-forget marker', () => {
     await restarted.core.requestCancel('par');
 
     const child = childOf(await store.list());
-    expect(child.history).toContain({ type: 'cancelRequested' });
+    expect(child.history).toContain({type: 'cancelRequested'});
   });
 });
 

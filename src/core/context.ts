@@ -16,8 +16,8 @@
  * one worker.
  */
 
-import { AsyncLocalStorage } from 'node:async_hooks';
-import type { Command, HistoryEvent, SignalEvent } from '../protocol';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import type {Command, HistoryEvent, SignalEvent} from '../protocol';
 
 interface Waiter {
   resolve: (v: unknown) => void;

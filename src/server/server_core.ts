@@ -70,18 +70,18 @@ import type {
   WorkflowTask,
   WorkflowTaskResult,
 } from '../protocol';
-import type { ExecutionRecord, HistoryStore } from './ports/history_store';
-import type { TaskQueue } from './ports/task_queue';
-import type { WorkflowTaskQueue } from './ports/workflow_task_queue';
-import type { TimerService } from './ports/timer_service';
-import { completedSeqs, pendingWork } from './pending_work';
+import {completedSeqs, pendingWork} from './pending_work';
+import type {ExecutionRecord, HistoryStore} from './ports/history_store';
+import {silentLogger, type Logger} from './ports/logger';
+import type {TaskQueue} from './ports/task_queue';
+import type {TimerService} from './ports/timer_service';
+import type {WorkflowTaskQueue} from './ports/workflow_task_queue';
 import {
   backoffMs,
   maxAttempts,
   shouldRetry,
   workflowTaskBackoffMs,
 } from './retry_policy';
-import { silentLogger, type Logger } from './ports/logger';
 
 const CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4;
 
@@ -212,18 +212,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   } = deps;
 
   const childrenByParent = new Map<string, Map<number, string>>();
-  const parentOfChild = new Map<string, { parentId: string; seq: number }>();
+  const parentOfChild = new Map<string, {parentId: string; seq: number}>();
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
   const activityLeases = new Map<
     TaskToken,
-    { workflowId: string; seq: number }
+    {workflowId: string; seq: number}
   >();
   // `polledAt` exists purely so a completion can report how long the task was out
   // with a worker — the task-latency number Phase 7 wants to aggregate.
   const workflowLeases = new Map<
     TaskToken,
-    { workflowId: string; version: number; polledAt: number }
+    {workflowId: string; version: number; polledAt: number}
   >();
   // Deadlines for attempts currently out with a worker, so a completion — or a
   // heartbeat, for the silence deadline — can cancel the ones that belong to it.
@@ -264,8 +264,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     child: ExecutionRecord,
   ): HistoryEvent {
     return child.status === 'completed'
-      ? { type: 'childCompleted', seq, result: child.result }
-      : { type: 'childFailed', seq, error: errorMessage(child.failure) };
+      ? {type: 'childCompleted', seq, result: child.result}
+      : {type: 'childFailed', seq, error: errorMessage(child.failure)};
   }
 
   // Wake an execution: it needs another workflow task. The queue coalesces, so a
@@ -305,7 +305,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   timerService.onFire(async (workflowId, seq) => {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
-    await appendEvent(workflowId, { type: 'timerFired', seq });
+    await appendEvent(workflowId, {type: 'timerFired', seq});
     wake(workflowId);
   });
 
@@ -398,7 +398,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           await appendEvent(workflowId, childOutcomeEvent(cmd.seq, existing));
           wake(workflowId);
         } else {
-          parentOfChild.set(childId, { parentId: workflowId, seq: cmd.seq });
+          parentOfChild.set(childId, {parentId: workflowId, seq: cmd.seq});
         }
       }
     } else if (cmd.type === 'cancelChild') {
@@ -519,7 +519,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // first completion resolves, so a second one is a history event for an
     // unknown seq and `core/apply_event` throws nondeterminism on it.
     if (completedSeqs(rec.history).activities.has(seq)) {
-      log('activity.duplicate_dropped', { workflowId, seq });
+      log('activity.duplicate_dropped', {workflowId, seq});
       return;
     }
     // A failed attempt is not yet a failed activity. The retry decision is the
@@ -554,15 +554,15 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     await appendEvent(
       workflowId,
       result.ok
-        ? { type: 'activityCompleted', seq, result: result.result }
-        : { type: 'activityFailed', seq, error: result.error },
+        ? {type: 'activityCompleted', seq, result: result.result}
+        : {type: 'activityFailed', seq, error: result.error},
     );
     await historyStore.clearActivityAttempts(workflowId, seq);
     log('activity.settled', {
       workflowId,
       seq,
       ok: result.ok,
-      ...(result.ok ? {} : { error: result.error }),
+      ...(result.ok ? {} : {error: result.error}),
     });
     wake(workflowId);
   }
@@ -573,7 +573,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     payload: unknown,
   ): Promise<void> {
     await historyStore.append(workflowId, [
-      { type: 'signal', name: signalName, payload },
+      {type: 'signal', name: signalName, payload},
     ]);
     wake(workflowId);
   }
@@ -582,7 +582,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
     if (rec.history.some((e) => e.type === 'cancelRequested')) return;
-    await appendEvent(workflowId, { type: 'cancelRequested' });
+    await appendEvent(workflowId, {type: 'cancelRequested'});
     const kids = childrenByParent.get(workflowId);
     if (kids) for (const childId of kids.values()) await requestCancel(childId);
     wake(workflowId);
@@ -839,7 +839,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     });
     // Armed on poll, not on dispatch: both deadlines bound the attempt, and the
     // attempt begins when a worker takes the task, not when it was queued.
-    const { startToCloseTimeoutMs, heartbeatTimeoutMs } = task.options;
+    const {startToCloseTimeoutMs, heartbeatTimeoutMs} = task.options;
     if (startToCloseTimeoutMs !== undefined && startToCloseTimeoutMs > 0)
       armAttemptTimer(task, 'startToClose', startToCloseTimeoutMs);
     // The heartbeat clock starts now, so an attempt that never beats at all is

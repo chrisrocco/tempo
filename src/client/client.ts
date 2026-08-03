@@ -7,8 +7,8 @@
  * in `protocol`, keeping the wire contract free of any `core` dependency.
  */
 
-import type { ExecutionStatus, WorkflowService } from '../protocol';
-import type { SignalDef } from '../core';
+import type {SignalDef} from '../core';
+import type {ExecutionStatus, WorkflowService} from '../protocol';
 
 export interface WorkflowHandle<T = unknown> {
   workflowId: string;
@@ -32,7 +32,7 @@ export interface Client {
   start<T = unknown>(
     name: string,
     args?: unknown[],
-    opts?: { workflowId?: string },
+    opts?: {workflowId?: string},
   ): WorkflowHandle<T>;
   /** A handle to an existing execution (e.g. one picked up by resume). */
   getHandle<T = unknown>(workflowId: string): WorkflowHandle<T>;
@@ -60,9 +60,9 @@ export function createClient(service: WorkflowService): Client {
     start<T = unknown>(
       name: string,
       args: unknown[] = [],
-      opts: { workflowId?: string } = {},
+      opts: {workflowId?: string} = {},
     ): WorkflowHandle<T> {
-      const { workflowId } = service.start(name, args, opts);
+      const {workflowId} = service.start(name, args, opts);
       return handle<T>(workflowId);
     },
     getHandle<T = unknown>(workflowId: string): WorkflowHandle<T> {

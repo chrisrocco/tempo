@@ -5,21 +5,21 @@
  * unwind the whole run. Internals specs, for contributors.
  */
 
+import type {WorkflowContext} from '../../src/core';
 import {
   als,
   applyEvent,
   CancelledFailure,
-  NondeterminismError,
   createContext,
   defineSignal,
+  NondeterminismError,
   setHandler,
 } from '../../src/core';
-import type { WorkflowContext } from '../../src/core';
-import type { Command } from '../../src/protocol';
+import type {Command} from '../../src/protocol';
 
 /** Park a fake waiter at `seq` and report how it settles. */
 function parkWaiter(ctx: WorkflowContext, seq: number) {
-  const settled: { value?: unknown; error?: unknown; done: boolean } = {
+  const settled: {value?: unknown; error?: unknown; done: boolean} = {
     done: false,
   };
   ctx.completions.set(seq, {
@@ -40,7 +40,7 @@ describe('core applyEvent — completions', () => {
     const ctx = createContext([], []);
     const waiter = parkWaiter(ctx, 0);
 
-    applyEvent(ctx, { type: 'activityCompleted', seq: 0, result: 'x' });
+    applyEvent(ctx, {type: 'activityCompleted', seq: 0, result: 'x'});
 
     expect(waiter.value).toBe('x');
     expect(ctx.completions.has(0)).toBeFalse();
@@ -51,7 +51,7 @@ describe('core applyEvent — completions', () => {
     const first = parkWaiter(ctx, 0);
     const second = parkWaiter(ctx, 1);
 
-    applyEvent(ctx, { type: 'activityCompleted', seq: 1, result: 'second' });
+    applyEvent(ctx, {type: 'activityCompleted', seq: 1, result: 'second'});
 
     expect(second.value).toBe('second');
     expect(first.done).toBeFalse();
@@ -61,7 +61,7 @@ describe('core applyEvent — completions', () => {
     const ctx = createContext([], []);
     const waiter = parkWaiter(ctx, 0);
 
-    applyEvent(ctx, { type: 'activityFailed', seq: 0, error: 'nope' });
+    applyEvent(ctx, {type: 'activityFailed', seq: 0, error: 'nope'});
 
     expect((waiter.error as Error).message).toBe('nope');
   });
@@ -70,7 +70,7 @@ describe('core applyEvent — completions', () => {
     const ctx = createContext([], []);
     const waiter = parkWaiter(ctx, 0);
 
-    applyEvent(ctx, { type: 'timerFired', seq: 0 });
+    applyEvent(ctx, {type: 'timerFired', seq: 0});
 
     expect(waiter.done).toBeTrue();
     expect(waiter.value).toBeUndefined();
@@ -85,7 +85,7 @@ describe('core applyEvent — completions', () => {
     const ctx = createContext([], []);
 
     expect(() =>
-      applyEvent(ctx, { type: 'activityCompleted', seq: 7, result: 1 }),
+      applyEvent(ctx, {type: 'activityCompleted', seq: 7, result: 1}),
     ).toThrowError(/nondeterminism.*seq 7/);
   });
 });
@@ -181,7 +181,7 @@ describe('core applyEvent — marker validation', () => {
 
   it('rejects a marker whose kind disagrees with the command at that seq', () => {
     const ctx = createContext([], []);
-    requested(ctx, { type: 'startTimer', seq: 0, ms: 10 });
+    requested(ctx, {type: 'startTimer', seq: 0, ms: 10});
 
     expect(() =>
       applyEvent(ctx, {
@@ -284,7 +284,7 @@ describe('core applyEvent — marker validation', () => {
 
   it('names the seq and both sides of the disagreement', () => {
     const ctx = createContext([], []);
-    requested(ctx, { type: 'startTimer', seq: 3, ms: 5 });
+    requested(ctx, {type: 'startTimer', seq: 3, ms: 5});
 
     let thrown: NondeterminismError | undefined;
     try {
@@ -309,10 +309,10 @@ describe('core applyEvent — marker validation', () => {
   // carries a relative `ms` — there is nothing to compare, so only the kind is.
   it('accepts a timer marker regardless of when it fires', () => {
     const ctx = createContext([], []);
-    requested(ctx, { type: 'startTimer', seq: 0, ms: 10 });
+    requested(ctx, {type: 'startTimer', seq: 0, ms: 10});
 
     expect(() =>
-      applyEvent(ctx, { type: 'timerStarted', seq: 0, fireAt: 999999 }),
+      applyEvent(ctx, {type: 'timerStarted', seq: 0, fireAt: 999999}),
     ).not.toThrow();
   });
 
@@ -344,7 +344,7 @@ describe('core applyEvent — signals', () => {
       setHandler(defineSignal('ping'), (p) => received.push(p));
     });
 
-    applyEvent(ctx, { type: 'signal', name: 'ping', payload: 42 });
+    applyEvent(ctx, {type: 'signal', name: 'ping', payload: 42});
 
     expect(received).toEqual([42]);
   });
@@ -355,7 +355,7 @@ describe('core applyEvent — signals', () => {
    */
   it('buffers a signal that arrives before its handler is registered', () => {
     const ctx = createContext([], []);
-    applyEvent(ctx, { type: 'signal', name: 'ping', payload: 'early' });
+    applyEvent(ctx, {type: 'signal', name: 'ping', payload: 'early'});
     expect(ctx.bufferedSignals.length).toBe(1);
 
     const received: unknown[] = [];
@@ -369,8 +369,8 @@ describe('core applyEvent — signals', () => {
 
   it('leaves buffered signals for other names alone when one handler registers', () => {
     const ctx = createContext([], []);
-    applyEvent(ctx, { type: 'signal', name: 'ping', payload: 1 });
-    applyEvent(ctx, { type: 'signal', name: 'pong', payload: 2 });
+    applyEvent(ctx, {type: 'signal', name: 'ping', payload: 1});
+    applyEvent(ctx, {type: 'signal', name: 'pong', payload: 2});
 
     als.run(ctx, () => setHandler(defineSignal('ping'), () => {}));
 
@@ -396,7 +396,7 @@ describe('core applyEvent — cancellation', () => {
       },
     });
 
-    applyEvent(ctx, { type: 'cancelRequested' });
+    applyEvent(ctx, {type: 'cancelRequested'});
 
     expect(activity.error).toBeInstanceOf(CancelledFailure);
     expect(conditionError).toBeInstanceOf(CancelledFailure);
@@ -406,7 +406,7 @@ describe('core applyEvent — cancellation', () => {
     const ctx = createContext([], []);
     parkWaiter(ctx, 0);
 
-    applyEvent(ctx, { type: 'cancelRequested' });
+    applyEvent(ctx, {type: 'cancelRequested'});
 
     expect(ctx.cancelled).toBeTrue();
     expect(ctx.completions.size).toBe(0);

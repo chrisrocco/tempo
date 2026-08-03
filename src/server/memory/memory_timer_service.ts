@@ -8,7 +8,7 @@
  * process alive.
  */
 
-import type { TimerService } from '../ports/timer_service';
+import type {TimerService} from '../ports/timer_service';
 
 interface TimerEntry {
   workflowId: string;
@@ -33,7 +33,7 @@ export class MemoryTimerService implements TimerService {
     const key = this.key(workflowId, seq);
     if (this.timers.has(key)) return; // already scheduled — idempotent safety
     const delay = Math.max(0, fireAt - Date.now()); // past-due => fire ASAP
-    const entry: TimerEntry = { workflowId, seq, fireAt };
+    const entry: TimerEntry = {workflowId, seq, fireAt};
     entry.handle = setTimeout(() => this.fire(key), delay);
     entry.handle.unref?.();
     this.timers.set(key, entry);

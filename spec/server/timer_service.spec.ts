@@ -5,7 +5,7 @@
  * setTimeouts) and a short wait to observe firing.
  */
 
-import { MemoryTimerService } from '../../src/server/memory/memory_timer_service';
+import {MemoryTimerService} from '../../src/server/memory/memory_timer_service';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));

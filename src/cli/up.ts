@@ -10,10 +10,10 @@
  * independently); see the target surface in cli.ts.
  */
 
-import type { ChildProcess } from 'node:child_process';
+import type {ChildProcess} from 'node:child_process';
 import * as path from 'node:path';
-import { describeWorker } from './describe';
-import { forwardOutput, spawnEntry, stopChild, waitForLine } from './process';
+import {describeWorker} from './describe';
+import {forwardOutput, spawnEntry, stopChild, waitForLine} from './process';
 
 /**
  * The framework's own server main — shipped with the CLI, never user-built.
@@ -37,10 +37,10 @@ export interface UpOptions {
 
 /** Resolve when the user interrupts us, or when a supervised child dies first. */
 function waitForShutdown(
-  children: { label: string; child: ChildProcess }[],
+  children: {label: string; child: ChildProcess}[],
 ): Promise<string> {
   return new Promise((resolve) => {
-    for (const { label, child } of children)
+    for (const {label, child} of children)
       child.once('exit', (code) => resolve(`${label} exited with ${code}`));
     process.once('SIGINT', () => resolve('interrupted'));
     process.once('SIGTERM', () => resolve('terminated'));
@@ -67,7 +67,7 @@ export async function up(options: UpOptions): Promise<number> {
     process.stdout.write(`tempo: server listening on ${serverUrl}\n`);
 
     worker = spawnEntry(options.entry, {
-      env: { TEMPO_SERVER_URL: serverUrl, TEMPO_ROLE: undefined },
+      env: {TEMPO_SERVER_URL: serverUrl, TEMPO_ROLE: undefined},
     });
     forwardOutput(worker, manifest.name);
     const [, roles] = await waitForLine(worker, /WORKER_READY \S+ (\S+)/);
@@ -76,8 +76,8 @@ export async function up(options: UpOptions): Promise<number> {
     );
 
     const reason = await waitForShutdown([
-      { label: 'server', child: server },
-      { label: `worker ${manifest.name}`, child: worker },
+      {label: 'server', child: server},
+      {label: `worker ${manifest.name}`, child: worker},
     ]);
     process.stdout.write(`\ntempo: stopping (${reason})\n`);
     return reason === 'interrupted' || reason === 'terminated' ? 0 : 1;

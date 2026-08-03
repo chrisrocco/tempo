@@ -6,14 +6,14 @@
  * in-process shortcuts — so the command surface itself is what is under test.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import { forwardOutput, stopChild, waitForLine } from '../../src/cli/process';
+import {spawn, type ChildProcess} from 'node:child_process';
+import {forwardOutput, stopChild, waitForLine} from '../../src/cli/process';
 
 const WORKER = 'examples/greeter.ts';
 
 function tempo(args: string[]): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx', 'bin/tempo.ts', ...args], {
-    env: { ...process.env },
+    env: {...process.env},
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -21,14 +21,14 @@ function tempo(args: string[]): ChildProcess {
 /** Run a CLI command to completion, capturing what it printed. */
 function runTempo(
   args: string[],
-): Promise<{ code: number | null; out: string; err: string }> {
+): Promise<{code: number | null; out: string; err: string}> {
   return new Promise((resolve) => {
     const proc = tempo(args);
     let out = '';
     let err = '';
     proc.stdout?.on('data', (d: Buffer) => (out += d.toString()));
     proc.stderr?.on('data', (d: Buffer) => (err += d.toString()));
-    proc.on('exit', (code) => resolve({ code, out, err }));
+    proc.on('exit', (code) => resolve({code, out, err}));
   });
 }
 
@@ -47,7 +47,7 @@ describe('tempo CLI', () => {
       );
       await waitForLine(server, /worker greeter ready/, 30000);
 
-      const { code, out } = await runTempo([
+      const {code, out} = await runTempo([
         'start',
         'greeter',
         'world',
@@ -96,7 +96,7 @@ describe('tempo CLI', () => {
   // A command pointed at a server that isn't there fails loudly instead of
   // silently dropping the write into a closed port.
   it('fails with a clear error when no server is reachable', async () => {
-    const { code, err } = await runTempo([
+    const {code, err} = await runTempo([
       'start',
       'greeter',
       '--server=http://127.0.0.1:1',
@@ -106,7 +106,7 @@ describe('tempo CLI', () => {
   }, 30000);
 
   it('reports an unknown command and prints usage', async () => {
-    const { code, err } = await runTempo(['nope']);
+    const {code, err} = await runTempo(['nope']);
     expect(code).toBe(1);
     expect(err).toContain('unknown command "nope"');
     expect(err).toContain('tempo up <entry>');
@@ -130,7 +130,7 @@ describe('tempo CLI', () => {
         `--server=${url}`,
       ]);
 
-      const { code, out } = await runTempo(['list', `--server=${url}`]);
+      const {code, out} = await runTempo(['list', `--server=${url}`]);
       expect(code).toBe(0);
       expect(out).toContain('WORKFLOW ID');
       expect(out).toContain('greeter');
@@ -160,9 +160,9 @@ describe('tempo CLI', () => {
       expect(started.code).toBe(0);
       const [row] = JSON.parse(
         (await runTempo(['list', '--json', `--server=${url}`])).out,
-      ) as { workflowId: string }[];
+      ) as {workflowId: string}[];
 
-      const { code, out } = await runTempo([
+      const {code, out} = await runTempo([
         'describe',
         row.workflowId,
         `--server=${url}`,
@@ -185,12 +185,12 @@ describe('tempo CLI', () => {
     const server = spawn(
       process.execPath,
       ['--import', 'tsx', 'bin/server-main.ts'],
-      { env: { ...process.env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] },
+      {env: {...process.env, PORT: '0'}, stdio: ['ignore', 'pipe', 'pipe']},
     );
     const [, port] = await waitForLine(server, /LISTENING (\d+)/, 30000);
     const url = `http://127.0.0.1:${port}`;
     const worker = spawn(process.execPath, ['--import', 'tsx', WORKER], {
-      env: { ...process.env, TEMPO_SERVER_URL: url, TEMPO_ROLE: 'workflow' },
+      env: {...process.env, TEMPO_SERVER_URL: url, TEMPO_ROLE: 'workflow'},
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     try {
@@ -227,7 +227,7 @@ describe('tempo CLI', () => {
     const server = spawn(
       process.execPath,
       ['--import', 'tsx', 'bin/server-main.ts'],
-      { env: { ...process.env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] },
+      {env: {...process.env, PORT: '0'}, stdio: ['ignore', 'pipe', 'pipe']},
     );
     try {
       const [, port] = await waitForLine(server, /LISTENING (\d+)/, 30000);
@@ -248,13 +248,13 @@ describe('tempo CLI', () => {
       ]);
       expect(killed.code).toBe(0);
 
-      const { out } = await runTempo([
+      const {out} = await runTempo([
         'describe',
         workflowId,
         '--json',
         `--server=${url}`,
       ]);
-      const detail = JSON.parse(out) as { status: string; failure?: string };
+      const detail = JSON.parse(out) as {status: string; failure?: string};
       expect(detail.status).toBe('terminated');
       expect(detail.failure).toBe('no longer needed');
     } finally {
@@ -271,7 +271,7 @@ describe('tempo CLI', () => {
         /server listening on (\S+)/,
         30000,
       );
-      const { code, err } = await runTempo([
+      const {code, err} = await runTempo([
         'describe',
         'no-such-id',
         `--server=${url}`,

@@ -15,8 +15,8 @@
  * Everything is together here for readability.
  */
 
-import { Tempo } from '../src';
-import { proxyActivities } from '../src/workflow';
+import {Tempo} from '../src';
+import {proxyActivities} from '../src/workflow';
 
 // ── activities — the only place I/O is allowed ─────────────────────────────
 export const GREETING = 'Hello';
@@ -28,18 +28,18 @@ export function greet(name: string): string {
 // Stands in for a module namespace: a real activities module exports constants
 // alongside its activities, and only the callables may become registry entries —
 // a rule both `proxyActivities` and `startWorker` have to respect.
-const activities = { GREETING, greet };
+const activities = {GREETING, greet};
 
 // ── workflows — deterministic orchestration, reaching I/O only via activities ─
 const act = proxyActivities<typeof activities>({
-  retry: { maximumAttempts: 3 },
+  retry: {maximumAttempts: 3},
 });
 
 export async function greeter(name: string): Promise<string> {
   return act.greet(name);
 }
 
-const workflows = { greeter };
+const workflows = {greeter};
 
 // ── the entrypoint — this file is the build target ─────────────────────────
 Tempo.startWorker({

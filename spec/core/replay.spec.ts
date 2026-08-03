@@ -10,9 +10,14 @@
  * model is documented by `spec/integration/local.spec.ts`.
  */
 
-import { createContext, NondeterminismError, replay } from '../../src/core';
-import { runActivity, sleep } from '../../src/core';
-import type { HistoryEvent } from '../../src/protocol';
+import {
+  createContext,
+  NondeterminismError,
+  replay,
+  runActivity,
+  sleep,
+} from '../../src/core';
+import type {HistoryEvent} from '../../src/protocol';
 
 describe('core replay — empty history', () => {
   it('emits a command for the primitive a workflow calls first', async () => {
@@ -91,8 +96,8 @@ describe('core replay — the live edge', () => {
     // second event matters — with a single one, a driver that went live too
     // early would be indistinguishable from a correct one.
     const events: HistoryEvent[] = [
-      { type: 'activityCompleted', seq: 0, result: 'first' },
-      { type: 'activityCompleted', seq: 1, result: 'second' },
+      {type: 'activityCompleted', seq: 0, result: 'first'},
+      {type: 'activityCompleted', seq: 1, result: 'second'},
     ];
     const ctx = createContext([], events);
 
@@ -105,14 +110,14 @@ describe('core replay — the live edge', () => {
     // 'a' and 'b' were already durable, so only 'c' is dispatched.
     expect(ctx.commands.length).toBe(1);
     expect(ctx.commands[0]).toEqual(
-      jasmine.objectContaining({ name: 'c', seq: 2 }),
+      jasmine.objectContaining({name: 'c', seq: 2}),
     );
   });
 
   it('emits nothing when history replays the workflow all the way to done', async () => {
     const events: HistoryEvent[] = [
-      { type: 'activityCompleted', seq: 0, result: 1 },
-      { type: 'activityCompleted', seq: 1, result: 2 },
+      {type: 'activityCompleted', seq: 0, result: 1},
+      {type: 'activityCompleted', seq: 1, result: 2},
     ];
     const ctx = createContext([], events);
 
@@ -128,7 +133,7 @@ describe('core replay — the live edge', () => {
   });
 
   it('goes live once the last recorded event is consumed', async () => {
-    const ctx = createContext([], [{ type: 'timerFired', seq: 0 }]);
+    const ctx = createContext([], [{type: 'timerFired', seq: 0}]);
 
     await replay(ctx, async () => {
       await sleep(5);
@@ -142,7 +147,7 @@ describe('core replay — the live edge', () => {
   it('starts live when there is no history to catch up on', () => {
     expect(createContext([], []).isLive).toBeTrue();
     expect(
-      createContext([], [{ type: 'timerFired', seq: 0 }]).isLive,
+      createContext([], [{type: 'timerFired', seq: 0}]).isLive,
     ).toBeFalse();
   });
 
@@ -152,7 +157,7 @@ describe('core replay — the live edge', () => {
    */
   it('feeds recorded results back into the workflow as its own values', async () => {
     const events: HistoryEvent[] = [
-      { type: 'activityCompleted', seq: 0, result: 'recorded' },
+      {type: 'activityCompleted', seq: 0, result: 'recorded'},
     ];
     const ctx = createContext([], events);
     let seenInsideWorkflow: unknown;
@@ -166,7 +171,7 @@ describe('core replay — the live edge', () => {
 
   it('surfaces a recorded activity failure as a rejection the workflow can catch', async () => {
     const events: HistoryEvent[] = [
-      { type: 'activityFailed', seq: 0, error: 'upstream exploded' },
+      {type: 'activityFailed', seq: 0, error: 'upstream exploded'},
     ];
     const ctx = createContext([], events);
 
@@ -195,8 +200,8 @@ describe('core replay — divergence between history and code', () => {
     // History from a run where the timer was created first; this code creates the
     // activity first, so seq 0 means different things on each side.
     const events: HistoryEvent[] = [
-      { type: 'timerStarted', seq: 0, fireAt: 1 },
-      { type: 'activityScheduled', seq: 1, name: 'a', args: [], options: {} },
+      {type: 'timerStarted', seq: 0, fireAt: 1},
+      {type: 'activityScheduled', seq: 1, name: 'a', args: [], options: {}},
     ];
     const ctx = createContext([], events);
 
@@ -209,8 +214,8 @@ describe('core replay — divergence between history and code', () => {
 
   it('replays two concurrent branches whose order is unchanged', async () => {
     const events: HistoryEvent[] = [
-      { type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {} },
-      { type: 'timerStarted', seq: 1, fireAt: 1 },
+      {type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {}},
+      {type: 'timerStarted', seq: 1, fireAt: 1},
     ];
     const ctx = createContext([], events);
 
@@ -232,7 +237,7 @@ describe('core replay — divergence between history and code', () => {
    */
   it('validates a marker issued during the first synchronous run', async () => {
     const events: HistoryEvent[] = [
-      { type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {} },
+      {type: 'activityScheduled', seq: 0, name: 'a', args: [], options: {}},
     ];
     const ctx = createContext([], events);
 
@@ -252,7 +257,7 @@ describe('core replay — divergence between history and code', () => {
         args: [],
         options: {},
       },
-      { type: 'activityCompleted', seq: 0, result: 'ok' },
+      {type: 'activityCompleted', seq: 0, result: 'ok'},
       {
         type: 'activityScheduled',
         seq: 1,

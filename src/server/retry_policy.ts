@@ -14,7 +14,7 @@
  * (see planning/sprints/05-phase-6-scope.md).
  */
 
-import type { RetryPolicy } from '../protocol';
+import type {RetryPolicy} from '../protocol';
 
 /** First delay after a workflow task fails; doubles from there. */
 const WORKFLOW_TASK_INITIAL_BACKOFF_MS = 100;

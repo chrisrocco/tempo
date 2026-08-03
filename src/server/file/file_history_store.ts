@@ -18,16 +18,16 @@
  * `load()`. Per-execution write chains serialize concurrent writes.
  */
 
-import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import {createHash} from 'node:crypto';
+import {promises as fs} from 'node:fs';
 import * as path from 'node:path';
 import {
   DEFAULT_TASK_QUEUE,
   type ExecutionStatus,
   type HistoryEvent,
 } from '../../protocol';
-import type { ExecutionRecord, HistoryStore } from '../ports/history_store';
-import { VersionConflictError } from '../ports/history_store';
+import type {ExecutionRecord, HistoryStore} from '../ports/history_store';
+import {VersionConflictError} from '../ports/history_store';
 
 interface PersistedMeta {
   workflowId: string;
@@ -61,12 +61,13 @@ function encodeName(id: string): string {
 export class FileHistoryStore implements HistoryStore {
   private readonly cache = new Map<string, ExecutionRecord>();
   private readonly writeChains = new Map<string, Promise<void>>();
+  private closed = false;
 
   private constructor(private readonly dir: string) {}
 
   /** Open (or create) a data dir: acquire the single-writer lock, then load state. */
   static async open(dir: string): Promise<FileHistoryStore> {
-    await fs.mkdir(dir, { recursive: true });
+    await fs.mkdir(dir, {recursive: true});
     await acquireLock(dir);
     const store = new FileHistoryStore(dir);
     await store.load();
@@ -75,8 +76,9 @@ export class FileHistoryStore implements HistoryStore {
 
   /** Flush pending writes and release the lock. */
   async close(): Promise<void> {
+    this.closed = true;
     await Promise.all([...this.writeChains.values()]);
-    await fs.rm(path.join(this.dir, 'lock'), { force: true });
+    await fs.rm(path.join(this.dir, 'lock'), {force: true});
   }
 
   async create(
@@ -102,7 +104,7 @@ export class FileHistoryStore implements HistoryStore {
     this.cache.set(workflowId, rec); // synchronous → immediately visible to get()
     await this.enqueue(workflowId, async () => {
       const d = this.execDir(workflowId);
-      await fs.mkdir(d, { recursive: true });
+      await fs.mkdir(d, {recursive: true});
       await fs.writeFile(path.join(d, 'events.jsonl'), '');
       await this.writeMeta(rec);
     });
@@ -189,7 +191,7 @@ export class FileHistoryStore implements HistoryStore {
   async setStatus(
     workflowId: string,
     status: ExecutionStatus,
-    outcome?: { result?: unknown; failure?: unknown },
+    outcome?: {result?: unknown; failure?: unknown},
   ): Promise<void> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
@@ -226,8 +228,14 @@ export class FileHistoryStore implements HistoryStore {
   // Serialize writes per execution: each op runs after the previous one settles,
   // and the caller awaits its own op. Errors don't break the chain.
   private enqueue(id: string, op: () => Promise<unknown>): Promise<void> {
+    if (this.closed) return Promise.resolve();
     const prev = this.writeChains.get(id) ?? Promise.resolve();
-    const result = prev.then(op, op).then(() => undefined);
+    const result = prev
+      .then(
+        () => (this.closed ? undefined : op()),
+        () => (this.closed ? undefined : op()),
+      )
+      .then(() => undefined);
     this.writeChains.set(
       id,
       result.then(
@@ -239,6 +247,7 @@ export class FileHistoryStore implements HistoryStore {
   }
 
   private async writeMeta(rec: ExecutionRecord): Promise<void> {
+    if (this.closed) return;
     const meta: PersistedMeta = {
       workflowId: rec.workflowId,
       runId: rec.runId,
@@ -255,8 +264,12 @@ export class FileHistoryStore implements HistoryStore {
     };
     const metaPath = path.join(this.execDir(rec.workflowId), 'meta.json');
     const tmp = `${metaPath}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(meta, null, 2));
-    await fs.rename(tmp, metaPath); // atomic replace on the same filesystem
+    try {
+      await fs.writeFile(tmp, JSON.stringify(meta, null, 2));
+      await fs.rename(tmp, metaPath); // atomic replace on the same filesystem
+    } catch (e) {
+      if (!this.closed) throw e;
+    }
   }
 
   private async load(): Promise<void> {

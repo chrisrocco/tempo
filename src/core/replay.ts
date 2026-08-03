@@ -50,10 +50,10 @@
  *   activity calls inside them.
  */
 
-import { als, type WorkflowContext, type WorkflowFn } from './context';
-import { applyEvent } from './apply_event';
-import { tryUnblockConditions } from './condition';
-import { drainMicrotasks } from './microtask_scheduler';
+import {applyEvent} from './apply_event';
+import {tryUnblockConditions} from './condition';
+import {als, type WorkflowContext, type WorkflowFn} from './context';
+import {drainMicrotasks} from './microtask_scheduler';
 
 // drain microtasks, then run the condition unblock pass to a fixpoint
 export async function settle(ctx: WorkflowContext): Promise<void> {

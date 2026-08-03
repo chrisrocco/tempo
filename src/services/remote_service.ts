@@ -59,7 +59,7 @@ export function createRemoteService(
   async function call(request: RpcRequest): Promise<unknown> {
     const res = await fetch(baseUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {'content-type': 'application/json'},
       body: JSON.stringify(request),
     });
     const response = (await res.json()) as RpcResponse;
@@ -80,20 +80,20 @@ export function createRemoteService(
         method: 'start',
         name,
         args,
-        opts: { ...opts, workflowId },
+        opts: {...opts, workflowId},
       }).catch(() => {});
-      return { workflowId };
+      return {workflowId};
     },
     signal(workflowId, signalName, payload) {
-      void call({ method: 'signal', workflowId, signalName, payload }).catch(
+      void call({method: 'signal', workflowId, signalName, payload}).catch(
         () => {},
       );
     },
     cancel(workflowId) {
-      void call({ method: 'cancel', workflowId }).catch(() => {});
+      void call({method: 'cancel', workflowId}).catch(() => {});
     },
     terminate(workflowId, reason) {
-      void call({ method: 'terminate', workflowId, reason }).catch(() => {});
+      void call({method: 'terminate', workflowId, reason}).catch(() => {});
     },
     getStatus(workflowId): ExecutionStatus {
       return statusCache.get(workflowId) ?? 'running';
@@ -125,7 +125,7 @@ export function createRemoteService(
       );
     },
     async listExecutions(): Promise<ExecutionSummary[]> {
-      return (await call({ method: 'listExecutions' })) as ExecutionSummary[];
+      return (await call({method: 'listExecutions'})) as ExecutionSummary[];
     },
     async pollWorkflowTask(
       taskQueue?: string,
@@ -150,12 +150,12 @@ export function createRemoteService(
         method: 'completeWorkflowTask',
         token,
         result: result.failed
-          ? { ...result, failure: errorMessage(result.failure) }
+          ? {...result, failure: errorMessage(result.failure)}
           : result,
       });
     },
     async failWorkflowTask(token: TaskToken, reason: string): Promise<void> {
-      await call({ method: 'failWorkflowTask', token, reason });
+      await call({method: 'failWorkflowTask', token, reason});
     },
     async pollActivityTask(
       taskQueue?: string,
@@ -171,10 +171,10 @@ export function createRemoteService(
       token: TaskToken,
       result: ActivityResult,
     ): Promise<void> {
-      await call({ method: 'completeActivityTask', token, result });
+      await call({method: 'completeActivityTask', token, result});
     },
     async heartbeatActivityTask(token: TaskToken): Promise<void> {
-      await call({ method: 'heartbeatActivityTask', token });
+      await call({method: 'heartbeatActivityTask', token});
     },
   };
 }

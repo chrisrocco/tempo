@@ -34,14 +34,14 @@
  * before the pass — so the condition reliably sees the new item.
  */
 
-import { getContext } from './context';
+import {getContext} from './context';
 
 export interface SignalDef {
   name: string;
 }
 
 export function defineSignal(name: string): SignalDef {
-  return { name };
+  return {name};
 }
 
 /**

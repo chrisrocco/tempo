@@ -8,7 +8,7 @@
  * actually remove it, not merely report it sooner.
  */
 
-import type { ActivityOptions } from '../../src';
+import type {ActivityOptions} from '../../src';
 import {
   MemoryHistoryStore,
   MemoryTaskQueue,
@@ -32,7 +32,7 @@ function makeCore(historyStore: MemoryHistoryStore, leaseMs: number) {
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
   });
-  return { core, activityTaskQueue };
+  return {core, activityTaskQueue};
 }
 
 async function seedScheduledActivity(
@@ -41,7 +41,7 @@ async function seedScheduledActivity(
 ): Promise<void> {
   await historyStore.create('wf', 'w', []);
   await historyStore.append('wf', [
-    { type: 'activityScheduled', seq: 0, name: 'slow', args: [], options },
+    {type: 'activityScheduled', seq: 0, name: 'slow', args: [], options},
   ]);
 }
 
@@ -50,10 +50,10 @@ describe('an activity that outlives its lease, with no timeout set', () => {
   // the reason startToCloseTimeoutMs exists.
   it('is handed to a second worker while the first is still running', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = makeCore(historyStore, 30);
+    const {core, activityTaskQueue} = makeCore(historyStore, 30);
     await seedScheduledActivity(historyStore, {});
     activityTaskQueue.enqueue(
-      { workflowId: 'wf', seq: 0, name: 'slow', args: [], options: {} },
+      {workflowId: 'wf', seq: 0, name: 'slow', args: [], options: {}},
       'default',
     );
 
@@ -70,8 +70,8 @@ describe('an activity that outlives its lease, with no timeout set', () => {
 describe('start-to-close timeout', () => {
   it('fails the attempt at the deadline rather than waiting for the worker', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = makeCore(historyStore, 5000);
-    const options: ActivityOptions = { startToCloseTimeoutMs: 30 };
+    const {core, activityTaskQueue} = makeCore(historyStore, 5000);
+    const options: ActivityOptions = {startToCloseTimeoutMs: 30};
     await seedScheduledActivity(historyStore, options);
     activityTaskQueue.enqueue(
       {
@@ -90,7 +90,7 @@ describe('start-to-close timeout', () => {
     const rec = await historyStore.get('wf');
     const failure = rec!.history.find((e) => e.type === 'activityFailed');
     expect(failure).toBeDefined();
-    expect((failure as { error: string }).error).toContain('timed out');
+    expect((failure as {error: string}).error).toContain('timed out');
   });
 
   /**
@@ -100,8 +100,8 @@ describe('start-to-close timeout', () => {
    */
   it('takes the task out of the queue, so no second worker runs it', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = makeCore(historyStore, 60);
-    const options: ActivityOptions = { startToCloseTimeoutMs: 20 };
+    const {core, activityTaskQueue} = makeCore(historyStore, 60);
+    const options: ActivityOptions = {startToCloseTimeoutMs: 20};
     await seedScheduledActivity(historyStore, options);
     activityTaskQueue.enqueue(
       {
@@ -122,8 +122,8 @@ describe('start-to-close timeout', () => {
 
   it('leaves an attempt that finishes in time completely alone', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = makeCore(historyStore, 5000);
-    const options: ActivityOptions = { startToCloseTimeoutMs: 100 };
+    const {core, activityTaskQueue} = makeCore(historyStore, 5000);
+    const options: ActivityOptions = {startToCloseTimeoutMs: 100};
     await seedScheduledActivity(historyStore, options);
     activityTaskQueue.enqueue(
       {
@@ -137,7 +137,7 @@ describe('start-to-close timeout', () => {
     );
 
     const task = await core.pollActivityTask();
-    await core.completeActivityTask(task!.token, { ok: true, result: 'done' });
+    await core.completeActivityTask(task!.token, {ok: true, result: 'done'});
     await wait(150); // the deadline passes with the attempt already settled
 
     const rec = await historyStore.get('wf');
@@ -153,8 +153,8 @@ describe('start-to-close timeout', () => {
    */
   it('ignores a late completion from the attempt it gave up on', async () => {
     const historyStore = new MemoryHistoryStore();
-    const { core, activityTaskQueue } = makeCore(historyStore, 5000);
-    const options: ActivityOptions = { startToCloseTimeoutMs: 20 };
+    const {core, activityTaskQueue} = makeCore(historyStore, 5000);
+    const options: ActivityOptions = {startToCloseTimeoutMs: 20};
     await seedScheduledActivity(historyStore, options);
     activityTaskQueue.enqueue(
       {
@@ -169,7 +169,7 @@ describe('start-to-close timeout', () => {
 
     const task = await core.pollActivityTask();
     await wait(80); // times out
-    await core.completeActivityTask(task!.token, { ok: true, result: 'late' });
+    await core.completeActivityTask(task!.token, {ok: true, result: 'late'});
 
     const rec = await historyStore.get('wf');
     const terminal = rec!.history.filter(

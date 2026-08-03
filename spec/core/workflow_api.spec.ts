@@ -18,7 +18,7 @@ import {
   startChild,
   workflowInfo,
 } from '../../src/core';
-import type { CancelChildCommand, StartChildCommand } from '../../src/protocol';
+import type {CancelChildCommand, StartChildCommand} from '../../src/protocol';
 
 describe('core primitives — seq allocation', () => {
   /**
@@ -78,7 +78,7 @@ describe('core primitives — command payloads', () => {
       void sleep(250);
     });
 
-    expect(ctx.commands[0]).toEqual({ type: 'startTimer', ms: 250, seq: 0 });
+    expect(ctx.commands[0]).toEqual({type: 'startTimer', ms: 250, seq: 0});
   });
 
   /**
@@ -88,8 +88,8 @@ describe('core primitives — command payloads', () => {
    */
   it('forwards a proxied call to the activity of the same name, with its options', () => {
     const ctx = createContext([], []);
-    const act = proxyActivities<{ greet(name: string): string }>({
-      retry: { maximumAttempts: 3 },
+    const act = proxyActivities<{greet(name: string): string}>({
+      retry: {maximumAttempts: 3},
     });
 
     als.run(ctx, () => {
@@ -100,7 +100,7 @@ describe('core primitives — command payloads', () => {
       type: 'scheduleActivity',
       name: 'greet',
       args: ['world'],
-      options: { retry: { maximumAttempts: 3 } },
+      options: {retry: {maximumAttempts: 3}},
       seq: 0,
     });
   });

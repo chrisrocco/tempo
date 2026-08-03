@@ -12,10 +12,10 @@
  * code path, not the failure semantics — see the caveat on `LocalService`.
  */
 
-import type { ActivityOptions } from './activity_options';
-import type { Command } from './commands';
-import type { HistoryEvent } from './history_events';
-import type { TaskToken } from './task_token';
+import type {ActivityOptions} from './activity_options';
+import type {Command} from './commands';
+import type {HistoryEvent} from './history_events';
+import type {TaskToken} from './task_token';
 
 /**
  * `terminated` is deliberately its own status rather than a flavour of `failed`.
@@ -62,9 +62,9 @@ export interface ExecutionSummary {
  * or genuinely stuck, and that distinction is the first thing an operator wants.
  */
 export interface PendingWorkView {
-  activities: { seq: number; name: string }[];
-  timers: { seq: number; fireAt: number }[];
-  children: { seq: number; childId: string; detached: boolean }[];
+  activities: {seq: number; name: string}[];
+  timers: {seq: number; fireAt: number}[];
+  children: {seq: number; childId: string; detached: boolean}[];
 }
 
 /** `tempo describe`: the summary, plus history and what the execution awaits. */
@@ -99,7 +99,7 @@ export interface WorkflowService {
     name: string,
     args?: unknown[],
     opts?: StartWorkflowOptions,
-  ): { workflowId: string };
+  ): {workflowId: string};
   signal(workflowId: string, signalName: string, payload?: unknown): void;
   cancel(workflowId: string): void;
   /**
@@ -162,7 +162,8 @@ export interface ActivityTask {
 
 /** What an activity worker reports back after running an activity function. */
 export type ActivityResult =
-  { ok: true; result: unknown } | { ok: false; error: string };
+  | {ok: true; result: unknown}
+  | {ok: false; error: string};
 
 /** An activity task handed to a worker, with the lease token to complete it. */
 export interface LeasedActivityTask extends ActivityTask {

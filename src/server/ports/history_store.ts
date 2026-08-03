@@ -8,7 +8,7 @@
  * concurrent workers make it meaningful.
  */
 
-import type { ExecutionStatus, HistoryEvent } from '../../protocol';
+import type {ExecutionStatus, HistoryEvent} from '../../protocol';
 
 /** One execution's durable state: its identity, history, and terminal outcome. */
 export interface ExecutionRecord {
@@ -120,7 +120,7 @@ export interface HistoryStore {
   setStatus(
     workflowId: string,
     status: ExecutionStatus,
-    outcome?: { result?: unknown; failure?: unknown },
+    outcome?: {result?: unknown; failure?: unknown},
   ): Promise<void>;
   /**
    * Continue-as-new: close the current run and begin a fresh one on the SAME
