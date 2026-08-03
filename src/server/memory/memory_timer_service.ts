@@ -17,6 +17,10 @@ interface TimerEntry {
   handle?: ReturnType<typeof setTimeout>;
 }
 
+function unref(handle?: ReturnType<typeof setTimeout>): void {
+  (handle as unknown as {unref?: () => void})?.unref?.();
+}
+
 export class MemoryTimerService implements TimerService {
   private readonly timers = new Map<string, TimerEntry>();
   private fireHandler: (workflowId: string, seq: number) => void = () => {};
@@ -35,7 +39,7 @@ export class MemoryTimerService implements TimerService {
     const delay = Math.max(0, fireAt - Date.now()); // past-due => fire ASAP
     const entry: TimerEntry = {workflowId, seq, fireAt};
     entry.handle = setTimeout(() => this.fire(key), delay);
-    entry.handle.unref?.();
+    unref(entry.handle);
     this.timers.set(key, entry);
   }
 
@@ -53,7 +57,7 @@ export class MemoryTimerService implements TimerService {
       if (entry.handle) clearTimeout(entry.handle);
       const delay = Math.max(0, entry.fireAt - now); // past-due => 0 => fires ASAP
       entry.handle = setTimeout(() => this.fire(key), delay);
-      entry.handle.unref?.();
+      unref(entry.handle);
     }
   }
 
