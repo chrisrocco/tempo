@@ -3,6 +3,7 @@
  * ORCHESTRATION BRAIN. stateful, runs NO user code. shared by local + remote.
  */
 
+export * from './execution_query';
 export * from './execution_view';
 export * from './file/file_history_store';
 export * from './json_logger';

@@ -17,7 +17,8 @@
 import type {
   ActivityResult,
   ExecutionDetail,
-  ExecutionSummary,
+  ExecutionFilter,
+  ExecutionPage,
   LeasedActivityTask,
   StartWorkflowOptions,
   TaskToken,
@@ -33,8 +34,8 @@ import {
   MemoryWorkflowTaskQueue,
   createServerCore,
   describeExecution,
+  queryExecutions,
   silentLogger,
-  summarizeExecution,
   type HistoryStore,
   type Logger,
 } from '../server';
@@ -78,7 +79,7 @@ export interface ServerHost {
   terminate(workflowId: string, reason: string): Promise<void>;
   getOutcome(workflowId: string): Promise<WorkflowOutcome>;
   describeExecution(workflowId: string): Promise<ExecutionDetail | undefined>;
-  listExecutions(): Promise<ExecutionSummary[]>;
+  listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
   pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
@@ -201,8 +202,8 @@ export function createServerHost(
       const rec = await historyStore.get(workflowId);
       return rec && describeExecution(rec);
     },
-    async listExecutions() {
-      return (await historyStore.list()).map(summarizeExecution);
+    async listExecutions(filter) {
+      return queryExecutions(await historyStore.list(), filter);
     },
     pollWorkflowTask(taskQueue) {
       return core.pollWorkflowTask(taskQueue);

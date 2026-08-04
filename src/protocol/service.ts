@@ -54,6 +54,10 @@ export interface ExecutionSummary {
   name: string;
   status: ExecutionStatus;
   historyLength: number;
+  /** Which worker pool it runs on — what a listing needs in order to group. */
+  taskQueue: string;
+  /** When it was created, epoch ms. The listing's sort key and its "age" column. */
+  createdAt: number;
   /**
    * Consecutive workflow-task failures. Non-zero on a `running` execution is the
    * signal that it is wedged rather than merely waiting — the engine cannot
@@ -82,6 +86,51 @@ export interface ExecutionSummary {
 export function isStuck(execution: ExecutionSummary): boolean {
   return execution.status === 'running' && execution.taskFailures > 0;
 }
+
+/**
+ * What to ask a listing for. Every field narrows; omitting all of them means
+ * everything, which is what `tempo list` has always done.
+ *
+ * `stuck` is not a status — it is the derived predicate above — but it belongs
+ * here rather than in the caller, because filtering after the fact would mean
+ * fetching every execution to find the handful that are broken, which is the
+ * exact cost this interface exists to avoid.
+ */
+export interface ExecutionFilter {
+  status?: ExecutionStatus;
+  name?: string;
+  taskQueue?: string;
+  /** Match executions whose id starts with this — the listing's search box. */
+  workflowIdPrefix?: string;
+  /** Only executions the engine cannot replay. */
+  stuck?: boolean;
+  /** How many to return. The server caps this; see `MAX_PAGE_SIZE`. */
+  limit?: number;
+  /** Resume after this point — an opaque value from a previous page. */
+  cursor?: string;
+}
+
+/**
+ * One page of a listing, newest first.
+ *
+ * The cursor is opaque on purpose: it currently encodes the sort key of the last
+ * row, and a caller that parsed it would be depending on an ordering this is
+ * free to change.
+ */
+export interface ExecutionPage {
+  executions: ExecutionSummary[];
+  /** Absent when this is the last page. */
+  nextCursor?: string;
+}
+
+/**
+ * The most any one listing returns, however large a `limit` is asked for.
+ *
+ * A ceiling rather than a suggestion, because the caller most likely to ask for
+ * everything is a dashboard doing it every two seconds, and the server has no
+ * way to refuse work it has already done.
+ */
+export const MAX_PAGE_SIZE = 200;
 
 /**
  * Dispatched work whose completion has not arrived — why a running execution is
@@ -139,8 +188,8 @@ export interface WorkflowService {
   getStatus(workflowId: string): ExecutionStatus;
   /** Inspect one execution: status, history, and what it is waiting on. */
   describeExecution(workflowId: string): Promise<ExecutionDetail | undefined>;
-  /** Every execution the server knows about. */
-  listExecutions(): Promise<ExecutionSummary[]>;
+  /** One page of the executions the server knows about, newest first. */
+  listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
   // ── worker-facing (poll a task, respond when done) ──
   /**
    * Claim the next workflow task on `taskQueue`.

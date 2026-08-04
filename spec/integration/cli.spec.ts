@@ -275,9 +275,12 @@ describe('tempo CLI', () => {
         `--server=${url}`,
       ]);
       expect(started.code).toBe(0);
-      const [row] = JSON.parse(
+      // `--json` emits the whole page, not a bare array: the cursor has to be
+      // reachable by whatever is scripting against it.
+      const {executions} = JSON.parse(
         (await runTempo(['list', '--json', `--server=${url}`])).out,
-      ) as {workflowId: string}[];
+      ) as {executions: {workflowId: string}[]};
+      const [row] = executions;
 
       const {code, out} = await runTempo([
         'describe',

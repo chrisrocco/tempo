@@ -61,7 +61,7 @@ import {
   MemoryWorkflowTaskQueue,
   createServerCore,
   describeExecution,
-  summarizeExecution,
+  queryExecutions,
   type HistoryStore,
 } from '../server';
 import type {ActivityWorker, WorkflowWorker} from '../worker';
@@ -302,8 +302,8 @@ export function createLocalService(
       const rec = await historyStore.get(workflowId);
       return rec && describeExecution(rec);
     },
-    async listExecutions() {
-      return (await historyStore.list()).map(summarizeExecution);
+    async listExecutions(filter) {
+      return queryExecutions(await historyStore.list(), filter);
     },
     // ── worker-facing seam (for out-of-process workers; unused by the in-proc loops) ──
     pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined> {
