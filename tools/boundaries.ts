@@ -230,33 +230,40 @@ function checkLayering(file: SourceFile, stripped: string): Violation[] {
 }
 
 /**
- * The engine must not know the dashboard exists.
+ * The engine must not name the dashboard **at all** — not in an import, and not
+ * in a path it spawns.
  *
  * The dashboard is a separate package that depends on the engine, and that edge
  * points one way. It did not always: the engine used to serve the dashboard —
  * carrying a TypeScript transpiler and an import-map generator to do it — while
- * the dashboard reached back into `src/` for the values it needed. Each half
- * looked reasonable on its own, and together they meant neither could be
- * understood, tested, or shipped without the other.
+ * the dashboard reached back into `src/` for the values it needed.
  *
- * Checked rather than trusted for the usual reason: the coupling grew where
- * nothing was looking. A single import is all it takes to grow back.
+ * **Why a string scan rather than an import scan.** The first version of this
+ * rule only inspected import specifiers, and passed while `cli/up.ts` held
+ * `path.resolve('dashboard/server/main.ts')` to spawn it. A hardcoded sibling
+ * path is the same dependency as an import and a worse one: it survives type
+ * checking, and it breaks in any layout where the process is not run from the
+ * repo root. Import specifiers are strings too, so scanning strings covers both
+ * with one rule.
+ *
+ * Comments are exempt because `stripCommentsAndStrings` has already blanked
+ * them — explaining the boundary is not crossing it.
  */
 function checkPackageDirection(
   file: SourceFile,
   stripped: string,
 ): Violation[] {
   const violations: Violation[] = [];
-  for (const ref of extractImports(stripped)) {
-    if (!/(^|\/)dashboard\//.test(ref.specifier)) continue;
+  stripped.split('\n').forEach((lineText, idx) => {
+    if (!/(^|['"`/])dashboard\//.test(lineText)) return;
     violations.push({
       path: file.path,
-      line: ref.line,
+      line: idx + 1,
       rule: 'package-direction',
       message:
-        'the engine must not import the dashboard — the dashboard depends on the engine, and that edge points one way. Whatever is needed here belongs in the engine, or the dashboard should reach it over the RPC',
+        "the engine must not name the dashboard — neither importing it nor spawning it by path. The dashboard depends on the engine and reaches it over the RPC; whatever is needed here belongs in the engine, and starting the dashboard is the operator's job",
     });
-  }
+  });
   return violations;
 }
 
