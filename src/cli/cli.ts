@@ -72,8 +72,9 @@ Usage:
       Rows the engine cannot replay are marked STUCK with the failure count
       and reason; --stuck shows only those. A stuck execution still reads
       "running" — it is live and retrying, not settled.
-  tempo describe <workflow-id> [--json]
-      Status, what the execution is waiting on, and its history.
+  tempo describe <workflow-id> [--json] [--from=N] [--limit=N]
+      Status, what the execution is waiting on, and its history. Long
+      histories show the most recent page; --from=0 starts at the beginning.
 
 Options:
   --server=URL   Server to talk to. Default $TEMPO_SERVER_URL, else
@@ -175,6 +176,10 @@ async function dispatch(argv: string[]): Promise<number> {
         serverUrl,
         required(rest[0], 'workflow id'),
         flags.has('json'),
+        {
+          ...(flags.get('from') ? {fromEvent: Number(flags.get('from'))} : {}),
+          ...(flags.get('limit') ? {limit: Number(flags.get('limit'))} : {}),
+        },
       );
     case undefined:
     case 'help':

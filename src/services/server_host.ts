@@ -16,6 +16,7 @@
 
 import type {
   ActivityResult,
+  DescribeOptions,
   ExecutionDetail,
   ExecutionFilter,
   ExecutionPage,
@@ -78,7 +79,10 @@ export interface ServerHost {
   cancel(workflowId: string): Promise<void>;
   terminate(workflowId: string, reason: string): Promise<void>;
   getOutcome(workflowId: string): Promise<WorkflowOutcome>;
-  describeExecution(workflowId: string): Promise<ExecutionDetail | undefined>;
+  describeExecution(
+    workflowId: string,
+    options?: DescribeOptions,
+  ): Promise<ExecutionDetail | undefined>;
   listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
   pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
@@ -198,9 +202,9 @@ export function createServerHost(
         failureStack: rec.status === 'failed' ? rec.failureStack : undefined,
       };
     },
-    async describeExecution(workflowId) {
+    async describeExecution(workflowId, options) {
       const rec = await historyStore.get(workflowId);
-      return rec && describeExecution(rec);
+      return rec && describeExecution(rec, options);
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);

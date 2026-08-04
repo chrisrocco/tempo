@@ -133,6 +133,39 @@ export interface ExecutionPage {
 export const MAX_PAGE_SIZE = 200;
 
 /**
+ * The most history events one `describeExecution` returns.
+ *
+ * A history of a few thousand events is now the *expected* size rather than a
+ * pathological one — `DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD` is 4096, so a
+ * long-lived workflow sits just under it by design. Returning all of it on every
+ * describe means a dashboard polling one execution ships megabytes a minute.
+ */
+export const MAX_HISTORY_PAGE = 500;
+
+/**
+ * Which slice of an execution's history to return.
+ *
+ * Paged by **index**, not by a cursor, because history is append-only: event 40
+ * is event 40 forever, so an offset cannot go stale or skip a row the way a
+ * cursor over a mutable set can. That is a property of the data, not a
+ * simplification.
+ */
+export interface DescribeOptions {
+  /**
+   * Index of the first event to return.
+   *
+   * Omitted means **the most recent page**, not the first. `describe` is a
+   * diagnostic command, and the question it is asked — what is this doing, what
+   * went wrong — is answered at the end of a history rather than the start. For
+   * anything shorter than a page, which is nearly everything, this is the whole
+   * history either way.
+   */
+  fromEvent?: number;
+  /** How many events. Capped at `MAX_HISTORY_PAGE`. */
+  limit?: number;
+}
+
+/**
  * Dispatched work whose completion has not arrived — why a running execution is
  * parked. An execution that is `running` with nothing pending is either mid-task
  * or genuinely stuck, and that distinction is the first thing an operator wants.
@@ -146,7 +179,14 @@ export interface PendingWorkView {
 /** `tempo describe`: the summary, plus history and what the execution awaits. */
 export interface ExecutionDetail extends ExecutionSummary {
   args: unknown[];
+  /**
+   * One page of history — see `DescribeOptions`. `historyLength` on the summary
+   * is the total, so `historyOffset + history.length < historyLength` means
+   * there is more after this page.
+   */
   history: HistoryEvent[];
+  /** Index of the first event in `history`, within the whole history. */
+  historyOffset: number;
   pending: PendingWorkView;
   cancelRequested: boolean;
   result?: unknown;
@@ -187,7 +227,10 @@ export interface WorkflowService {
   getResult(workflowId: string): Promise<unknown>;
   getStatus(workflowId: string): ExecutionStatus;
   /** Inspect one execution: status, history, and what it is waiting on. */
-  describeExecution(workflowId: string): Promise<ExecutionDetail | undefined>;
+  describeExecution(
+    workflowId: string,
+    options?: DescribeOptions,
+  ): Promise<ExecutionDetail | undefined>;
   /** One page of the executions the server knows about, newest first. */
   listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
   // ── worker-facing (poll a task, respond when done) ──
