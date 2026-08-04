@@ -50,6 +50,7 @@
 
 export {condition} from './core/condition';
 export {CancelledFailure} from './core/errors';
+export {pollForever, type PollForeverOptions} from './core/poller';
 export {
   background,
   firstSignal,
