@@ -31,12 +31,13 @@
  */
 
 import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
-import type {
-  ExecutionDetail as Detail,
-  QueueWorkers,
-  WorkerRole,
-} from '../src/protocol/service';
-import {isQueueServed, isStuck} from '../src/protocol/service.js';
+import {
+  isQueueServed,
+  isStuck,
+  type ExecutionDetail as Detail,
+  type QueueWorkers,
+  type WorkerRole,
+} from 'workflow-engine/protocol';
 import {client} from './client.js';
 import {Poller} from './poller.js';
 import {executionsHref} from './routes.js';

@@ -24,7 +24,7 @@
  * measurement.
  */
 
-import type {HistoryEvent} from '../src/protocol/history_events';
+import type {HistoryEvent} from 'workflow-engine/protocol';
 
 function assertNever(event: never): never {
   throw new Error(`unhandled history event: ${JSON.stringify(event)}`);

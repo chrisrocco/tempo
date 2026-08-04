@@ -16,8 +16,7 @@
  */
 
 import {LitElement, html, type TemplateResult} from 'lit';
-import {isStuck} from '../src/protocol/service.js';
-import type {ExecutionSummary} from '../src/protocol/service';
+import {isStuck, type ExecutionSummary} from 'workflow-engine/protocol';
 import {badge, surface} from './theme.js';
 
 export class StatusBadge extends LitElement {

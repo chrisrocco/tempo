@@ -24,7 +24,7 @@ import type {
   ExecutionPage,
   QueueWorkers,
   StartWorkflowOptions,
-} from '../src/protocol/service';
+} from 'workflow-engine/protocol';
 
 /** The RPC envelope: every response is one of these two shapes. */
 type RpcResponse = {ok: true; value: unknown} | {ok: false; error: string};

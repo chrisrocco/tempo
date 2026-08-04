@@ -14,7 +14,7 @@ import {
   executionsHref,
   parseRoute,
   type RouteFilter,
-} from '../../ui/routes';
+} from '../../dashboard/app/routes';
 
 describe('dashboard routes — parsing', () => {
   it('reads a bare hash as the unfiltered executions listing', () => {

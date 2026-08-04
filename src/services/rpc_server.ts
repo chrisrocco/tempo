@@ -5,22 +5,22 @@
  * polled task that came back `undefined` is sent as JSON `null` (undefined is not
  * valid JSON); the client maps it back. `bin/server-main` wraps this in a process.
  *
- * It also serves the dashboard at `/ui`, when given a place to serve it from —
- * see `ui_server.ts`. Deliberately the same listener: same origin means the
- * browser can call the RPC with no CORS, and an operator has one port to reach
- * rather than two to keep in step.
+ * **One endpoint, and nothing else.** This used to also serve the dashboard,
+ * which meant the engine carried a TypeScript transpiler, an import-map
+ * generator, and a static file server for the benefit of a browser app that
+ * imported the engine back. The dashboard serves itself now and reaches this
+ * over the same RPC any other client uses, which is the only interface it
+ * should have needed.
  *
  * **There is no auth and no TLS on this transport** — it is plain HTTP+JSON.
  * `bin/server-main` binds loopback for that reason. Expose it only on loopback or
- * a trusted private network; never put the port on the public internet. Serving
- * a UI does not change that and makes it easier to forget: the dashboard can
- * terminate executions, so anything that can load it can too.
+ * a trusted private network; never put the port on the public internet. Anything
+ * that can reach this port can terminate any execution.
  */
 
 import * as http from 'node:http';
 import type {RpcRequest, RpcResponse} from '../protocol';
 import type {ServerHost} from './server_host';
-import {createUiServer, type UiServerOptions} from './ui_server';
 
 /**
  * The compile-time half of the switch below: `request` narrows to `never` once
@@ -82,35 +82,8 @@ async function dispatch(
   }
 }
 
-export interface RpcServerOptions {
-  /**
-   * Serve the dashboard from here. Omitted means no `/ui` — the server stays
-   * exactly what it was, which is what the integration specs and any
-   * headless deployment want.
-   */
-  ui?: UiServerOptions;
-}
-
-export function createRpcServer(
-  host: ServerHost,
-  options: RpcServerOptions = {},
-): http.Server {
-  const ui = options.ui ? createUiServer(options.ui) : undefined;
-
+export function createRpcServer(host: ServerHost): http.Server {
   return http.createServer((req, res) => {
-    // The UI is GET-only and answered before the body is read: an RPC request
-    // is a POST with a JSON body, and waiting for a body that a browser
-    // navigation will never send would hang the page load.
-    if (ui && req.method === 'GET') {
-      const served = ui.handle(req.url ?? '/', {
-        send: (status, headers, payload) => {
-          res.writeHead(status, headers);
-          res.end(payload);
-        },
-      });
-      if (served) return;
-    }
-
     let body = '';
     req.on('data', (chunk) => {
       body += chunk;

@@ -26,7 +26,7 @@
  */
 
 import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
-import type {ExecutionPage, ExecutionSummary} from '../src/protocol/service';
+import type {ExecutionPage, ExecutionSummary} from 'workflow-engine/protocol';
 import {client} from './client.js';
 import {Poller} from './poller.js';
 import {navigate} from './router.js';

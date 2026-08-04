@@ -44,11 +44,14 @@ if (dependencyViolations.length === 0) {
   console.error(`\ndependencies: ${dependencyViolations.length} violation(s)`);
 }
 
-// Two programs, because the engine and the dashboard are checked under
-// different libs and a single program cannot hold both. Same rules over both.
+// Three programs, because the engine, the dashboard's server, and its browser
+// code are checked under different libs and no single program can hold them.
+// Same rules over all of them — a dropped promise in a custom element is a
+// swallowed error rather than a dead process, which is quieter and worse.
 const styleViolations = [
   ...checkStyle(programFor(root), root),
-  ...checkStyle(programFor(root, 'ui/tsconfig.json'), root),
+  ...checkStyle(programFor(root, 'dashboard/tsconfig.json'), root),
+  ...checkStyle(programFor(root, 'dashboard/app/tsconfig.json'), root),
 ];
 if (styleViolations.length === 0) {
   console.log('style: clean (floating promises, top-level await, import.meta)');

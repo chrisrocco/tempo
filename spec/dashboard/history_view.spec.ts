@@ -14,7 +14,7 @@ import {
   durationOf,
   formatDuration,
   markerTimes,
-} from '../../ui/history_view';
+} from '../../dashboard/app/history_view';
 
 /** The default activity options, which none of these cases depends on. */
 const OPTIONS = {};
