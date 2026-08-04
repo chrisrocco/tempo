@@ -298,6 +298,21 @@ describe('architecture — dependencies', () => {
   });
 
   /**
+   * The engine's own list is empty, and that is the claim worth pinning: `lit`
+   * is permitted *somewhere*, and the somewhere is the dashboard. Checking only
+   * the general case would pass while the engine quietly regrew a runtime
+   * dependency for a browser.
+   */
+  it('refuses a runtime dependency in the engine, including lit', () => {
+    const violations = checkDependencies(
+      {dependencies: {lit: '^3.2.0'}},
+      {runtime: [], dev: []},
+    );
+
+    expect(violations.map((v) => v.name)).toEqual(['lit']);
+  });
+
+  /**
    * The specific rule that is easiest to talk yourself out of: labs packages
    * look official, and each one replaces work. They are pre-release by
    * definition, and the dashboard was scoped to do without them.

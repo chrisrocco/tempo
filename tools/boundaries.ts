@@ -12,7 +12,7 @@
  * codebase that already passes (see spec/architecture.spec.ts). Reading the disk
  * lives separately in `readSourceFiles`.
  *
- * Three rules, each mapping to a claim made elsewhere in the docs:
+ * Four rules, each mapping to a claim made elsewhere in the docs:
  *
  * 1. **Layering** — dependencies point strictly down, and each layer declares what
  *    it may reach. Two are worth calling out: `server/` may NOT import `core/`,
@@ -26,6 +26,11 @@
  *    (see `ALLOWED_HOST_COUPLING`).
  * 3. **The author entrypoint** — workflow modules import only `workflow.ts`, and
  *    obey the same purity rule as the core they run inside.
+ * 4. **Package direction** — the engine must not import the dashboard. The
+ *    dashboard depends on the engine and not the reverse, which is what lets the
+ *    engine ship with no runtime dependencies. This one is here because the
+ *    coupling it forbids is the coupling that actually grew: the engine served
+ *    the dashboard while the dashboard reached back into `src/`.
  */
 
 import {readdirSync, readFileSync, statSync} from 'node:fs';
@@ -41,7 +46,7 @@ export interface SourceFile {
 export interface Violation {
   path: string;
   line: number;
-  rule: 'layering' | 'core-purity' | 'author-entrypoint';
+  rule: 'layering' | 'core-purity' | 'author-entrypoint' | 'package-direction';
   message: string;
 }
 
@@ -224,6 +229,37 @@ function checkLayering(file: SourceFile, stripped: string): Violation[] {
   return violations;
 }
 
+/**
+ * The engine must not know the dashboard exists.
+ *
+ * The dashboard is a separate package that depends on the engine, and that edge
+ * points one way. It did not always: the engine used to serve the dashboard —
+ * carrying a TypeScript transpiler and an import-map generator to do it — while
+ * the dashboard reached back into `src/` for the values it needed. Each half
+ * looked reasonable on its own, and together they meant neither could be
+ * understood, tested, or shipped without the other.
+ *
+ * Checked rather than trusted for the usual reason: the coupling grew where
+ * nothing was looking. A single import is all it takes to grow back.
+ */
+function checkPackageDirection(
+  file: SourceFile,
+  stripped: string,
+): Violation[] {
+  const violations: Violation[] = [];
+  for (const ref of extractImports(stripped)) {
+    if (!/(^|\/)dashboard\//.test(ref.specifier)) continue;
+    violations.push({
+      path: file.path,
+      line: ref.line,
+      rule: 'package-direction',
+      message:
+        'the engine must not import the dashboard — the dashboard depends on the engine, and that edge points one way. Whatever is needed here belongs in the engine, or the dashboard should reach it over the RPC',
+    });
+  }
+  return violations;
+}
+
 function checkPurity(
   file: SourceFile,
   stripped: string,
@@ -290,6 +326,7 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
       continue;
     }
     violations.push(...checkLayering(file, stripped));
+    violations.push(...checkPackageDirection(file, stripped));
     // Both layers run inside a replay, so both are held to determinism. Keying
     // this on `core` alone was safe only while `core` was the only thing that
     // ran there: a helper in `patterns/` is called from workflow code just the

@@ -1,0 +1,17 @@
+{
+  // The dashboard's *browser* half. DOM lib, and `types: []` so Node's globals
+  // are genuinely absent rather than merely discouraged — a custom element that
+  // reaches for `process` should not compile.
+  //
+  // This is also what makes the claim about typed projections true rather than
+  // aspirational: the app imports `ExecutionDetail` and `isStuck` from the
+  // engine's `protocol` entry rather than restating them, so a field added to a
+  // projection is a compile error here. Nothing checked this code at all before
+  // a config existed for it, so that error had nowhere to appear.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["**/*.ts"]
+}

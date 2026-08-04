@@ -34,13 +34,31 @@ export interface DependencyViolation {
   name: string;
   field: 'dependencies' | 'devDependencies';
   message: string;
+  /** Which package declared it, repo-relative. Absent when checked directly. */
+  pkg?: string;
 }
 
 /**
- * Shipped to anyone who installs this. `lit` is here for the dashboard; the
- * engine itself imports nothing outside node: builtins.
+ * What the **engine** ships to anyone who installs it: nothing.
+ *
+ * It was one — `lit`, for a dashboard the engine used to serve. That was
+ * backwards, and the dashboard is now its own package that depends on the
+ * engine rather than the other way round. An empty list here is the claim the
+ * fileoverview makes, finally enforced rather than asserted: adding anything is
+ * a decision to argue for out loud.
  */
-const ALLOWED_RUNTIME = ['lit'];
+const ALLOWED_RUNTIME: readonly string[] = [];
+
+/**
+ * The **dashboard**, which is allowed exactly one real dependency plus the
+ * engine it reports on.
+ *
+ * `workflow-engine` is the local package, linked by path — it is what makes a
+ * field added to a projection a compile error in the browser code rather than
+ * `undefined` at runtime, and it is a one-way edge: the engine does not know
+ * this package exists.
+ */
+const ALLOWED_DASHBOARD_RUNTIME: readonly string[] = ['lit', 'workflow-engine'];
 
 /**
  * Build and test only. Each earns its place by being something we would
@@ -69,15 +87,36 @@ function refusal(name: string, field: string): string {
   return `${name} is not on the ${field} allowlist in tools/dependencies.ts. Adding a dependency is a decision to make out loud: put it on the list in the same commit that uses it, with a reason`;
 }
 
-/** Check a parsed package.json against both allowlists. */
-export function checkDependencies(pkg: {
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-}): DependencyViolation[] {
+/** What one manifest is permitted. */
+export interface Allowlists {
+  runtime: readonly string[];
+  dev: readonly string[];
+}
+
+/**
+ * Every manifest in the repo, and what each may depend on.
+ *
+ * Two lists rather than one, because the two packages have genuinely different
+ * budgets: the engine's is empty and the dashboard's is not. A single list
+ * would let a browser dependency creep into the thing that claims to have none.
+ */
+const PACKAGES: {dir: string; allow: Allowlists}[] = [
+  {dir: '.', allow: {runtime: ALLOWED_RUNTIME, dev: ALLOWED_DEV}},
+  {dir: 'dashboard', allow: {runtime: ALLOWED_DASHBOARD_RUNTIME, dev: []}},
+];
+
+/** Check a parsed package.json against a pair of allowlists. */
+export function checkDependencies(
+  pkg: {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  },
+  allow: Allowlists = {runtime: ALLOWED_DASHBOARD_RUNTIME, dev: ALLOWED_DEV},
+): DependencyViolation[] {
   const violations: DependencyViolation[] = [];
   for (const [field, allowed] of [
-    ['dependencies', ALLOWED_RUNTIME],
-    ['devDependencies', ALLOWED_DEV],
+    ['dependencies', allow.runtime],
+    ['devDependencies', allow.dev],
   ] as const) {
     for (const name of Object.keys(pkg[field] ?? {})) {
       if (allowed.includes(name)) continue;
@@ -87,12 +126,18 @@ export function checkDependencies(pkg: {
   return violations;
 }
 
-/** Read the repo's package.json and check it. */
+/** Read every manifest in the repo and check each against its own list. */
 export function checkRepoDependencies(root: string): DependencyViolation[] {
-  const raw = readFileSync(path.join(root, 'package.json'), 'utf8');
-  return checkDependencies(
-    JSON.parse(raw) as Parameters<typeof checkDependencies>[0],
-  );
+  const violations: DependencyViolation[] = [];
+  for (const {dir, allow} of PACKAGES) {
+    const manifest = path.join(root, dir, 'package.json');
+    const pkg = JSON.parse(readFileSync(manifest, 'utf8')) as Parameters<
+      typeof checkDependencies
+    >[0];
+    for (const violation of checkDependencies(pkg, allow))
+      violations.push({...violation, pkg: dir});
+  }
+  return violations;
 }
 
 /** Format violations for a terminal. */
@@ -100,6 +145,9 @@ export function formatDependencyViolations(
   violations: DependencyViolation[],
 ): string {
   return violations
-    .map((v) => `package.json (${v.field})  [dependency]\n    ${v.message}`)
+    .map(
+      (v) =>
+        `${v.pkg ?? '.'}/package.json (${v.field})  [dependency]\n    ${v.message}`,
+    )
     .join('\n\n');
 }

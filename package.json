@@ -4,10 +4,16 @@
   "private": true,
   "type": "module",
   "description": "A minimal-but-correct durable workflow engine (a small Temporal-shaped system).",
+  "workspaces": ["dashboard"],
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol/index.ts",
+    "./workflow": "./src/workflow.ts"
+  },
   "scripts": {
     "tempo": "tsx bin/tempo.ts",
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p ui/tsconfig.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard/tsconfig.json && tsc --noEmit -p dashboard/app/tsconfig.json",
     "lint": "tsx tools/lint.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
@@ -19,8 +25,5 @@
     "prettier": "^3.9.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
-  },
-  "dependencies": {
-    "lit": "^3.3.3"
   }
 }

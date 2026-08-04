@@ -33,7 +33,7 @@
  */
 
 import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
-import type {ExecutionSummary} from '../src/protocol/service';
+import type {ExecutionSummary} from 'workflow-engine/protocol';
 import {client} from './client.js';
 import {controls, heading, panel, surface} from './theme.js';
 

@@ -4,9 +4,6 @@
  * RPC and owns the durable state + timers. Workflow/activity workers connect to it.
  *
  * Env:
- *   UI_ROOT            serve the dashboard at /ui from this directory. Unset =
- *                      no UI, which is the default: the dashboard can terminate
- *                      executions and the transport has no auth.
  *   HOST               interface to bind (default `127.0.0.1`). `0.0.0.0` accepts
  *                      connections from other machines — see the warning below.
  *   PORT               listen port (0 = random). Prints `LISTENING <port> <host>`
@@ -45,7 +42,6 @@
  */
 
 import type {AddressInfo} from 'node:net';
-import * as path from 'node:path';
 import {FileHistoryStore} from '../src';
 import {createJsonLogger} from '../src/server';
 import {createRpcServer, createServerHost} from '../src/services';
@@ -58,11 +54,6 @@ const activityLeaseMs = process.env['ACTIVITY_LEASE_MS']
   ? Number(process.env['ACTIVITY_LEASE_MS'])
   : undefined;
 const dataDir = process.env['DATA_DIR'];
-// Absolute, because the UI root is resolved against it on every request and the
-// server's working directory is not something a caller should have to reason about.
-const uiRoot = process.env['UI_ROOT']
-  ? path.resolve(process.env['UI_ROOT'])
-  : undefined;
 
 async function main(): Promise<void> {
   // Durable when DATA_DIR is set (a single-writer lockfile guards the dir);
@@ -76,17 +67,7 @@ async function main(): Promise<void> {
   });
   if (store) await host.resume(); // re-arm timers, re-dispatch pending work, re-drive running execs
 
-  // The dashboard is opt-in. It can terminate executions and the transport has
-  // no auth, so a server that was not asked to serve a UI does not serve one.
-  const server = createRpcServer(host, {
-    ui: uiRoot
-      ? {
-          uiRoot,
-          nodeModules: path.resolve('node_modules'),
-          srcRoot: path.resolve('src'),
-        }
-      : undefined,
-  });
+  const server = createRpcServer(host);
   server.listen(port, bindHost, () => {
     const addr = server.address() as AddressInfo;
     // Readiness line — the port it actually bound (so a supervisor/test can

@@ -23,7 +23,7 @@
  * anything.
  */
 
-import type {ExecutionFilter, ExecutionStatus} from '../src/protocol/service';
+import type {ExecutionFilter, ExecutionStatus} from 'workflow-engine/protocol';
 
 /** The filter fields the URL round-trips; the rest are paging mechanics. */
 export type RouteFilter = Pick<

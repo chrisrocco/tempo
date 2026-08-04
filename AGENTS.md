@@ -28,18 +28,28 @@ the layering, the ban on clock/randomness/IO inside `core/` and `patterns/`, and
 workflow modules import only `workflow.ts`. Run it with `npm run lint`; the
 suite runs the same rules. When it fails, the message names the layer and why.
 
-**Almost nothing is worth a dependency.** The engine has none; the dashboard is
-allowed exactly one, `lit`. Not `@lit-labs/*` — pre-release by definition — and
-not `@lit/*` either: "part of Lit" means the `lit` package. A router, a
-virtualizer, a context library are each a few dozen lines against the platform,
-and writing them is cheaper than carrying an unstable dependency in
-infrastructure other things depend on. The dev toolchain is a separate, equally
-short list: TypeScript, `tsx`, Jasmine, Prettier. **`tsx` is the only thing that
-executes TypeScript — there is no bundler**, and adding one is a decision to
-argue for out loud, not a package to install. This is **checked, not trusted** —
-[`tools/dependencies.ts`](tools/dependencies.ts) holds both allowlists, and
-`npm run lint` and the suite both fail on anything else. Adding to a list is
-fine; doing it in the same commit that needs it, with a reason, is the point.
+**Almost nothing is worth a dependency.** The engine has **none** — its runtime
+allowlist is empty, and that is enforced rather than asserted. The dashboard is
+allowed exactly one, `lit`, plus the engine itself. Not `@lit-labs/*` —
+pre-release by definition — and not `@lit/*` either: "part of Lit" means the
+`lit` package. A router, a virtualizer, a context library are each a few dozen
+lines against the platform, and writing them is cheaper than carrying an
+unstable dependency in infrastructure other things depend on. The dev toolchain
+is a separate, equally short list: TypeScript, `tsx`, Jasmine, Prettier. **`tsx`
+is the only thing that executes TypeScript — there is no bundler**, and adding
+one is a decision to argue for out loud, not a package to install. This is
+**checked, not trusted** — [`tools/dependencies.ts`](tools/dependencies.ts)
+holds a list per package, and `npm run lint` and the suite both fail on anything
+else. Adding to a list is fine; doing it in the same commit that needs it, with
+a reason, is the point.
+
+**The dashboard is a separate package, and the edge points one way.** It depends
+on the engine — for the RPC it calls and the projection types it renders — and
+the engine has never heard of it. That is why `lit` is not the engine's problem
+and why `services/` does not contain a TypeScript transpiler. It is also
+**checked**: [`tools/boundaries.ts`](tools/boundaries.ts) fails any import from
+`src/` into `dashboard/`, because this is exactly the coupling that grew last
+time nothing was watching for it.
 
 **Put seams behind interfaces, implementations behind them.** `server/ports/`
 declares a contract; `server/memory/` and `server/file/` satisfy it. This splits

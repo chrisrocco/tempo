@@ -132,8 +132,9 @@ async function dispatch(argv: string[]): Promise<number> {
         host: flags.get('host') || undefined,
         port: port === undefined ? undefined : Number(port),
         dataDir: flags.get('data-dir') || undefined,
-        // Bare --ui means the repo's own dashboard; a value overrides the root.
-        uiRoot: flags.has('ui') ? flags.get('ui') || 'ui' : undefined,
+        // The dashboard is its own process and its own package; `up` only
+        // decides whether to start it.
+        dashboard: flags.has('ui'),
         // Positionals after the entry are the workflow's arguments, parsed the
         // same way `tempo start` parses them.
         run: run

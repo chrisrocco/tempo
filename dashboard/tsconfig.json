@@ -1,0 +1,11 @@
+{
+  // The dashboard's *server* half: Node code that hands the app to a browser and
+  // forwards its RPC calls. Node globals, no DOM.
+  //
+  // The browser half has its own config in `app/`, and the split is the point.
+  // One config covering both would have to union the two environments, which is
+  // how `document` becomes reachable in a request handler and `process` in a
+  // custom element. `npm run typecheck` at the repo root runs all three configs.
+  "extends": "../tsconfig.json",
+  "include": ["server/**/*.ts"]
+}

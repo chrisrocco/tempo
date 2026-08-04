@@ -20,7 +20,7 @@
  */
 
 import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
-import type {HistoryEvent} from '../src/protocol/history_events';
+import type {HistoryEvent} from 'workflow-engine/protocol';
 import {
   describeEvent,
   durationOf,
