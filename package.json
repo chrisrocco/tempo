@@ -19,5 +19,8 @@
     "prettier": "^3.9.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "lit": "^3.3.3"
   }
 }

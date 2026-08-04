@@ -44,7 +44,7 @@ import {up} from './up';
 const USAGE = `tempo — run and drive workflows
 
 Usage:
-  tempo up <entry> [--host=ADDR] [--port=N] [--data-dir=PATH]
+  tempo up <entry> [--host=ADDR] [--port=N] [--data-dir=PATH] [--ui]
       Run a server and worker in the foreground. Ctrl-C to stop.
       --host is the interface the server binds; default 127.0.0.1. Use
       0.0.0.0 to let workers or an external CLI connect from other machines.
@@ -121,6 +121,8 @@ async function dispatch(argv: string[]): Promise<number> {
         host: flags.get('host') || undefined,
         port: port === undefined ? undefined : Number(port),
         dataDir: flags.get('data-dir') || undefined,
+        // Bare --ui means the repo's own dashboard; a value overrides the root.
+        uiRoot: flags.has('ui') ? flags.get('ui') || 'ui' : undefined,
         // Positionals after the entry are the workflow's arguments, parsed the
         // same way `tempo start` parses them.
         run: run
