@@ -16,7 +16,12 @@
  * anything that would rather parse than read.
  */
 
-import {isStuck, type ExecutionDetail, type HistoryEvent} from '../protocol';
+import {
+  isStuck,
+  type ExecutionDetail,
+  type ExecutionFilter,
+  type HistoryEvent,
+} from '../protocol';
 import {createRemoteService} from '../services';
 import {DEFAULT_SERVER_URL} from '../tempo';
 
@@ -242,27 +247,38 @@ export async function describeExecution(
   return 0;
 }
 
+/** `3m`, `2h`, `4d` — coarse on purpose; a listing wants recency, not precision. */
+function formatAge(createdAt: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - createdAt) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86_400) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86_400)}d`;
+}
+
 export async function listExecutions(
   serverUrl: string,
   asJson: boolean,
-  stuckOnly = false,
+  filter: ExecutionFilter = {},
 ): Promise<number> {
   await assertReachable(serverUrl);
-  const all = await createRemoteService(serverUrl).listExecutions();
-  const rows = stuckOnly ? all.filter(isStuck) : all;
+  // The filter goes to the server, which is the point of it existing: asking for
+  // everything and discarding it here is exactly the cost paging exists to save.
+  const page = await createRemoteService(serverUrl).listExecutions(filter);
+  const rows = page.executions;
   if (asJson) {
-    process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(page, null, 2)}\n`);
     return 0;
   }
   if (rows.length === 0) {
     process.stdout.write(
-      stuckOnly ? 'no stuck executions\n' : 'no executions\n',
+      filter.stuck ? 'no stuck executions\n' : 'no executions\n',
     );
     return 0;
   }
   const width = Math.max(...rows.map((r) => r.workflowId.length), 11);
   process.stdout.write(
-    `${'WORKFLOW ID'.padEnd(width)}  ${'NAME'.padEnd(12)}  ${'STATUS'.padEnd(10)}  EVENTS\n`,
+    `${'WORKFLOW ID'.padEnd(width)}  ${'NAME'.padEnd(12)}  ${'QUEUE'.padEnd(10)}  ${'STATUS'.padEnd(10)}  ${'AGE'.padStart(4)}  EVENTS\n`,
   );
   for (const r of rows) {
     // The marker goes on the row rather than into STATUS: the status is
@@ -272,9 +288,14 @@ export async function listExecutions(
       ? `  STUCK (${r.taskFailures} task failures: ${r.lastTaskFailure})`
       : '';
     process.stdout.write(
-      `${r.workflowId.padEnd(width)}  ${r.name.padEnd(12)}  ${r.status.padEnd(10)}  ${r.historyLength}${note}\n`,
+      `${r.workflowId.padEnd(width)}  ${r.name.padEnd(12)}  ${r.taskQueue.padEnd(10)}  ${r.status.padEnd(10)}  ${formatAge(r.createdAt).padStart(4)}  ${r.historyLength}${note}\n`,
     );
   }
+  // Only when there is more: a caller who sees nothing has the whole answer.
+  if (page.nextCursor !== undefined)
+    process.stdout.write(
+      `\n… more. Continue with --cursor=${page.nextCursor}\n`,
+    );
   return 0;
 }
 

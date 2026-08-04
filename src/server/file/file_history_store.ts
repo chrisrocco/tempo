@@ -38,6 +38,8 @@ interface PersistedMeta {
   /** Absent in data dirs written before routing existed; reads as the default. */
   taskQueue?: string;
   status: ExecutionStatus;
+  /** Absent in data dirs written before creation time was recorded. */
+  createdAt?: number;
   result?: unknown;
   failureMessage?: string;
   /** Absent in data dirs written before stacks were carried; reads as undefined. */
@@ -112,6 +114,7 @@ export class FileHistoryStore implements HistoryStore {
       name,
       args,
       taskQueue,
+      createdAt: Date.now(),
       history: [],
       version: 0,
       status: 'running',
@@ -282,6 +285,7 @@ export class FileHistoryStore implements HistoryStore {
       args: rec.args,
       taskQueue: rec.taskQueue,
       status: rec.status,
+      createdAt: rec.createdAt,
       result: rec.result,
       failureMessage:
         rec.failure !== undefined ? errorMessage(rec.failure) : undefined,
@@ -326,6 +330,12 @@ export class FileHistoryStore implements HistoryStore {
         name: meta.name,
         args: meta.args,
         taskQueue: meta.taskQueue ?? DEFAULT_TASK_QUEUE,
+        // A data dir written before creation time was recorded still has to sort
+        // somewhere, and the first event's timestamp is the closest true answer
+        // available. Falling back to 0 rather than to `now` matters: `now` would
+        // make every old execution look brand new on the first boot after an
+        // upgrade, and shuffle the listing on every boot after that.
+        createdAt: meta.createdAt ?? history.find((e) => e.ts)?.ts ?? 0,
         history,
         version: history.length,
         status: meta.status,

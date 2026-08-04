@@ -29,7 +29,7 @@ function fakeService(overrides: Partial<WorkflowService>): WorkflowService {
     getResult: async () => undefined,
     getStatus: () => 'running',
     describeExecution: async () => undefined,
-    listExecutions: async () => [],
+    listExecutions: async () => ({executions: []}),
     pollWorkflowTask: async () => undefined,
     completeWorkflowTask: async () => {},
     failWorkflowTask: async () => {},

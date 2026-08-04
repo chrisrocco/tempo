@@ -17,8 +17,9 @@
 import type {
   ActivityResult,
   ExecutionDetail,
+  ExecutionFilter,
+  ExecutionPage,
   ExecutionStatus,
-  ExecutionSummary,
   LeasedActivityTask,
   RpcRequest,
   RpcResponse,
@@ -131,8 +132,8 @@ export function createRemoteService(
         })) as ExecutionDetail | null) ?? undefined
       );
     },
-    async listExecutions(): Promise<ExecutionSummary[]> {
-      return (await call({method: 'listExecutions'})) as ExecutionSummary[];
+    async listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage> {
+      return (await call({method: 'listExecutions', filter})) as ExecutionPage;
     },
     async pollWorkflowTask(
       taskQueue?: string,

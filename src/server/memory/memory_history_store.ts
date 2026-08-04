@@ -33,6 +33,7 @@ export class MemoryHistoryStore implements HistoryStore {
       name,
       args,
       taskQueue,
+      createdAt: Date.now(),
       history: [],
       version: 0,
       status: 'running',

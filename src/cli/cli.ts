@@ -67,7 +67,8 @@ Usage:
       End an execution outright, without replaying it. Use this when cancel
       cannot land — a workflow whose replay is what fails.
 
-  tempo list [--json] [--stuck]    Every execution the server knows about.
+  tempo list [--json] [--stuck] [--name=] [--queue=] [--limit=N] [--cursor=]
+      Executions the server knows about, newest first.
       Rows the engine cannot replay are marked STUCK with the failure count
       and reason; --stuck shows only those. A stuck execution still reads
       "running" — it is live and retrying, not settled.
@@ -160,7 +161,15 @@ async function dispatch(argv: string[]): Promise<number> {
         rest[1] ?? 'terminated via tempo',
       );
     case 'list':
-      return listExecutions(serverUrl, flags.has('json'), flags.has('stuck'));
+      return listExecutions(serverUrl, flags.has('json'), {
+        // Only send what was asked for: an explicit `stuck: false` would mean
+        // "only healthy ones", which is not what omitting the flag means.
+        ...(flags.has('stuck') ? {stuck: true} : {}),
+        ...(flags.get('name') ? {name: flags.get('name')} : {}),
+        ...(flags.get('queue') ? {taskQueue: flags.get('queue')} : {}),
+        ...(flags.get('limit') ? {limit: Number(flags.get('limit'))} : {}),
+        ...(flags.get('cursor') ? {cursor: flags.get('cursor')} : {}),
+      });
     case 'describe':
       return describeExecution(
         serverUrl,

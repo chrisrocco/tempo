@@ -61,7 +61,9 @@ class TempoApp extends LitElement {
    */
   private async refresh(): Promise<void> {
     try {
-      this.executions = await client.listExecutions();
+      // A page, not everything: the server caps it, and a dashboard polling
+      // every couple of seconds is exactly the caller that cap exists for.
+      this.executions = (await client.listExecutions({limit: 50})).executions;
       this.error = undefined;
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);

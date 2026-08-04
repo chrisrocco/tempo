@@ -37,6 +37,8 @@ export function summarizeExecution(rec: ExecutionRecord): ExecutionSummary {
     name: rec.name,
     status: rec.status,
     historyLength: rec.history.length,
+    taskQueue: rec.taskQueue,
+    createdAt: rec.createdAt,
     taskFailures: rec.taskFailures,
     lastTaskFailure: rec.lastTaskFailure,
   };

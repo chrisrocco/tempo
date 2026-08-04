@@ -18,7 +18,8 @@
 
 import type {
   ExecutionDetail,
-  ExecutionSummary,
+  ExecutionFilter,
+  ExecutionPage,
   StartWorkflowOptions,
 } from '../src/protocol/service';
 
@@ -46,8 +47,8 @@ async function call<T>(body: unknown): Promise<T> {
 }
 
 export const client = {
-  listExecutions(): Promise<ExecutionSummary[]> {
-    return call<ExecutionSummary[]>({method: 'listExecutions'});
+  listExecutions(filter: ExecutionFilter = {}): Promise<ExecutionPage> {
+    return call<ExecutionPage>({method: 'listExecutions', filter});
   },
 
   /** `null` rather than undefined on the wire — an unknown id, not an error. */

@@ -24,6 +24,14 @@ export interface ExecutionRecord {
    * history, and its activities inherit it.
    */
   taskQueue: string;
+  /**
+   * When the execution was created, epoch ms. Distinct from the first history
+   * event: an execution exists, and can be listed, before it has been replayed
+   * once. It is also the sort key a paged listing needs — a cursor is only
+   * meaningful over a total order, and neither insertion order nor whatever a
+   * directory read returns is one.
+   */
+  createdAt: number;
   history: HistoryEvent[];
   version: number;
   status: ExecutionStatus;
