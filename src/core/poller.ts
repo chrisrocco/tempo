@@ -75,8 +75,16 @@ export interface PollForeverOptions<T, S, Q> {
    */
   onRemoved?: (key: string) => void;
   /**
-   * The arguments to carry into the next run when history rolls over. Pass the
-   * poller's own arguments; omitting them restarts it with none.
+   * What the next run should be started with when history rolls over.
+   *
+   * Defaults to **this run's own arguments**, which is almost always right: a
+   * poller rolls over to keep polling the same thing, so the next run wants the
+   * parameters this one had. Set it only to deliberately change them.
+   *
+   * The default matters more than it looks. Rolling over with no arguments
+   * restarts `monitorHotlist(hotlist)` as `monitorHotlist(undefined)` — the
+   * workflow keeps running, the poll returns nothing or throws, and the failure
+   * appears one rollover after the code that caused it.
    */
   args?: unknown[];
 }
@@ -88,6 +96,16 @@ export interface PollForeverOptions<T, S, Q> {
  */
 function changed(before: unknown, after: unknown): boolean {
   return JSON.stringify(before) !== JSON.stringify(after);
+}
+
+/**
+ * The arguments the next run should get: the caller's override, else the ones
+ * this run was given. Read through `workflowInfo` at the moment of the rollover
+ * rather than captured once, so a run that was itself started by a rollover
+ * passes on what it actually received.
+ */
+function carryArgs(options: {args?: unknown[]}): unknown[] {
+  return options.args ?? workflowInfo().args;
 }
 
 /**
@@ -121,9 +139,9 @@ export async function pollForever<T, S, Q>(
     // has grown enough from the polling itself to be worth shedding.
     if (changed(state, next)) {
       setCarryover(STATE_KEY, next);
-      await continueAsNew(...(options.args ?? []));
+      await continueAsNew(...carryArgs(options));
     }
     if (workflowInfo().continueAsNewSuggested)
-      await continueAsNew(...(options.args ?? []));
+      await continueAsNew(...carryArgs(options));
   }
 }

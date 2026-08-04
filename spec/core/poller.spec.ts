@@ -222,6 +222,48 @@ describe('pollForever', () => {
     rt.shutdown();
   });
 
+  /**
+   * With no `args` given, the next run gets what this one was started with.
+   *
+   * The old default — no arguments at all — restarted `monitor(label)` as
+   * `monitor(undefined)`. The execution stays healthy-looking, so the damage
+   * shows up as a poller that has quietly stopped watching anything, one
+   * rollover after the omission that caused it.
+   *
+   * The feed keeps changing so this rolls over repeatedly: the arguments have to
+   * survive being passed on by a run that was itself started by a rollover, not
+   * just the first one.
+   */
+  it('defaults to carrying the arguments this run was given', async () => {
+    const store = new MemoryHistoryStore();
+    const feed: Item[] = [];
+    let n = 0;
+    const rt = createLocalRuntime({historyStore: store})
+      .registerActivity('fetch', () => {
+        feed.push({id: `i${n}`, seq: ++n}); // something new every cycle
+        return [...feed];
+      })
+      .registerWorkflow('monitor', async (label: string) =>
+        pollForever<Item, string[], undefined>({
+          everyMs: 5,
+          // no `args` — the point of the test
+          differ: byId((item) => item.id),
+          poll: () => runActivity<Item[]>('fetch'),
+          onAdded: () => {},
+        }),
+      );
+
+    const handle = rt.start('monitor', ['hotlist'], {workflowId: 'mon'});
+    await wait(250);
+    handle.terminate('done');
+    await wait(20);
+
+    const rec = await store.get('mon');
+    expect(rec!.runId).toBeGreaterThan(1); // several rollovers, not just one
+    expect(rec!.args).toEqual(['hotlist']); // still monitoring what it was told to
+    rt.shutdown();
+  });
+
   it('carries the poller arguments into the run it rolls over into', async () => {
     const store = new MemoryHistoryStore();
     const feed: Item[] = [{id: 'a', seq: 1}];
