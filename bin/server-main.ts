@@ -4,7 +4,10 @@
  * RPC and owns the durable state + timers. Workflow/activity workers connect to it.
  *
  * Env:
- *   PORT               listen port (0 = random). Prints `LISTENING <port>` once bound.
+ *   HOST               interface to bind (default `127.0.0.1`). `0.0.0.0` accepts
+ *                      connections from other machines — see the warning below.
+ *   PORT               listen port (0 = random). Prints `LISTENING <port> <host>`
+ *                      once bound.
  *   DATA_DIR           if set, persist to a filesystem HistoryStore at this path and
  *                      `resume()` running executions on boot. If unset, in-memory
  *                      (fast, non-durable) — the default used by tests.
@@ -20,9 +23,13 @@
  *
  * ## Operational notes
  *
- * - **Binds `127.0.0.1`.** Right for a single VM with everything co-located. To
- *   put workers on other machines, change the bind to `0.0.0.0` and keep the port
- *   on a private network — the RPC has no auth and no TLS (see rpc_server.ts).
+ * - **Binds `127.0.0.1` by default.** Right for a single VM with everything
+ *   co-located, and the right default because it is the only one that is safe
+ *   without further thought. Set `HOST=0.0.0.0` to put workers or an external CLI
+ *   on other machines — but the RPC has **no auth and no TLS** (see
+ *   rpc_server.ts), so anything that can reach the port can start, signal, and
+ *   terminate executions. Keep it on a private network or behind a proxy that
+ *   terminates TLS and authenticates; do not expose it to the internet.
  * - **One server per data dir.** The `DATA_DIR` lockfile enforces it. A crashed
  *   server's stale lock self-heals: the next boot checks whether the recorded pid
  *   is still alive and reclaims it, so a supervisor with `Restart=always` will not
@@ -39,6 +46,9 @@ import {FileHistoryStore} from '../src';
 import {createJsonLogger} from '../src/server';
 import {createRpcServer, createServerHost} from '../src/services';
 
+// Named `bindHost`, not `host`: `main` binds a local `host` to the server host
+// object, which would shadow this and silently pass an object to `listen`.
+const bindHost = process.env['HOST'] ?? '127.0.0.1';
 const port = process.env['PORT'] ? Number(process.env['PORT']) : 0;
 const activityLeaseMs = process.env['ACTIVITY_LEASE_MS']
   ? Number(process.env['ACTIVITY_LEASE_MS'])
@@ -58,10 +68,12 @@ async function main(): Promise<void> {
   if (store) await host.resume(); // re-arm timers, re-dispatch pending work, re-drive running execs
 
   const server = createRpcServer(host);
-  server.listen(port, '127.0.0.1', () => {
+  server.listen(port, bindHost, () => {
     const addr = server.address() as AddressInfo;
-    // Readiness line — the port it actually bound (so a supervisor/test can connect).
-    console.log(`LISTENING ${addr.port}`);
+    // Readiness line — the port it actually bound (so a supervisor/test can
+    // connect). The host is appended rather than substituted: existing readers
+    // match `LISTENING (\d+)`, and that keeps matching.
+    console.log(`LISTENING ${addr.port} ${addr.address}`);
   });
 
   function shutdown(): void {

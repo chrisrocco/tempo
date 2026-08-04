@@ -101,6 +101,30 @@ describe('tempo CLI', () => {
     expect(err).toContain('activity exploded');
   }, 60000);
 
+  /**
+   * `--host` has to reach two places that are easy to change independently: the
+   * server's bind, and the URL `up` hands the worker. Binding IPv6 loopback
+   * proves both — the worker only connects if the URL was built from the address
+   * actually bound *and* bracketed, and it stays off any external interface, so
+   * this does not trip a firewall prompt in CI the way 0.0.0.0 would.
+   */
+  it('binds the host it is given, and the worker still connects', async () => {
+    const {code, out} = await runTempo([
+      'up',
+      WORKER,
+      '--host=::1',
+      '--port=0',
+      '--run=greeter',
+      'world',
+    ]);
+
+    expect(code).toBe(0);
+    expect(out).toContain('http://[::1]:');
+    expect(out).toContain('Hello, world!');
+    // Loopback is private, so the exposure warning must stay quiet here.
+    expect(out).not.toContain('reachable from other machines');
+  }, 60000);
+
   // A workflow started without --wait returns its id immediately; `tempo result`
   // fetches the outcome afterwards, which is the fire-and-forget shape.
   it('starts a workflow detached and fetches its result separately', async () => {

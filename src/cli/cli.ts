@@ -44,8 +44,11 @@ import {up} from './up';
 const USAGE = `tempo — run and drive workflows
 
 Usage:
-  tempo up <entry> [--port=N] [--data-dir=PATH]
+  tempo up <entry> [--host=ADDR] [--port=N] [--data-dir=PATH]
       Run a server and worker in the foreground. Ctrl-C to stop.
+      --host is the interface the server binds; default 127.0.0.1. Use
+      0.0.0.0 to let workers or an external CLI connect from other machines.
+      The RPC has no auth or TLS, so keep that on a private network.
 
   tempo up <entry> --run=<workflow> [args...] [--task-queue=NAME]
       One-shot: bring up a server and worker, run one workflow to completion,
@@ -115,6 +118,7 @@ async function dispatch(argv: string[]): Promise<number> {
       const run = flags.get('run');
       return up({
         entry: required(rest[0], 'worker entrypoint'),
+        host: flags.get('host') || undefined,
         port: port === undefined ? undefined : Number(port),
         dataDir: flags.get('data-dir') || undefined,
         // Positionals after the entry are the workflow's arguments, parsed the

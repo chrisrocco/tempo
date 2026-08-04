@@ -45,9 +45,45 @@ export interface RunRequest {
   taskQueue?: string;
 }
 
+/**
+ * Turn a bind address into one a client can dial.
+ *
+ * A wildcard bind is not an address: `0.0.0.0` means "every IPv4 interface", and
+ * connecting to it is unspecified — it happens to reach localhost on Windows and
+ * Linux, and fails on some other stacks. So the wildcards map to their loopback,
+ * and every other host is already dialable and passes through. IPv6 literals get
+ * bracketed, since `http://::1:7233` has no unambiguous reading.
+ */
+export function connectableHost(bindHost: string): string {
+  const host =
+    bindHost === '0.0.0.0' || bindHost === ''
+      ? '127.0.0.1'
+      : bindHost === '::' || bindHost === '::0'
+        ? '::1'
+        : bindHost;
+  return host.includes(':') ? `[${host}]` : host;
+}
+
+/**
+ * Can only this machine reach a server bound here?
+ *
+ * Drives the exposure warning, so it has to be about reachability rather than
+ * about being the default: `::1` is not `127.0.0.1` but is just as private, and
+ * warning about it would train people to ignore the warning that matters. The
+ * whole `127.0.0.0/8` block is loopback, not just `.0.1`.
+ */
+export function isLoopbackHost(host: string): boolean {
+  return host === '::1' || host === 'localhost' || host.startsWith('127.');
+}
+
 export interface UpOptions {
   /** Path to the worker entrypoint or built binary. */
   entry: string;
+  /**
+   * Interface for the server to bind. Defaults to `127.0.0.1`. `0.0.0.0` lets
+   * other machines connect — the RPC has no auth, so keep it off public networks.
+   */
+  host?: string;
   /** Server listen port. 0 (the default) takes any free port. */
   port?: number;
   /** Persist history here; omit for an in-memory server. */
@@ -78,6 +114,7 @@ export async function up(options: UpOptions): Promise<number> {
 
   const server = spawnEntry(SERVER_ENTRY, {
     env: {
+      HOST: options.host,
       PORT: String(options.port ?? 0),
       DATA_DIR: options.dataDir,
     },
@@ -86,9 +123,19 @@ export async function up(options: UpOptions): Promise<number> {
 
   let worker: ChildProcess | undefined;
   try {
-    const [, port] = await waitForLine(server, /LISTENING (\d+)/);
-    const serverUrl = `http://127.0.0.1:${port}`;
+    // The readiness line reports what it actually bound, which is the only
+    // reliable source: the port may have been 0, and the host may have been
+    // defaulted by the server rather than passed here.
+    const [, port, boundHost] = await waitForLine(
+      server,
+      /LISTENING (\d+) (\S+)/,
+    );
+    const serverUrl = `http://${connectableHost(boundHost!)}:${port}`;
     process.stdout.write(`tempo: server listening on ${serverUrl}\n`);
+    if (!isLoopbackHost(boundHost!))
+      process.stdout.write(
+        `tempo: bound ${boundHost} — reachable from other machines, and the RPC has no auth or TLS\n`,
+      );
 
     worker = spawnEntry(options.entry, {
       env: {TEMPO_SERVER_URL: serverUrl, TEMPO_ROLE: undefined},
