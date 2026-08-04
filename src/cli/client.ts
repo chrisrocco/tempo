@@ -124,8 +124,32 @@ export async function terminateWorkflow(
   return 0;
 }
 
-/** One history event as a line: the type, its seq if it has one, and its payload. */
-function formatEvent(ev: HistoryEvent, index: number): string {
+/**
+ * How long after the first event this one landed.
+ *
+ * Relative rather than absolute, because the question a history answers is
+ * "what took the time", and a column of near-identical ISO strings answers it
+ * badly. `first` is the execution's own start, so the numbers are readable
+ * whether it ran last minute or last month.
+ */
+function formatOffset(
+  ts: number | undefined,
+  first: number | undefined,
+): string {
+  if (ts === undefined || first === undefined) return '        '; // pre-`ts` history
+  const seconds = (ts - first) / 1000;
+  return `${seconds < 10 ? seconds.toFixed(2) : seconds.toFixed(1)}s`.padStart(
+    7,
+  );
+}
+
+/**
+ * One history event as a line: when, the type, its seq if it has one, and its
+ * payload. `first` is the execution's earliest timestamp, so the time column
+ * reads as an elapsed offset.
+ */
+function formatEvent(ev: HistoryEvent, index: number, first?: number): string {
+  const at = `${formatOffset(ev.ts, first)} `;
   const seq = 'seq' in ev ? ` seq=${ev.seq}` : '';
   const detail =
     ev.type === 'activityScheduled'
@@ -139,7 +163,7 @@ function formatEvent(ev: HistoryEvent, index: number): string {
             : ev.type === 'activityFailed' || ev.type === 'childFailed'
               ? ` ${ev.error}`
               : '';
-  return `  ${String(index).padStart(3)}  ${ev.type}${seq}${detail}`;
+  return `  ${at}${String(index).padStart(3)}  ${ev.type}${seq}${detail}`;
 }
 
 /**
@@ -212,7 +236,8 @@ export async function describeExecution(
   }
   out.push('', 'waiting on:', ...formatPending(detail));
   out.push('', `history (${detail.historyLength}):`);
-  out.push(...detail.history.map(formatEvent));
+  const firstTs = detail.history.find((e) => e.ts !== undefined)?.ts;
+  out.push(...detail.history.map((e, i) => formatEvent(e, i, firstTs)));
   process.stdout.write(`${out.join('\n')}\n`);
   return 0;
 }

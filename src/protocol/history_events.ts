@@ -9,8 +9,31 @@
 
 import type {ActivityOptions} from './activity_options';
 
+/**
+ * What every recorded event carries, whatever kind it is.
+ *
+ * `ts` is stamped by the server at the moment the event is appended, once, and
+ * is thereafter part of the durable record — so replaying the same history
+ * yields the same timestamps, and nothing derived from it can diverge. It is the
+ * server's clock, not any worker's: workers are stateless and interchangeable,
+ * and their clocks are not.
+ *
+ * Optional because histories written before this field existed have none.
+ * Readers must treat a missing `ts` as "unknown", never as zero — an execution
+ * that predates this change is not one that happened in 1970.
+ *
+ * **Deliberately not exposed to workflow code.** A recorded timestamp is
+ * deterministic, so a `workflow.now()` built on it would be sound, but that is a
+ * primitive with its own design (which event's clock does a bare `now()` read?)
+ * rather than a field to reach through `applyEvent` for.
+ */
+export interface HistoryEventBase {
+  /** Epoch milliseconds, from the server, at append time. */
+  ts?: number;
+}
+
 /** Fields common to events that complete a specific command. */
-export interface CompletionEventBase {
+export interface CompletionEventBase extends HistoryEventBase {
   /** The seq of the command this event completes. */
   seq: number;
 }
@@ -55,7 +78,7 @@ export interface ChildFailedEvent extends CompletionEventBase {
  * re-emitted command from re-dispatching, and they are the "scheduled before
  * running" record crash recovery reconstructs from.
  */
-export interface ActivityScheduledEvent {
+export interface ActivityScheduledEvent extends HistoryEventBase {
   type: 'activityScheduled';
   seq: number;
   name: string;
@@ -70,7 +93,7 @@ export interface ActivityScheduledEvent {
  * read from the host clock at replay. Not workflow-visible; `sleep`
  * still resolves on the `timerFired` completion.
  */
-export interface TimerStartedEvent {
+export interface TimerStartedEvent extends HistoryEventBase {
   type: 'timerStarted';
   seq: number;
   fireAt: number;
@@ -88,7 +111,7 @@ export interface TimerStartedEvent {
  * `childFailed` keyed by the same seq, while a detached child never reports back
  * at all. Recovery must not synthesize a completion for one that is never coming.
  */
-export interface ChildStartedEvent {
+export interface ChildStartedEvent extends HistoryEventBase {
   type: 'childStarted';
   seq: number;
   childId: string;
@@ -97,7 +120,7 @@ export interface ChildStartedEvent {
 }
 
 /** Externally injected; not tied to a command, so it carries no seq. */
-export interface SignalEvent {
+export interface SignalEvent extends HistoryEventBase {
   type: 'signal';
   name: string;
   payload: unknown;
@@ -110,7 +133,7 @@ export interface SignalEvent {
  * fixed in history and replay stays deterministic — cancellation is an event, not
  * a side effect.
  */
-export interface CancelRequestedEvent {
+export interface CancelRequestedEvent extends HistoryEventBase {
   type: 'cancelRequested';
 }
 
