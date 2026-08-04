@@ -64,7 +64,10 @@ Usage:
       End an execution outright, without replaying it. Use this when cancel
       cannot land — a workflow whose replay is what fails.
 
-  tempo list [--json]              Every execution the server knows about.
+  tempo list [--json] [--stuck]    Every execution the server knows about.
+      Rows the engine cannot replay are marked STUCK with the failure count
+      and reason; --stuck shows only those. A stuck execution still reads
+      "running" — it is live and retrying, not settled.
   tempo describe <workflow-id> [--json]
       Status, what the execution is waiting on, and its history.
 
@@ -151,7 +154,7 @@ async function dispatch(argv: string[]): Promise<number> {
         rest[1] ?? 'terminated via tempo',
       );
     case 'list':
-      return listExecutions(serverUrl, flags.has('json'));
+      return listExecutions(serverUrl, flags.has('json'), flags.has('stuck'));
     case 'describe':
       return describeExecution(
         serverUrl,

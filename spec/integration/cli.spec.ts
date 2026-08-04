@@ -20,6 +20,10 @@ function tempo(args: string[]): ChildProcess {
   });
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
 /** Run a CLI command to completion, capturing what it printed. */
 function runTempo(
   args: string[],
@@ -170,6 +174,60 @@ describe('tempo CLI', () => {
       expect(out).toContain('WORKFLOW ID');
       expect(out).toContain('greeter');
       expect(out).toContain('completed');
+    } finally {
+      await stopChild(server);
+    }
+  }, 60000);
+
+  /**
+   * The operator's actual question — "which of these is broken?" — against a
+   * listing containing both kinds of `running`. A typo'd workflow name is
+   * retried forever by design, so it sits in the list looking exactly like a
+   * healthy execution unless the row says otherwise.
+   */
+  it('marks stuck executions in the listing, and filters to them', async () => {
+    const server = tempo(['up', WORKER, '--port=0']);
+    forwardOutput(server, 'up');
+    try {
+      const [, url] = await waitForLine(
+        server,
+        /server listening on (\S+)/,
+        30000,
+      );
+      await waitForLine(server, /worker greeter ready/, 30000);
+
+      await runTempo([
+        'start',
+        'greeter',
+        'world',
+        '--wait',
+        `--server=${url}`,
+      ]);
+      const typo = await runTempo([
+        'start',
+        'greter',
+        'world',
+        `--server=${url}`,
+      ]);
+      const stuckId = typo.out.trim();
+      await wait(2000); // let the task fail at least once
+
+      const listed = await runTempo(['list', `--server=${url}`]);
+      expect(listed.code).toBe(0);
+      expect(listed.out).toContain('STUCK');
+      expect(listed.out).toContain('no workflow registered as greter');
+      expect(listed.out).toContain('greeter'); // the healthy one is still listed
+
+      const filtered = await runTempo(['list', '--stuck', `--server=${url}`]);
+      expect(filtered.code).toBe(0);
+      expect(filtered.out).toContain(stuckId);
+      // The completed execution must not appear — that is the point of --stuck.
+      expect(filtered.out).not.toContain('completed');
+
+      // And terminating it clears the listing, so the filter tracks reality.
+      await runTempo(['terminate', stuckId, 'typo', `--server=${url}`]);
+      const after = await runTempo(['list', '--stuck', `--server=${url}`]);
+      expect(after.out).toContain('no stuck executions');
     } finally {
       await stopChild(server);
     }
