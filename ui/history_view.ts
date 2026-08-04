@@ -38,6 +38,15 @@ export interface EventView {
   payload?: unknown;
   /** A stack, for the one event kind that carries one. */
   stack?: string;
+  /**
+   * A child execution this event refers to, when the event names one. The
+   * timeline renders it as a link — which is the whole reason `childId` is
+   * denormalized onto the outcome events (see `ChildCompletedEvent`).
+   *
+   * Absent on history written before that field existed, so the row degrades to
+   * plain text rather than to a link that goes nowhere.
+   */
+  childId?: string;
 }
 
 /**
@@ -72,13 +81,23 @@ export function describeEvent(event: HistoryEvent): EventView {
       return {label: 'timer fired', tone: 'accent'};
     case 'childStarted':
       return {
-        label: `${event.detached ? 'detached child' : 'child'} ${event.childId} started`,
+        label: `${event.detached ? 'detached child' : 'child'} started`,
         tone: 'muted',
+        childId: event.childId,
       };
     case 'childCompleted':
-      return {label: 'child completed', tone: 'ok', payload: event.result};
+      return {
+        label: 'child completed',
+        tone: 'ok',
+        payload: event.result,
+        childId: event.childId,
+      };
     case 'childFailed':
-      return {label: `child failed — ${event.error}`, tone: 'danger'};
+      return {
+        label: `child failed — ${event.error}`,
+        tone: 'danger',
+        childId: event.childId,
+      };
     case 'signal':
       return {
         label: `signal ${event.name}`,

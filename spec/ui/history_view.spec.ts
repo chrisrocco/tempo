@@ -61,6 +61,28 @@ describe('dashboard history — reading an event', () => {
     expect(blocking.label).not.toContain('detached');
   });
 
+  it('carries the child id on an outcome, so the row can link to the child', () => {
+    // The reason `childId` is denormalized onto the outcome: a long history
+    // pages, and the `childStarted` that named this child may not be loaded.
+    const failed = describeEvent({
+      type: 'childFailed',
+      seq: 4,
+      error: 'child blew up',
+      childId: 'item-7',
+    });
+    expect(failed.childId).toBe('item-7');
+    expect(failed.tone).toBe('danger');
+  });
+
+  it('leaves the child id unset on history written before it was recorded', () => {
+    const old = describeEvent({
+      type: 'childFailed',
+      seq: 4,
+      error: 'child blew up',
+    });
+    expect(old.childId).toBeUndefined();
+  });
+
   it('shows a signal payload, which is the reason to look at a signal', () => {
     const view = describeEvent({
       type: 'signal',

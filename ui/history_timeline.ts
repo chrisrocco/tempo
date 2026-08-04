@@ -27,6 +27,7 @@ import {
   formatDuration,
   markerTimes,
 } from './history_view.js';
+import {executionHref} from './routes.js';
 import {
   absoluteTime,
   heading,
@@ -71,6 +72,11 @@ export class HistoryTimeline extends LitElement {
       }
       .label {
         font-size: 13px;
+      }
+      .child {
+        font-family: var(--mono);
+        font-size: 12px;
+        margin-left: 6px;
       }
       .ok {
         color: var(--ok);
@@ -187,7 +193,16 @@ export class HistoryTimeline extends LitElement {
         <td class="seq">${this.offset + index}</td>
         <td class="seq">${'seq' in event ? event.seq : ''}</td>
         <td>
-          <div class="label ${view.tone}">${view.label}</div>
+          <div class="label ${view.tone}">
+            ${view.label}
+            ${
+              view.childId === undefined
+                ? nothing
+                : html`<a class="child" href=${executionHref(view.childId)}
+                  >${view.childId}</a
+                >`
+            }
+          </div>
           ${
             view.payload === undefined
               ? nothing

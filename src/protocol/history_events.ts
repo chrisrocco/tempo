@@ -58,14 +58,33 @@ export interface TimerFiredEvent extends CompletionEventBase {
   type: 'timerFired';
 }
 
+/**
+ * `childId` is denormalized onto both child outcomes even though the same
+ * `seq` already appears on the `childStarted` that dispatched it.
+ *
+ * Not redundancy: history is *paged* (see `MAX_HISTORY_PAGE`), and a child that
+ * ran for a while has its dispatch and its outcome hundreds of events apart. A
+ * reader holding one page can pair them only if both carry the id, so without
+ * this a failed child is a row saying "child failed" with no way to reach the
+ * child — which is exactly the case that most needs reaching, since a failed
+ * child permanently burns its workflow id and is never retried.
+ *
+ * Optional because histories written before this field existed have none.
+ * Readers must treat a missing `childId` as "unknown", never as absent — the
+ * child existed either way.
+ */
 export interface ChildCompletedEvent extends CompletionEventBase {
   type: 'childCompleted';
   result: unknown;
+  /** The child's workflow id — see the note above. */
+  childId?: string;
 }
 
 export interface ChildFailedEvent extends CompletionEventBase {
   type: 'childFailed';
   error: string;
+  /** The child's workflow id — see the note above. */
+  childId?: string;
 }
 
 /**

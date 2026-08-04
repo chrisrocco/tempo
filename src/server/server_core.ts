@@ -307,9 +307,22 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     seq: number,
     child: ExecutionRecord,
   ): HistoryEvent {
+    // The id is carried on the outcome as well as on the `childStarted` that
+    // dispatched it, so a reader holding one page of a long history can still
+    // reach the child — see `ChildCompletedEvent`.
     return child.status === 'completed'
-      ? {type: 'childCompleted', seq, result: child.result}
-      : {type: 'childFailed', seq, error: errorMessage(child.failure)};
+      ? {
+          type: 'childCompleted',
+          seq,
+          result: child.result,
+          childId: child.workflowId,
+        }
+      : {
+          type: 'childFailed',
+          seq,
+          error: errorMessage(child.failure),
+          childId: child.workflowId,
+        };
   }
 
   // Wake an execution: it needs another workflow task. The queue coalesces, so a
