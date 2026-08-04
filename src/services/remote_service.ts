@@ -16,6 +16,7 @@
 
 import type {
   ActivityResult,
+  DescribeOptions,
   ExecutionDetail,
   ExecutionFilter,
   ExecutionPage,
@@ -124,11 +125,13 @@ export function createRemoteService(
     },
     async describeExecution(
       workflowId: string,
+      options?: DescribeOptions,
     ): Promise<ExecutionDetail | undefined> {
       return (
         ((await call({
           method: 'describeExecution',
           workflowId,
+          options,
         })) as ExecutionDetail | null) ?? undefined
       );
     },

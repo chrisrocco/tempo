@@ -6,6 +6,7 @@
  */
 
 import type {
+  DescribeOptions,
   ExecutionFilter,
   ActivityResult,
   ExecutionStatus,
@@ -39,7 +40,11 @@ export type RpcRequest =
   | {method: 'cancel'; workflowId: string}
   | {method: 'terminate'; workflowId: string; reason: string}
   | {method: 'getOutcome'; workflowId: string}
-  | {method: 'describeExecution'; workflowId: string}
+  | {
+      method: 'describeExecution';
+      workflowId: string;
+      options?: DescribeOptions;
+    }
   | {method: 'listExecutions'; filter?: ExecutionFilter}
   | {method: 'pollWorkflowTask'; taskQueue?: string}
   | {

@@ -21,7 +21,12 @@
  * the failure becomes a message.
  */
 
-import type {ExecutionDetail, ExecutionSummary} from '../protocol';
+import {
+  MAX_HISTORY_PAGE,
+  type DescribeOptions,
+  type ExecutionDetail,
+  type ExecutionSummary,
+} from '../protocol';
 import {pendingWork} from './pending_work';
 import type {ExecutionRecord} from './ports/history_store';
 
@@ -49,12 +54,40 @@ export function summarizeExecution(rec: ExecutionRecord): ExecutionSummary {
  * History is copied — a caller must not be able to mutate the store's array
  * through a view of it, and `MemoryHistoryStore` hands back live references.
  */
-export function describeExecution(rec: ExecutionRecord): ExecutionDetail {
+/**
+ * Where a history page starts and ends.
+ *
+ * The default — the *last* page rather than the first — is the one decision
+ * here. An execution long enough to need paging is long enough that its
+ * beginning is rarely the interesting part: a wedged poller's useful events are
+ * the most recent ones. Clamped rather than validated, because an offset past
+ * the end is a caller paging off the end of a history that has since rolled
+ * over, and the useful answer to that is an empty page rather than an error.
+ */
+function historyWindow(
+  total: number,
+  options: DescribeOptions,
+): {offset: number; limit: number} {
+  const limit = Math.min(options.limit ?? MAX_HISTORY_PAGE, MAX_HISTORY_PAGE);
+  const offset = options.fromEvent ?? Math.max(0, total - limit); // default: the tail
+  return {offset: Math.max(0, Math.min(offset, total)), limit};
+}
+
+export function describeExecution(
+  rec: ExecutionRecord,
+  options: DescribeOptions = {},
+): ExecutionDetail {
+  const {offset, limit} = historyWindow(rec.history.length, options);
+  // Derived from the WHOLE history, never the page. What an execution is
+  // waiting on is a fact about all of it: an activity scheduled at event 3 and
+  // still unanswered at event 4000 is exactly the case an operator is looking
+  // for, and a page-scoped derivation would report it as nothing pending.
   const pending = pendingWork(rec.history);
   return {
     ...summarizeExecution(rec),
     args: rec.args,
-    history: rec.history.slice(),
+    history: rec.history.slice(offset, offset + limit),
+    historyOffset: offset,
     pending: {
       activities: pending.activities.map((e) => ({seq: e.seq, name: e.name})),
       timers: pending.timers.map((e) => ({seq: e.seq, fireAt: e.fireAt})),

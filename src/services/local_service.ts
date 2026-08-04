@@ -298,9 +298,9 @@ export function createLocalService(
     // Inspection reads the store, not `statusMirror`: the mirror exists to make
     // `getStatus` synchronous, while these are already async and the store is the
     // truth. One fewer thing that can disagree with history.
-    async describeExecution(workflowId) {
+    async describeExecution(workflowId, options) {
       const rec = await historyStore.get(workflowId);
-      return rec && describeExecution(rec);
+      return rec && describeExecution(rec, options);
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
