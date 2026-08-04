@@ -48,6 +48,7 @@
  * not?" The answer names the layer.
  */
 
+export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
 export {condition} from './core/condition';
 export {CancelledFailure} from './core/errors';
 export {pollForever, type PollForeverOptions} from './core/poller';

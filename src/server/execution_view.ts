@@ -68,6 +68,7 @@ export function describeExecution(rec: ExecutionRecord): ExecutionDetail {
       rec.status === 'failed' || rec.status === 'terminated'
         ? errorMessage(rec.failure)
         : undefined,
+    carryover: rec.carryover,
     // Only for 'failed': a terminated execution's reason is an operator's
     // sentence, and there is no stack behind it to show.
     failureStack: rec.status === 'failed' ? rec.failureStack : undefined,

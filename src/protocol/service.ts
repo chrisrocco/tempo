@@ -105,6 +105,12 @@ export interface ExecutionDetail extends ExecutionSummary {
   failure?: string;
   /** The stack behind `failure`, when the failure originated somewhere that had one. */
   failureStack?: string;
+  /**
+   * The execution's carryover state. Shown because ambient is not the same as
+   * hidden: state that decides whether an item gets processed has to be legible
+   * to whoever is asking why it was not.
+   */
+  carryover?: Carryover;
 }
 
 /**
@@ -201,6 +207,23 @@ export interface LeasedActivityTask extends ActivityTask {
  * with the resulting commands + terminal state. The `token` identifies the task
  * on complete; `continueAsNewSuggested` is the server's history-growth hint.
  */
+/**
+ * State a workflow keeps across its own runs, without putting it in its
+ * signature — see `core/carryover.ts` for what it is for and what it is not.
+ */
+export type Carryover = Record<string, unknown>;
+
+/**
+ * A ceiling on the serialized carryover, enforced when a task reports back.
+ *
+ * Carryover is written on every workflow task and copied into every new run, so
+ * something that grows without bound there degrades quietly: a slowly fattening
+ * record, and rollovers that get more expensive the longer a workflow has been
+ * alive. The cap converts that into a loud, immediate failure naming the
+ * offending state, at the moment the code that grows it is first run.
+ */
+export const MAX_CARRYOVER_BYTES = 16 * 1024;
+
 export interface WorkflowTask {
   token: TaskToken;
   workflowId: string;
@@ -208,6 +231,8 @@ export interface WorkflowTask {
   args: unknown[];
   history: HistoryEvent[];
   continueAsNewSuggested: boolean;
+  /** What the previous task (or the previous run) left behind. */
+  carryover: Carryover;
 }
 
 /** What a workflow worker returns after replaying one workflow task. */
@@ -223,4 +248,11 @@ export interface WorkflowTaskResult {
    */
   failureStack?: string;
   commands: Command[];
+  /**
+   * Carryover as it stands at the end of this task. Returned on **every** task,
+   * not only on the one that rolls the run over: storing it per task is what
+   * makes it survive a crash and what makes `tempo describe` show the live value
+   * rather than the one from the last rollover.
+   */
+  carryover?: Carryover;
 }

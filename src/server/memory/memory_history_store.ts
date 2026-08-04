@@ -9,6 +9,7 @@
 
 import {
   DEFAULT_TASK_QUEUE,
+  type Carryover,
   type ExecutionStatus,
   type HistoryEvent,
 } from '../../protocol';
@@ -35,6 +36,7 @@ export class MemoryHistoryStore implements HistoryStore {
       history: [],
       version: 0,
       status: 'running',
+      carryover: {},
       taskFailures: 0,
       activityAttempts: {},
     });
@@ -102,6 +104,12 @@ export class MemoryHistoryStore implements HistoryStore {
     delete rec.activityAttempts[seq];
   }
 
+  async setCarryover(workflowId: string, carryover: Carryover): Promise<void> {
+    const rec = this.records.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.carryover = {...carryover};
+  }
+
   async setStatus(
     workflowId: string,
     status: ExecutionStatus,
@@ -127,5 +135,8 @@ export class MemoryHistoryStore implements HistoryStore {
     rec.version = 0;
     rec.runId += 1;
     // status stays 'running'; result/failure remain unset — this is not a close.
+    // `carryover` is deliberately untouched: surviving this reset is the entire
+    // point of it. Clearing it here would silently break every helper that keeps
+    // a cursor, and the symptom would be a poller starting over from nothing.
   }
 }

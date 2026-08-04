@@ -191,7 +191,7 @@ describe('terminate — the escape hatch cancel cannot be', () => {
     // The workflow can never apply it, because replaying is what throws.
     const task = await core.pollWorkflowTask();
     const reason = await worker
-      .replayTask(task!.name, task!.args, task!.history, false)
+      .replayTask(task!.name, task!.args, task!.history, false, {})
       .then(
         () => undefined,
         (e: unknown) => (e instanceof Error ? e.message : String(e)),
@@ -256,7 +256,7 @@ describe('recovering a wedged execution', () => {
     // test instead of being swallowed by the handler meant for the throw.
     const first = await core.pollWorkflowTask();
     const reason = await brokenWorker
-      .replayTask(first!.name, first!.args, first!.history, false)
+      .replayTask(first!.name, first!.args, first!.history, false, {})
       .then(
         () => undefined,
         (e: unknown) => (e instanceof Error ? e.message : String(e)),
@@ -274,6 +274,7 @@ describe('recovering a wedged execution', () => {
       retry!.args,
       retry!.history,
       false,
+      {},
     );
     await core.completeWorkflowTask(retry!.token, result);
 

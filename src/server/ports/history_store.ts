@@ -8,7 +8,7 @@
  * concurrent workers make it meaningful.
  */
 
-import type {ExecutionStatus, HistoryEvent} from '../../protocol';
+import type {Carryover, ExecutionStatus, HistoryEvent} from '../../protocol';
 
 /** One execution's durable state: its identity, history, and terminal outcome. */
 export interface ExecutionRecord {
@@ -35,6 +35,12 @@ export interface ExecutionRecord {
    * and an `Error` does not survive JSON with its stack attached.
    */
   failureStack?: string;
+  /**
+   * Workflow-owned state that survives continue-as-new. Unlike `history` it is
+   * not append-only and not replayed — it is the value the last workflow task
+   * reported, kept so the next one can start from it.
+   */
+  carryover: Carryover;
   /**
    * Consecutive workflow-task failures, reset by the next success. Durable
    * because the queues are not: a counter kept in the queue would reset on
@@ -122,6 +128,8 @@ export interface HistoryStore {
   recordActivityAttempt(workflowId: string, seq: number): Promise<number>;
   /** Forget an activity's attempts once it reaches a terminal event. */
   clearActivityAttempts(workflowId: string, seq: number): Promise<void>;
+  /** Replace the execution carryover with what the last workflow task reported. */
+  setCarryover(workflowId: string, carryover: Carryover): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */
   setStatus(
     workflowId: string,

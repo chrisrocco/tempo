@@ -23,6 +23,7 @@ import {promises as fs} from 'node:fs';
 import * as path from 'node:path';
 import {
   DEFAULT_TASK_QUEUE,
+  type Carryover,
   type ExecutionStatus,
   type HistoryEvent,
 } from '../../protocol';
@@ -46,6 +47,8 @@ interface PersistedMeta {
   lastTaskFailure?: string;
   /** Absent in data dirs written before server-decided retry; reads as empty. */
   activityAttempts?: Record<number, number>;
+  /** Absent in data dirs written before carryover existed; reads as empty. */
+  carryover?: Carryover;
 }
 
 /**
@@ -112,6 +115,7 @@ export class FileHistoryStore implements HistoryStore {
       history: [],
       version: 0,
       status: 'running',
+      carryover: {},
       taskFailures: 0,
       activityAttempts: {},
     };
@@ -202,6 +206,13 @@ export class FileHistoryStore implements HistoryStore {
     await this.enqueue(workflowId, () => this.writeMeta(rec));
   }
 
+  async setCarryover(workflowId: string, carryover: Carryover): Promise<void> {
+    const rec = this.cache.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.carryover = {...carryover};
+    await this.enqueue(workflowId, () => this.writeMeta(rec));
+  }
+
   async setStatus(
     workflowId: string,
     status: ExecutionStatus,
@@ -278,6 +289,7 @@ export class FileHistoryStore implements HistoryStore {
       taskFailures: rec.taskFailures,
       lastTaskFailure: rec.lastTaskFailure,
       activityAttempts: rec.activityAttempts,
+      carryover: rec.carryover,
     };
     const metaPath = path.join(this.execDir(rec.workflowId), 'meta.json');
     const tmp = `${metaPath}.tmp`;
@@ -326,6 +338,7 @@ export class FileHistoryStore implements HistoryStore {
         taskFailures: meta.taskFailures ?? 0,
         lastTaskFailure: meta.lastTaskFailure,
         activityAttempts: meta.activityAttempts ?? {},
+        carryover: meta.carryover ?? {},
       });
     }
   }

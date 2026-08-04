@@ -173,6 +173,7 @@ describe('late activity ack after redelivery', () => {
           task.args,
           task.history,
           task.continueAsNewSuggested,
+          task.carryover,
         );
         await core.applyWorkflowTaskResult(leased.workflowId, result);
       }

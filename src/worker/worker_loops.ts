@@ -138,6 +138,7 @@ export function runWorkflowWorker(
         task.args,
         task.history,
         task.continueAsNewSuggested,
+        task.carryover,
       );
     } catch (e) {
       // Replay itself broke — a nondeterminism error, or a throw from outside the

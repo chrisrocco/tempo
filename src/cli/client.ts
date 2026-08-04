@@ -189,6 +189,11 @@ export async function describeExecution(
   if (detail.result !== undefined)
     out.push(`result:    ${formatResult(detail.result)}`);
   if (detail.failure !== undefined) out.push(`failure:   ${detail.failure}`);
+  // Shown whenever there is any: carryover decides what a workflow does next
+  // (a poller's cursor, say), so "why did it skip that item" is unanswerable
+  // without it. Ambient state that an operator cannot see is hidden state.
+  if (detail.carryover && Object.keys(detail.carryover).length > 0)
+    out.push(`carryover: ${JSON.stringify(detail.carryover)}`);
   // The stack goes below the summary lines rather than inline: it is multi-line
   // and would wreck the aligned block above it.
   if (detail.failureStack !== undefined)
