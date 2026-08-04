@@ -4,8 +4,29 @@
  * `setTimeout`, so durations and firing *order* are honored (a 10ms timer fires
  * before a 40ms one). The table stands in for the durable store a real adapter
  * would persist; `recover()` re-arms it the way a server would sweep persisted
- * timers on boot. Handles are `unref`'d so a stray timer can never keep the
- * process alive.
+ * timers on boot.
+ *
+ * ## Handles are ref'd, deliberately
+ *
+ * A pending timer here means a workflow is waiting on it, which is outstanding
+ * work the process still owes someone — so it keeps the process alive, like any
+ * other unfinished operation.
+ *
+ * These used to be `unref`'d, on the reasoning that a stray timer must never
+ * hold a process open. That produced a worse failure than the one it prevented:
+ * a script that started a workflow and let it park exited **code 0 with no
+ * output**, having run none of the workflow past its first `sleep`. Silence and
+ * success are the two things a lost execution should never look like.
+ *
+ * The suite could not see it — Jasmine's runner holds the event loop open, so
+ * the timer always fired anyway. `spec/integration/process_lifetime.spec.ts`
+ * spawns a real process for exactly that reason.
+ *
+ * Nothing leaks: a fired timer stops holding the loop by itself, `cancel`
+ * clears one, and `stop` clears all of them. Timers that merely *bound* other
+ * work — activity attempt deadlines in `server_core` — stay unref'd, because
+ * they interrupt work rather than produce it, and the work they are watching
+ * holds the loop on its own.
  */
 
 import type {TimerService} from '../ports/timer_service';
@@ -15,10 +36,6 @@ interface TimerEntry {
   seq: number;
   fireAt: number; // epoch ms — what a durable adapter would persist
   handle?: ReturnType<typeof setTimeout>;
-}
-
-function unref(handle?: ReturnType<typeof setTimeout>): void {
-  (handle as unknown as {unref?: () => void})?.unref?.();
 }
 
 export class MemoryTimerService implements TimerService {
@@ -39,7 +56,6 @@ export class MemoryTimerService implements TimerService {
     const delay = Math.max(0, fireAt - Date.now()); // past-due => fire ASAP
     const entry: TimerEntry = {workflowId, seq, fireAt};
     entry.handle = setTimeout(() => this.fire(key), delay);
-    unref(entry.handle);
     this.timers.set(key, entry);
   }
 
@@ -57,7 +73,6 @@ export class MemoryTimerService implements TimerService {
       if (entry.handle) clearTimeout(entry.handle);
       const delay = Math.max(0, entry.fireAt - now); // past-due => 0 => fires ASAP
       entry.handle = setTimeout(() => this.fire(key), delay);
-      unref(entry.handle);
     }
   }
 

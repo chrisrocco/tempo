@@ -252,6 +252,9 @@ export function createServerHost(
     },
     shutdown() {
       timerService.stop();
+      // See `LocalService.shutdown`: workflow timers and retry backoffs live in
+      // different places and both are ref'd.
+      core.stop();
     },
   };
 }

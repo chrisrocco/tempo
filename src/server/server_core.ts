@@ -215,6 +215,17 @@ export interface ServerCore {
    * `worker_registry.ts`.
    */
   listQueues(): QueueWorkers[];
+  /**
+   * Drop the timers this core is holding, so a host can shut down.
+   *
+   * Needed because retry backoffs are **ref'd** — a pending retry is work the
+   * process still owes, and must not let it exit silently (see
+   * `scheduleProgress`). The cost of that is that an abandoned one would hold a
+   * process open, so a host has to be able to let go of them. Attempt deadlines
+   * are cleared too; they never held the loop, but leaving them armed after a
+   * shutdown would fire `abandonAttempt` against a stopped server.
+   */
+  stop(): void;
   // ── worker-facing seam (for out-of-process workers; see WorkflowService) ──
   pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
@@ -256,6 +267,31 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   // Not injected and not persisted: worker liveness is an observation this
   // process made, and must not outlive it. See `worker_registry.ts`.
   const workerRegistry = createWorkerRegistry();
+  // Backoffs that will produce work when they fire — a retrying workflow task,
+  // a retrying activity. Tracked so `stop` can clear them; see `scheduleProgress`.
+  const progressTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  /**
+   * Schedule something that will *make progress* when it fires.
+   *
+   * Ref'd, unlike the attempt deadlines below, and the distinction is the whole
+   * point: a pending retry means work this process still owes someone, so it
+   * keeps the process alive exactly as an in-flight activity would. These were
+   * unref'd, which let a script whose first attempt failed exit 0 before the
+   * retry ever ran — the same silent loss `MemoryTimerService` documents, and
+   * invisible for the same reason.
+   *
+   * Tracked rather than fire-and-forget, because being ref'd means an
+   * abandoned one would hold a process open. `stop` clears them, which is what
+   * makes `shutdown` still work.
+   */
+  function scheduleProgress(run: () => void, delayMs: number): void {
+    const handle = setTimeout(() => {
+      progressTimers.delete(handle);
+      run();
+    }, delayMs);
+    progressTimers.add(handle);
+  }
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
   const activityLeases = new Map<
@@ -350,15 +386,15 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
 
   // A wake held back, so a failing task retries on a schedule instead of at
-  // whatever rate the workers happen to poll. The timer is in-memory and unref'd:
-  // losing it to a restart costs nothing, because `resume` re-enqueues every
-  // running execution anyway, and it must never hold the process open.
+  // whatever rate the workers happen to poll. The timer is in-memory: losing it
+  // to a restart costs nothing, because `resume` re-enqueues every running
+  // execution anyway.
   function wakeAfter(workflowId: string, delayMs: number): void {
     if (delayMs <= 0) {
       wake(workflowId);
       return;
     }
-    setTimeout(() => wake(workflowId), delayMs).unref?.();
+    scheduleProgress(() => wake(workflowId), delayMs);
   }
 
   async function notifyParentOfTerminal(childId: string): Promise<void> {
@@ -592,7 +628,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       enqueue();
       return;
     }
-    setTimeout(enqueue, delayMs).unref?.();
+    scheduleProgress(enqueue, delayMs);
   }
 
   async function reportActivityResult(
@@ -1001,6 +1037,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     terminate,
     resumeFromHistory,
     listQueues: workerRegistry.queues,
+    stop() {
+      for (const handle of progressTimers) clearTimeout(handle);
+      progressTimers.clear();
+      for (const token of [...attemptTimers.keys()]) clearAttemptTimers(token);
+    },
     pollWorkflowTask,
     completeWorkflowTask,
     failWorkflowTask,
