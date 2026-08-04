@@ -8,6 +8,7 @@
  */
 
 import path from 'node:path';
+import {checkDependencies, checkRepoDependencies} from '../tools/dependencies';
 import {
   checkBoundaries,
   isWorkflowModule,
@@ -277,5 +278,63 @@ describe('architecture — the comment stripper', () => {
     );
     expect(stripped).toContain(`'../core'`);
     expect(stripped).not.toContain('Date.now');
+  });
+});
+
+/**
+ * The dependency allowlist. Same reasoning as the boundary rules: the constraint
+ * is only real if a violation fails a build rather than a code review.
+ *
+ * Both directions matter here. The repo passing today proves nothing about
+ * whether the checker works, so the interesting tests are the planted additions.
+ */
+describe('architecture — dependencies', () => {
+  it('accepts what the project actually carries', () => {
+    expect(checkRepoDependencies(repoRoot)).toEqual([]);
+  });
+
+  it('accepts lit, the one permitted runtime dependency', () => {
+    expect(checkDependencies({dependencies: {lit: '^3.2.0'}})).toEqual([]);
+  });
+
+  /**
+   * The specific rule that is easiest to talk yourself out of: labs packages
+   * look official, and each one replaces work. They are pre-release by
+   * definition, and the dashboard was scoped to do without them.
+   */
+  it('refuses a Lit labs package, and says why', () => {
+    const violations = checkDependencies({
+      dependencies: {'@lit-labs/virtualizer': '^2.0.0'},
+    });
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('labs');
+    expect(violations[0].message).toContain('planning/sprints/06-dashboard.md');
+  });
+
+  // "Part of Lit" means the `lit` package — not everything under the org.
+  it('refuses a @lit/ package that is not lit itself', () => {
+    const violations = checkDependencies({
+      dependencies: {'@lit/context': '^1'},
+    });
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('not Lit');
+  });
+
+  it('refuses an unrelated runtime dependency', () => {
+    const violations = checkDependencies({dependencies: {'date-fns': '^3'}});
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].field).toBe('dependencies');
+  });
+
+  // The dev list is separate and just as closed — a bundler is the likeliest
+  // thing to appear here, and adding one is a decision, not an install.
+  it('refuses a new dev dependency, bundlers included', () => {
+    const violations = checkDependencies({devDependencies: {vite: '^5'}});
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].field).toBe('devDependencies');
   });
 });
