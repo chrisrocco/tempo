@@ -342,32 +342,62 @@ export async function listExecutions(
  * sequential worker inside a long activity stops polling and reads as absent
  * here (see `isQueueServed`), so "nothing is polling" is what was observed and
  * "no worker exists" is only one of its two explanations.
+ *
+ * Counts come from `groupExecutions` rather than from tallying a listing, which
+ * would report on one capped page rather than on the server. The two reads are
+ * issued together: they are one question, and serializing them would double the
+ * latency of the command for nothing.
  */
 export async function listQueues(
   serverUrl: string,
   asJson: boolean,
 ): Promise<number> {
   await assertReachable(serverUrl);
-  const queues = await createRemoteService(serverUrl).listQueues();
+  const service = createRemoteService(serverUrl);
+  const [queues, groups] = await Promise.all([
+    service.listQueues(),
+    service.groupExecutions(),
+  ]);
   if (asJson) {
-    process.stdout.write(`${JSON.stringify(queues, null, 2)}\n`);
-    return 0;
-  }
-  if (queues.length === 0) {
-    process.stdout.write('no worker has polled this server since it started\n');
-    return 0;
-  }
-  const now = Date.now();
-  const width = Math.max(...queues.map((q) => q.taskQueue.length), 10);
-  process.stdout.write(
-    `${'TASK QUEUE'.padEnd(width)}  ${'WORKFLOW'.padEnd(10)}  ACTIVITY\n`,
-  );
-  for (const q of queues) {
     process.stdout.write(
-      `${q.taskQueue.padEnd(width)}  ${describePoll(q.workflowPolledAt, now).padEnd(10)}  ${describePoll(q.activityPolledAt, now)}\n`,
+      `${JSON.stringify({queues, groups: groups.byTaskQueue}, null, 2)}\n`,
+    );
+    return 0;
+  }
+
+  // The union of both sources, because each answers half of it. A queue with
+  // workers and no executions is an idle pool; a queue with executions and no
+  // workers is the one worth waking someone for. Listing only what has been
+  // polled would hide precisely the second.
+  const counts = new Map(groups.byTaskQueue.map((g) => [g.key, g]));
+  const names = [
+    ...new Set([...queues.map((q) => q.taskQueue), ...counts.keys()]),
+  ].sort();
+  if (names.length === 0) {
+    process.stdout.write('nothing has run and no worker has polled\n');
+    return 0;
+  }
+
+  const polled = new Map(queues.map((q) => [q.taskQueue, q]));
+  const now = Date.now();
+  const width = Math.max(...names.map((n) => n.length), 10);
+  process.stdout.write(
+    `${'TASK QUEUE'.padEnd(width)}  ${'WORKFLOW'.padEnd(10)}  ${'ACTIVITY'.padEnd(10)}  ${'RUNNING'.padStart(7)}  ${'STUCK'.padStart(5)}  ${'FAILED'.padStart(6)}  TOTAL\n`,
+  );
+  for (const name of names) {
+    const q = polled.get(name);
+    const c = counts.get(name);
+    process.stdout.write(
+      `${name.padEnd(width)}  ` +
+        `${describePoll(q?.workflowPolledAt, now).padEnd(10)}  ` +
+        `${describePoll(q?.activityPolledAt, now).padEnd(10)}  ` +
+        `${String(c?.running ?? 0).padStart(7)}  ` +
+        `${String(c?.stuck ?? 0).padStart(5)}  ` +
+        `${String(c?.failed ?? 0).padStart(6)}  ` +
+        `${c?.total ?? 0}\n`,
     );
   }
-  if (queues.some((q) => q.taskQueue === ANY_TASK_QUEUE))
+  if (names.includes(ANY_TASK_QUEUE))
     process.stdout.write(
       `\n${ANY_TASK_QUEUE} is a worker polling every queue — the in-process runtime does this.\n`,
     );

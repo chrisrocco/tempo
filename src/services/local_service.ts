@@ -61,6 +61,7 @@ import {
   MemoryWorkflowTaskQueue,
   createServerCore,
   describeExecution,
+  groupExecutions,
   queryExecutions,
   type HistoryStore,
 } from '../server';
@@ -304,6 +305,9 @@ export function createLocalService(
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
+    },
+    async groupExecutions() {
+      return groupExecutions(await historyStore.list());
     },
     async listQueues() {
       // Under the in-process runtime this reports one entry, `ANY_TASK_QUEUE`,

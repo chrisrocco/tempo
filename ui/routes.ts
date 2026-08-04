@@ -34,7 +34,8 @@ export type RouteFilter = Pick<
 /** Where the user is. Unrecognized hashes fall back to the listing. */
 export type Route =
   | {view: 'executions'; filter: RouteFilter}
-  | {view: 'execution'; workflowId: string};
+  | {view: 'execution'; workflowId: string}
+  | {view: 'queues'};
 
 const STATUSES: readonly ExecutionStatus[] = [
   'running',
@@ -60,6 +61,8 @@ function isStatus(value: string): value is ExecutionStatus {
 export function parseRoute(hash: string): Route {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const [pathname = '/', query = ''] = raw.split('?');
+
+  if (pathname === '/queues') return {view: 'queues'};
 
   const detail = /^\/executions\/(.+)$/.exec(pathname);
   if (detail) {
@@ -94,6 +97,9 @@ export function parseRoute(hash: string): Route {
 export function executionHref(workflowId: string): string {
   return `#/executions/${encodeURIComponent(workflowId)}`;
 }
+
+/** The link to the queues and workflow-types view. */
+export const QUEUES_HREF = '#/queues';
 
 /**
  * The link to the listing under `filter`. Empty fields are dropped rather than

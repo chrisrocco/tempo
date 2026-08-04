@@ -19,6 +19,7 @@ import type {
   DescribeOptions,
   ExecutionDetail,
   ExecutionFilter,
+  ExecutionGroups,
   ExecutionPage,
   QueueWorkers,
   ExecutionStatus,
@@ -141,6 +142,9 @@ export function createRemoteService(
     },
     async listQueues(): Promise<QueueWorkers[]> {
       return (await call({method: 'listQueues'})) as QueueWorkers[];
+    },
+    async groupExecutions(): Promise<ExecutionGroups> {
+      return (await call({method: 'groupExecutions'})) as ExecutionGroups;
     },
     async pollWorkflowTask(
       taskQueue?: string,

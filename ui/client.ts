@@ -20,6 +20,7 @@ import type {
   DescribeOptions,
   ExecutionDetail,
   ExecutionFilter,
+  ExecutionGroups,
   ExecutionPage,
   QueueWorkers,
   StartWorkflowOptions,
@@ -64,6 +65,14 @@ export const client = {
   /** Which task queues are being polled — see `isQueueServed`. */
   listQueues(signal?: AbortSignal): Promise<QueueWorkers[]> {
     return call<QueueWorkers[]>({method: 'listQueues'}, signal);
+  },
+
+  /**
+   * Counts by status, grouped. Server-side because a client tallying a capped
+   * page would be reporting on the page rather than on the server.
+   */
+  groupExecutions(signal?: AbortSignal): Promise<ExecutionGroups> {
+    return call<ExecutionGroups>({method: 'groupExecutions'}, signal);
   },
 
   /** `null` rather than undefined on the wire — an unknown id, not an error. */

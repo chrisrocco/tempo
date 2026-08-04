@@ -19,6 +19,7 @@ import type {
   DescribeOptions,
   ExecutionDetail,
   ExecutionFilter,
+  ExecutionGroups,
   ExecutionPage,
   LeasedActivityTask,
   QueueWorkers,
@@ -36,6 +37,7 @@ import {
   MemoryWorkflowTaskQueue,
   createServerCore,
   describeExecution,
+  groupExecutions,
   queryExecutions,
   silentLogger,
   type HistoryStore,
@@ -87,6 +89,8 @@ export interface ServerHost {
   listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
+  /** Every execution counted by status, grouped by task queue and by name. */
+  groupExecutions(): Promise<ExecutionGroups>;
   pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
@@ -214,6 +218,9 @@ export function createServerHost(
     },
     async listQueues() {
       return core.listQueues();
+    },
+    async groupExecutions() {
+      return groupExecutions(await historyStore.list());
     },
     pollWorkflowTask(taskQueue) {
       return core.pollWorkflowTask(taskQueue);

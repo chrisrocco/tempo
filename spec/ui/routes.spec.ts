@@ -29,6 +29,10 @@ describe('dashboard routes — parsing', () => {
     expect(parseRoute('#/nonsense')).toEqual({view: 'executions', filter: {}});
   });
 
+  it('reads the queues path as the queues view', () => {
+    expect(parseRoute('#/queues')).toEqual({view: 'queues'});
+  });
+
   it('reads an execution path as the detail view for that id', () => {
     expect(parseRoute('#/executions/order-42')).toEqual({
       view: 'execution',

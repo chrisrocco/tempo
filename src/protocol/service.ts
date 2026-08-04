@@ -202,6 +202,45 @@ export interface ExecutionDetail extends ExecutionSummary {
   carryover?: Carryover;
 }
 
+// ── grouped counts ───────────────────────────────────────────────────────
+// "Which pools and which workflows are failing" — a question about the shape of
+// the whole set, which a paged listing structurally cannot answer. A client
+// counting the rows it was given would be reporting on its page rather than on
+// the server, and would be wrong by exactly the amount that matters once there
+// is enough data to need paging.
+
+/**
+ * Executions sharing one key, counted by status.
+ *
+ * `stuck` overlaps `running` rather than sitting beside it — a wedged execution
+ * *is* running (see `isStuck`) — so the four statuses sum to `total` and `stuck`
+ * does not. Making it a fifth disjoint bucket would have meant either lying
+ * about the status or dropping the distinction, and this is the count someone
+ * scanning for trouble reads first.
+ */
+export interface ExecutionGroup {
+  key: string;
+  total: number;
+  running: number;
+  completed: number;
+  failed: number;
+  terminated: number;
+  /** Running, but the engine cannot replay them. A subset of `running`. */
+  stuck: number;
+}
+
+/**
+ * The two groupings worth having, from one scan.
+ *
+ * Both together rather than one call each, because they answer one question —
+ * where is the trouble — and the caller is a dashboard that would otherwise
+ * make two requests every couple of seconds to scan the same set twice.
+ */
+export interface ExecutionGroups {
+  byTaskQueue: ExecutionGroup[];
+  byName: ExecutionGroup[];
+}
+
 // ── worker liveness ──────────────────────────────────────────────────────
 // Which pools are being asked for work. Everything above describes executions;
 // this describes the fleet, and it is the one question the execution views
@@ -313,6 +352,8 @@ export interface WorkflowService {
   listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
+  /** Every execution counted by status, grouped by task queue and by name. */
+  groupExecutions(): Promise<ExecutionGroups>;
   // ── worker-facing (poll a task, respond when done) ──
   /**
    * Claim the next workflow task on `taskQueue`.

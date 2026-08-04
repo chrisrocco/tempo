@@ -30,6 +30,7 @@
  * | `theme.ts`            | the palette and the shared element styles       |
  * | `execution_list.ts`   | the home view: filter bar and paged table       |
  * | `execution_detail.ts` | one execution, and the panels that explain it   |
+ * | `queues_view.ts`      | which pools and types are in trouble            |
  * | `history_view.ts`     | how an event reads, and how long it took        |
  * | `history_timeline.ts` | laying those out, and paging them               |
  * | `action_bar.ts`       | signal, cancel, terminate                       |
@@ -42,10 +43,19 @@
 
 import {LitElement, css, html, type TemplateResult} from 'lit';
 import {RouteController} from './router.js';
-import {executionsHref} from './routes.js';
+import {QUEUES_HREF, executionsHref, type Route} from './routes.js';
 import {heading, surface} from './theme.js';
 import './execution_detail.js';
 import './execution_list.js';
+import './queues_view.js';
+
+/**
+ * Adding a route becomes a compile error here rather than a blank page — the
+ * same reason `rpc_server.ts` ends its dispatch this way (see AGENTS.md).
+ */
+function assertNever(route: never): never {
+  throw new Error(`unhandled route: ${JSON.stringify(route)}`);
+}
 
 class TempoApp extends LitElement {
   private readonly router = new RouteController(this);
@@ -76,24 +86,55 @@ class TempoApp extends LitElement {
         color: var(--dim);
         font-size: 12px;
       }
+      nav {
+        margin-left: auto;
+        display: flex;
+        gap: 16px;
+        font-size: 12.5px;
+      }
+      nav a.here {
+        color: var(--text);
+        font-weight: 600;
+      }
     `,
   ];
 
   override render(): TemplateResult {
     const route = this.router.route;
+    // The detail view belongs to the executions section, so its tab stays lit
+    // while reading one — a nav that goes blank on a sub-page loses the reader's
+    // sense of where they are.
+    const onQueues = route.view === 'queues';
     return html`
       <header>
         <a class="brand" href=${executionsHref()}>tempo</a>
         <span class="tagline">what is running, what is broken, and why</span>
+        <nav>
+          <a class=${onQueues ? '' : 'here'} href=${executionsHref()}
+            >executions</a
+          >
+          <a class=${onQueues ? 'here' : ''} href=${QUEUES_HREF}
+            >queues &amp; types</a
+          >
+        </nav>
       </header>
-      ${
-        route.view === 'executions'
-          ? html`<execution-list .filter=${route.filter}></execution-list>`
-          : html`<execution-detail
-            .workflowId=${route.workflowId}
-          ></execution-detail>`
-      }
+      ${this.view(route)}
     `;
+  }
+
+  private view(route: Route): TemplateResult {
+    switch (route.view) {
+      case 'executions':
+        return html`<execution-list .filter=${route.filter}></execution-list>`;
+      case 'execution':
+        return html`<execution-detail
+          .workflowId=${route.workflowId}
+        ></execution-detail>`;
+      case 'queues':
+        return html`<queues-view></queues-view>`;
+      default:
+        return assertNever(route);
+    }
   }
 }
 

@@ -33,9 +33,20 @@ activity stops polling. Both readings matter to an operator, so the wording says
 what was observed rather than what it implies. Per-worker identity and
 outstanding-lease tracking would separate them, and are the natural follow-ons.
 
-What is left from the plan below is the **Queues & types** view — now much
-cheaper, since queue liveness and `taskQueue` on the summary both exist — and
-SSE.
+**Queues & types is built**, which completes every view in the plan below.
+Counts come from a server-side `groupExecutions` rather than from tallying a
+listing: `listExecutions` caps at `MAX_PAGE_SIZE`, so a client counting its own
+rows would report "3 failed" when there are three hundred, and would report it
+confidently. Grouping costs the same scan the listing already does.
+
+The queue table is the **union** of what has executions and what has been
+polled, because each source answers half the question — a queue with workers and
+no executions is an idle pool, and a queue with executions and no workers is the
+one worth waking someone for.
+
+**Only SSE remains**, and it stays cheap: `ui/poller.ts` put every repeating
+read behind one controller, so it is a swap in one module rather than in every
+view.
 
 Two things the sprint did not anticipate, both landed here:
 
