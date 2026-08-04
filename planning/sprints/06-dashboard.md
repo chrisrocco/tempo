@@ -11,6 +11,26 @@ A dashboard that answers "what is running, what is broken, and why" without
 reading JSON by hand. Served by the tempo server itself at `/ui`, built with Lit
 and nothing else.
 
+## Status
+
+**Phase 0 is complete**, and the two views built on it are in: the executions
+list (filter bar, paging, `STUCK` badge) and the execution detail view (the two
+failure panels, pending work, carryover, paged history, and the control
+actions). What is left from the plan below is the **Queues & types** view, plus
+the two deferred items — SSE and the worker registry.
+
+Two things the sprint did not anticipate, both landed here:
+
+-   **`ui/` was not type-checked at all.** The root `tsconfig.json` never
+    included it and has no DOM lib, so the claim that a field added to a
+    projection becomes a compile error in the dashboard was aspirational. There
+    is now a second config (`ui/tsconfig.json`), and `npm run typecheck` and the
+    style checker both run over both.
+-   **Filters live in the URL**, not in component state — see `ui/routes.ts`.
+    The most useful thing an operator produces is a link pointing at the
+    problem, and filter state held in a component cannot be pasted into a
+    ticket.
+
 ## The finding
 
 **This is a read-API project wearing a UI.** The Lit half is the easy half, and

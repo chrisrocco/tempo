@@ -17,6 +17,7 @@
  */
 
 import type {
+  DescribeOptions,
   ExecutionDetail,
   ExecutionFilter,
   ExecutionPage,
@@ -33,12 +34,17 @@ type RpcResponse = {ok: true; value: unknown} | {ok: false; error: string};
  * transport succeeded, the call did not — so both that and a genuine network
  * error are turned into a thrown Error here. A caller should not have to know
  * which layer disappointed it.
+ *
+ * The optional `signal` is what makes `Poller`'s cancellation real: without it
+ * an aborted poll still runs to completion on the server and still occupies a
+ * connection, and only its *result* is discarded.
  */
-async function call<T>(body: unknown): Promise<T> {
+async function call<T>(body: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch('/', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify(body),
+    signal,
   });
   if (!response.ok) throw new Error(`server returned ${response.status}`);
   const envelope = (await response.json()) as RpcResponse;
@@ -47,19 +53,24 @@ async function call<T>(body: unknown): Promise<T> {
 }
 
 export const client = {
-  listExecutions(filter: ExecutionFilter = {}): Promise<ExecutionPage> {
-    return call<ExecutionPage>({method: 'listExecutions', filter});
+  listExecutions(
+    filter: ExecutionFilter = {},
+    signal?: AbortSignal,
+  ): Promise<ExecutionPage> {
+    return call<ExecutionPage>({method: 'listExecutions', filter}, signal);
   },
 
   /** `null` rather than undefined on the wire — an unknown id, not an error. */
   async describeExecution(
     workflowId: string,
+    options: DescribeOptions = {},
+    signal?: AbortSignal,
   ): Promise<ExecutionDetail | undefined> {
     return (
-      (await call<ExecutionDetail | null>({
-        method: 'describeExecution',
-        workflowId,
-      })) ?? undefined
+      (await call<ExecutionDetail | null>(
+        {method: 'describeExecution', workflowId, options},
+        signal,
+      )) ?? undefined
     );
   },
 

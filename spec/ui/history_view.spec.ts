@@ -1,0 +1,161 @@
+/**
+ * @fileoverview
+ * How a history event reads, and when a duration is knowable.
+ *
+ * The cases worth pinning down are the ones where the honest answer is "I don't
+ * know": an event written before `ts` existed, and a completion whose dispatch
+ * is on a page that is not loaded. Both are easy to render as a confident wrong
+ * number, and neither would be noticed by looking at the page.
+ */
+
+import type {HistoryEvent} from '../../src/protocol/history_events';
+import {
+  describeEvent,
+  durationOf,
+  formatDuration,
+  markerTimes,
+} from '../../ui/history_view';
+
+/** The default activity options, which none of these cases depends on. */
+const OPTIONS = {};
+
+describe('dashboard history — reading an event', () => {
+  it('names the activity on the event that schedules it', () => {
+    const view = describeEvent({
+      type: 'activityScheduled',
+      seq: 1,
+      name: 'chargeCard',
+      args: [42],
+      options: OPTIONS,
+    });
+    expect(view.label).toContain('chargeCard');
+    expect(view.payload).toEqual([42]);
+  });
+
+  it('carries the error message on a failed activity, and its stack', () => {
+    const view = describeEvent({
+      type: 'activityFailed',
+      seq: 1,
+      error: 'card declined',
+      stack: 'Error: card declined\n    at charge',
+    });
+    expect(view.label).toContain('card declined');
+    expect(view.tone).toBe('danger');
+    expect(view.stack).toContain('at charge');
+  });
+
+  it('distinguishes a detached child from a blocking one', () => {
+    const detached = describeEvent({
+      type: 'childStarted',
+      seq: 2,
+      childId: 'item-9',
+      detached: true,
+    });
+    const blocking = describeEvent({
+      type: 'childStarted',
+      seq: 3,
+      childId: 'item-9',
+      detached: false,
+    });
+    expect(detached.label).toContain('detached');
+    expect(blocking.label).not.toContain('detached');
+  });
+
+  it('shows a signal payload, which is the reason to look at a signal', () => {
+    const view = describeEvent({
+      type: 'signal',
+      name: 'approve',
+      payload: {by: 'ops'},
+    });
+    expect(view.label).toContain('approve');
+    expect(view.payload).toEqual({by: 'ops'});
+  });
+});
+
+describe('dashboard history — durations', () => {
+  const scheduled: HistoryEvent = {
+    type: 'activityScheduled',
+    seq: 1,
+    name: 'charge',
+    args: [],
+    options: OPTIONS,
+    ts: 1_000,
+  };
+
+  it('measures a completion from its own dispatch, not the previous row', () => {
+    const unrelated: HistoryEvent = {
+      type: 'timerStarted',
+      seq: 2,
+      fireAt: 9_999,
+      ts: 2_500,
+    };
+    const completed: HistoryEvent = {
+      type: 'activityCompleted',
+      seq: 1,
+      result: 'ok',
+      ts: 3_000,
+    };
+    const markers = markerTimes([scheduled, unrelated, completed]);
+    expect(durationOf(completed, markers)).toBe(2_000);
+  });
+
+  it('reports no duration when the dispatch is on a page that is not loaded', () => {
+    const completed: HistoryEvent = {
+      type: 'activityCompleted',
+      seq: 1,
+      result: 'ok',
+      ts: 3_000,
+    };
+    expect(durationOf(completed, markerTimes([completed]))).toBeUndefined();
+  });
+
+  it('reports no duration for history written before timestamps existed', () => {
+    const noTs: HistoryEvent = {
+      type: 'activityScheduled',
+      seq: 1,
+      name: 'charge',
+      args: [],
+      options: OPTIONS,
+    };
+    const completed: HistoryEvent = {
+      type: 'activityCompleted',
+      seq: 1,
+      result: 'ok',
+    };
+    expect(
+      durationOf(completed, markerTimes([noTs, completed])),
+    ).toBeUndefined();
+  });
+
+  it('reports no duration for a dispatch, which has not finished anything', () => {
+    expect(durationOf(scheduled, markerTimes([scheduled]))).toBeUndefined();
+  });
+
+  it('reports no duration for a signal, which completes no command', () => {
+    const signal: HistoryEvent = {
+      type: 'signal',
+      name: 'approve',
+      payload: undefined,
+      ts: 5_000,
+    };
+    expect(durationOf(signal, markerTimes([scheduled]))).toBeUndefined();
+  });
+});
+
+describe('dashboard history — formatting a duration', () => {
+  it('uses milliseconds below a second', () => {
+    expect(formatDuration(450)).toBe('450ms');
+  });
+
+  it('uses seconds with one decimal below a minute', () => {
+    expect(formatDuration(2_400)).toBe('2.4s');
+  });
+
+  it('uses minutes and seconds below an hour', () => {
+    expect(formatDuration(90_000)).toBe('1m 30s');
+  });
+
+  it('uses hours and minutes above an hour', () => {
+    expect(formatDuration(3 * 3_600_000 + 25 * 60_000)).toBe('3h 25m');
+  });
+});

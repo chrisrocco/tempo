@@ -44,8 +44,12 @@ if (dependencyViolations.length === 0) {
   console.error(`\ndependencies: ${dependencyViolations.length} violation(s)`);
 }
 
-const program = programFor(root);
-const styleViolations = checkStyle(program, root);
+// Two programs, because the engine and the dashboard are checked under
+// different libs and a single program cannot hold both. Same rules over both.
+const styleViolations = [
+  ...checkStyle(programFor(root), root),
+  ...checkStyle(programFor(root, 'ui/tsconfig.json'), root),
+];
 if (styleViolations.length === 0) {
   console.log('style: clean (floating promises, top-level await, import.meta)');
 } else {

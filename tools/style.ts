@@ -167,11 +167,27 @@ export function checkStyle(
   return violations;
 }
 
-/** Build a program from the repo's own tsconfig, so the rules see what tsc sees. */
-export function programFor(root: string): ts.Program {
-  const configPath = path.join(root, 'tsconfig.json');
+/**
+ * Build a program from one of the repo's tsconfigs, so the rules see what
+ * `tsc` sees.
+ *
+ * `configFile` is relative to `root` because there is more than one: the engine
+ * and the dashboard are checked under different libs (Node vs. DOM) and so
+ * cannot share a program. The floating-promise rule matters on both sides — a
+ * dropped promise in a custom element is a swallowed error rather than a dead
+ * process, which is quieter and therefore worse.
+ */
+export function programFor(
+  root: string,
+  configFile = 'tsconfig.json',
+): ts.Program {
+  const configPath = path.join(root, configFile);
   const config = ts.readConfigFile(configPath, ts.sys.readFile);
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+  const parsed = ts.parseJsonConfigFileContent(
+    config.config,
+    ts.sys,
+    path.dirname(configPath),
+  );
   return ts.createProgram(parsed.fileNames, parsed.options);
 }
 
