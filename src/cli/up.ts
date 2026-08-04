@@ -37,16 +37,6 @@ import {forwardOutput, spawnEntry, stopChild, waitForLine} from './process';
  */
 const SERVER_ENTRY = path.resolve('bin/server-main.ts');
 
-/**
- * The dashboard's own process, resolved the same way and for the same reason.
- *
- * It is a separate package that talks to the server over the RPC like any other
- * client, so `up` supervises it as a third child rather than the server serving
- * it. That is what lets the engine ship with no runtime dependencies: the one
- * it used to carry, Lit, belongs to this.
- */
-const DASHBOARD_ENTRY = path.resolve('dashboard/server/main.ts');
-
 /** One workflow to run to completion, for `up`'s one-shot mode. */
 export interface RunRequest {
   name: string;
@@ -99,11 +89,6 @@ export interface UpOptions {
   /** Persist history here; omit for an in-memory server. */
   dataDir?: string;
   /**
-   * Also run the dashboard, as a third child on its own port. Off unless asked
-   * for: it can terminate executions and neither transport has any auth.
-   */
-  dashboard?: boolean;
-  /**
    * Run one workflow, print its result, and tear the topology down again,
    * instead of staying up until interrupted.
    */
@@ -136,7 +121,6 @@ export async function up(options: UpOptions): Promise<number> {
   });
   forwardOutput(server, 'server');
 
-  let dashboard: ChildProcess | undefined;
   let worker: ChildProcess | undefined;
   try {
     // The readiness line reports what it actually bound, which is the only
@@ -148,24 +132,6 @@ export async function up(options: UpOptions): Promise<number> {
     );
     const serverUrl = `http://${connectableHost(boundHost!)}:${port}`;
     process.stdout.write(`tempo: server listening on ${serverUrl}\n`);
-
-    // Its own process on its own port, pointed at the server. It reaches the
-    // engine over the RPC exactly as the CLI does, so nothing about the server
-    // changes when it is running.
-    if (options.dashboard) {
-      dashboard = spawnEntry(DASHBOARD_ENTRY, {
-        env: {HOST: options.host, PORT: '0', ENGINE_URL: serverUrl},
-      });
-      forwardOutput(dashboard, 'dashboard');
-      const [, uiPort, uiHost] = await waitForLine(
-        dashboard,
-        /LISTENING (\d+) (\S+)/,
-      );
-      process.stdout.write(
-        `tempo: dashboard at http://${connectableHost(uiHost!)}:${uiPort}\n`,
-      );
-    }
-
     if (!isLoopbackHost(boundHost!))
       process.stdout.write(
         `tempo: bound ${boundHost} — reachable from other machines, and the RPC has no auth or TLS\n`,
@@ -198,12 +164,10 @@ export async function up(options: UpOptions): Promise<number> {
     const reason = await waitForShutdown([
       {label: 'server', child: server},
       {label: `worker ${manifest.name}`, child: worker},
-      ...(dashboard ? [{label: 'dashboard', child: dashboard}] : []),
     ]);
     process.stdout.write(`\ntempo: stopping (${reason})\n`);
     return reason === 'interrupted' || reason === 'terminated' ? 0 : 1;
   } finally {
-    if (dashboard) await stopChild(dashboard);
     if (worker) await stopChild(worker);
     await stopChild(server);
   }
