@@ -11,16 +11,18 @@
  */
 
 import {
-  background,
   condition,
   createContext,
   defineSignal,
-  firstSignal,
   replay,
   runActivity,
   setHandler,
-  signalStream,
 } from '../../src/core';
+import {
+  background,
+  firstSignal,
+  signalStream,
+} from '../../src/patterns/signal_stream';
 import type {HistoryEvent} from '../../src/protocol';
 
 const comment = defineSignal('comment');

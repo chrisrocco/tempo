@@ -15,15 +15,20 @@
  * Three rules, each mapping to a claim made elsewhere in the docs:
  *
  * 1. **Layering** — dependencies point strictly down, and each layer declares what
- *    it may reach. Notably `server/` may NOT import `core/`: the server runs no
- *    user code, replay happens in the workflow worker.
- * 2. **Core purity** — no clock, randomness, I/O, or ambient host state inside
- *    `core/`, with one documented exception (see `ALLOWED_HOST_COUPLING`).
+ *    it may reach. Two are worth calling out: `server/` may NOT import `core/`,
+ *    because the server runs no user code and replay happens in the workflow
+ *    worker; and `core/` may not import `patterns/`, because the engine must not
+ *    depend on helpers built out of it. The second is why `patterns/` is a layer
+ *    at all rather than a folder inside `core/` — same-layer imports are not
+ *    checked, so as long as both lived in `core/` that direction was unsayable.
+ * 2. **Determinism purity** — no clock, randomness, I/O, or ambient host state in
+ *    `core/` *or* `patterns/`: both run inside a replay. One documented exception
+ *    (see `ALLOWED_HOST_COUPLING`).
  * 3. **The author entrypoint** — workflow modules import only `workflow.ts`, and
  *    obey the same purity rule as the core they run inside.
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import {readdirSync, readFileSync, statSync} from 'node:fs';
 import path from 'node:path';
 
 /** One source file to check: a repo-relative POSIX path plus its contents. */
@@ -47,6 +52,7 @@ export interface Violation {
 const LAYER_IMPORTS: Record<string, readonly string[]> = {
   protocol: [],
   core: ['protocol'],
+  patterns: ['protocol', 'core'],
   server: ['protocol'],
   worker: ['protocol', 'core'],
   client: ['protocol', 'core'],
@@ -57,7 +63,9 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
 const LAYER_RATIONALE: Record<string, string> = {
   protocol:
     'protocol/ is pure data with no dependencies — it is what lets core and server share types without depending on each other',
-  core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/',
+  core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/ — and never patterns/, which is built on top of it',
+  patterns:
+    'patterns/ is workflow-authoring helpers built from the primitives core/ exports; it depends on core/, never the reverse',
   server:
     'server/ runs NO user code — workflow replay happens in the workflow worker, so it must not reach into core/',
   worker: 'worker/ is written against protocol/ and runs core/',
@@ -69,14 +77,14 @@ const LAYER_RATIONALE: Record<string, string> = {
 
 /** Constructs that make replay irreproducible, so they cannot appear on the deterministic side. */
 const NONDETERMINISTIC = [
-  { pattern: /\bDate\.now\b/, name: 'Date.now()' },
-  { pattern: /\bnew Date\b/, name: 'new Date()' },
-  { pattern: /\bMath\.random\b/, name: 'Math.random()' },
-  { pattern: /\bsetTimeout\b/, name: 'setTimeout' },
-  { pattern: /\bsetInterval\b/, name: 'setInterval' },
-  { pattern: /\bsetImmediate\b/, name: 'setImmediate' },
-  { pattern: /\bprocess\.env\b/, name: 'process.env' },
-  { pattern: /\bfetch\s*\(/, name: 'fetch()' },
+  {pattern: /\bDate\.now\b/, name: 'Date.now()'},
+  {pattern: /\bnew Date\b/, name: 'new Date()'},
+  {pattern: /\bMath\.random\b/, name: 'Math.random()'},
+  {pattern: /\bsetTimeout\b/, name: 'setTimeout'},
+  {pattern: /\bsetInterval\b/, name: 'setInterval'},
+  {pattern: /\bsetImmediate\b/, name: 'setImmediate'},
+  {pattern: /\bprocess\.env\b/, name: 'process.env'},
+  {pattern: /\bfetch\s*\(/, name: 'fetch()'},
 ] as const;
 
 /**
@@ -173,7 +181,7 @@ function extractImports(strippedText: string): ImportRef[] {
     let m: RegExpExecArray | null;
     re.lastIndex = 0;
     while ((m = re.exec(lineText)) !== null) {
-      refs.push({ specifier: m[1], line: idx + 1 });
+      refs.push({specifier: m[1], line: idx + 1});
     }
   });
   return refs;
@@ -224,7 +232,7 @@ function checkPurity(
   const exempt = ALLOWED_HOST_COUPLING[file.path] ?? [];
   const violations: Violation[] = [];
   stripped.split('\n').forEach((lineText, idx) => {
-    for (const { pattern, name } of NONDETERMINISTIC) {
+    for (const {pattern, name} of NONDETERMINISTIC) {
       if (exempt.includes(name)) continue;
       if (pattern.test(lineText)) {
         violations.push({
@@ -282,7 +290,12 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
       continue;
     }
     violations.push(...checkLayering(file, stripped));
-    if (layerOf(file.path) === 'core') {
+    // Both layers run inside a replay, so both are held to determinism. Keying
+    // this on `core` alone was safe only while `core` was the only thing that
+    // ran there: a helper in `patterns/` is called from workflow code just the
+    // same, and a `Date.now()` in one is exactly as fatal.
+    const layer = layerOf(file.path);
+    if (layer === 'core' || layer === 'patterns') {
       violations.push(...checkPurity(file, stripped, 'core-purity'));
     }
   }

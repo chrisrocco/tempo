@@ -50,16 +50,16 @@
 
 export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
 export {condition} from './core/condition';
-export {byCursor, byId, type Differ, type DiffResult} from './core/diff';
+export {byCursor, byId, type Differ, type DiffResult} from './patterns/diff';
 export {CancelledFailure} from './core/errors';
-export {pollForever, type PollForeverOptions} from './core/poller';
+export {pollForever, type PollForeverOptions} from './patterns/poller';
 export {
   background,
   firstSignal,
   signalStream,
   type Branch,
   type StreamOptions,
-} from './core/signal_stream';
+} from './patterns/signal_stream';
 export {
   clearHandler,
   defineSignal,
