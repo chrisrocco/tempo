@@ -214,11 +214,19 @@ describe('pollForever', () => {
     await wait(20);
 
     const rec = await store.get('mon');
-    // Whatever run it is sitting in polls and waits; it claims nothing.
+    // The run it is sitting in polls and waits, and claims nothing: not one
+    // marker for the twenty items it keeps being handed.
     expect(rec!.history.filter((e) => e.type === 'childStarted').length).toBe(
       0,
     );
-    expect(rec!.history.length).toBeLessThan(15);
+    // Its history is activities and timers only — a constant per cycle, rather
+    // than something that scales with the size of the feed.
+    expect([...new Set(rec!.history.map((e) => e.type))].sort()).toEqual([
+      'activityCompleted',
+      'activityScheduled',
+      'timerFired',
+      'timerStarted',
+    ]);
     rt.shutdown();
   });
 

@@ -41,6 +41,11 @@ export interface Runtime {
 export interface LocalRuntimeOptions {
   /** Persistence backend. Defaults to in-memory; pass a FileHistoryStore for durability. */
   historyStore?: HistoryStore;
+  /**
+   * History length at which the server suggests continue-as-new. Defaults to the
+   * server default; specs exercising rollover pass a small one.
+   */
+  continueAsNewSuggestThreshold?: number;
 }
 
 export function createLocalRuntime(options: LocalRuntimeOptions = {}): Runtime {
@@ -54,6 +59,7 @@ export function createLocalRuntime(options: LocalRuntimeOptions = {}): Runtime {
     workflowWorker,
     activityWorker,
     options.historyStore,
+    options.continueAsNewSuggestThreshold,
   );
   const client = createClient(service);
 
