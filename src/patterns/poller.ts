@@ -29,9 +29,9 @@
  * new state.
  */
 
-import {getCarryover, setCarryover} from './carryover';
+import {getCarryover, setCarryover} from '../core/carryover';
 import type {Differ} from './diff';
-import {sleep, continueAsNew, workflowInfo} from './workflow_api';
+import {sleep, continueAsNew, workflowInfo} from '../core/workflow_api';
 
 /**
  * Namespaced, because carryover is shared with whatever else the workflow keeps

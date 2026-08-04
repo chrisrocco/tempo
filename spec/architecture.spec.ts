@@ -64,6 +64,45 @@ describe('architecture — layering', () => {
     expect(violations[0].message).toContain('runs NO user code');
   });
 
+  /**
+   * The direction that used to be unenforceable. `poller` and `signal_stream`
+   * lived in `core/` and were reached through the same relative imports as the
+   * engine, and same-layer imports are not checked — so `replay.ts` importing a
+   * helper built *on* replay would have passed. Splitting the layer is what
+   * turns "the engine does not depend on the patterns" from a convention into a
+   * rule.
+   */
+  it('rejects the engine depending on the patterns built from it', () => {
+    const violations = checkBoundaries([
+      file('src/core/replay.ts', `import { x } from '../patterns/poller';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('layering');
+    expect(violations[0].message).toContain('core/ must not import patterns/');
+  });
+
+  it('allows a pattern to build on the engine', () => {
+    const violations = checkBoundaries([
+      file('src/patterns/poller.ts', `import { sleep } from '../core';`),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * The rule that would have been lost silently in the move: purity was keyed on
+   * `core/`, and patterns run inside a replay just as much as the engine does.
+   */
+  it('holds patterns to the same determinism ban as the engine', () => {
+    const violations = checkBoundaries([
+      file('src/patterns/poller.ts', `const t = Date.now();`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('core-purity');
+  });
+
   it('rejects protocol depending on anything at all', () => {
     const violations = checkBoundaries([
       file('src/protocol/commands.ts', `import { x } from '../core/context';`),

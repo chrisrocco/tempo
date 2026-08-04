@@ -199,13 +199,15 @@ warm executions on the worker is planned but not built.
 
 ## Project layout
 
-Dependencies point strictly down: `protocol <- core <- {server, services,
-worker, client} <- {local_runtime, entrypoints, bin}`.
+Dependencies point strictly down: `protocol <- core <- {patterns, server,
+services, worker, client} <- {local_runtime, entrypoints, bin}`.
 
 ```
 src/
   protocol/       Pure data + contracts. The wire format. No logic, no deps.
   core/           The deterministic engine: (history) -> (commands).
+  patterns/       Authoring helpers built from core's primitives — pollForever,
+                  diffing, signal streams. Depends on core; core never on it.
   server/         Orchestration brain. Stateful, runs NO user code.
     ports/          history_store · task_queue · workflow_task_queue · timer_service
     memory/         in-memory adapters for all four ports
