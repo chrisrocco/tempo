@@ -9,6 +9,5 @@ export * from './context';
 export * from './errors';
 export * from './microtask_scheduler';
 export * from './replay';
-export * from './signal_stream';
 export * from './signals';
 export * from './workflow_api';
