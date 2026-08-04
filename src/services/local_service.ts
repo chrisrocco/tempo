@@ -85,6 +85,7 @@ export function createLocalService(
   workflowWorker: WorkflowWorker,
   activityWorker: ActivityWorker,
   historyStore: HistoryStore = new MemoryHistoryStore(),
+  continueAsNewSuggestThreshold?: number,
 ): LocalService {
   const workflowTaskQueue = new MemoryWorkflowTaskQueue();
   const activityTaskQueue = new MemoryTaskQueue();
@@ -106,6 +107,7 @@ export function createLocalService(
     },
     kickWorkflowWorker,
     kickActivityWorker,
+    continueAsNewSuggestThreshold,
   });
 
   // Startup sweep: re-arm persisted timers on boot (no-op on a fresh in-memory table).

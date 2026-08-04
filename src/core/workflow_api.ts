@@ -193,12 +193,29 @@ export interface WorkflowInfo {
    * may want to continue as new earlier than suggested.
    */
   continueAsNewSuggested: boolean;
+  /**
+   * The arguments this run was started with — the same values the workflow
+   * function received.
+   *
+   * Reachable without threading them through, which is what a helper needs in
+   * order to continue as new *as the same workflow*: it can carry the arguments
+   * forward without the caller having to hand them over, and without them
+   * appearing in the helper's own signature.
+   *
+   * Replay-safe: they come from the record with the task, and are fixed for the
+   * life of the run. A copy, so a caller cannot reach back through it into the
+   * context.
+   */
+  args: unknown[];
 }
 
 /** Read server-provided facts about the current run off the context. */
 export function workflowInfo(): WorkflowInfo {
   const ctx = getContext();
-  return {continueAsNewSuggested: ctx.continueAsNewSuggested};
+  return {
+    continueAsNewSuggested: ctx.continueAsNewSuggested,
+    args: [...ctx.args],
+  };
 }
 
 /**

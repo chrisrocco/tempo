@@ -567,7 +567,11 @@ describe('local runtime — continueAsNew', () => {
   });
 
   it('surfaces the server continue-as-new suggestion once history grows', async () => {
-    const rt = createLocalRuntime()
+    // A small threshold, so this takes a handful of activities rather than the
+    // ~2000 the real default would need. The default is deliberately production
+    // sized (see DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD); tests that want to
+    // reach it say so.
+    const rt = createLocalRuntime({continueAsNewSuggestThreshold: 4})
       .registerActivity('noop', () => null)
       .registerWorkflow('grower', async () => {
         // do work until the server hints that we should roll over

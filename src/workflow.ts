@@ -50,6 +50,7 @@
 
 export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
 export {condition} from './core/condition';
+export {byCursor, byId, type Differ, type DiffResult} from './core/diff';
 export {CancelledFailure} from './core/errors';
 export {pollForever, type PollForeverOptions} from './core/poller';
 export {

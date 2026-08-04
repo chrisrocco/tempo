@@ -83,7 +83,26 @@ import {
   workflowTaskBackoffMs,
 } from './retry_policy';
 
-const CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4;
+/**
+ * History length at which the server starts hinting that a workflow should roll
+ * over — `continueAsNewSuggested` on the task.
+ *
+ * 4096 is what Temporal uses (`HistoryCountSuggestContinueAsNew`), and matching
+ * it is not just deference: it sits an order of magnitude below where replay
+ * cost becomes a problem, which is the property that matters. Temporal's other
+ * two tiers, for orientation — it warns at 10,240 events and refuses at 51,200.
+ *
+ * This was 4 while nothing acted on the hint automatically, which made it a
+ * test-scale number sitting in production code. `pollForever` now acts on it, at
+ * which point 4 means a rollover every poll: a fresh run and a full record
+ * rewrite every cycle, for a poller that found nothing.
+ *
+ * Count only, deliberately. Temporal also suggests on serialized *size* (4 MB),
+ * which is arguably the better signal — 4096 tiny events are nothing, 4 MB is
+ * real memory on every replay — but measuring it cheaply on every task is its
+ * own design problem, so it is not attempted here.
+ */
+export const DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD = 4096;
 
 /**
  * The id of the child dispatched by the `startChild` at `seq`, in `runId`, of
@@ -135,6 +154,15 @@ export interface ServerCoreDeps {
   kickActivityWorker(): void;
   /** Where lifecycle events go. Defaults to silence — see `ports/logger`. */
   log?: Logger;
+  /**
+   * History length at which to start suggesting continue-as-new. Defaults to
+   * `DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD`.
+   *
+   * Injectable so that tests exercising rollover can use a small one, rather
+   * than the whole system running at test scale to keep them fast — which is how
+   * the default came to be 4.
+   */
+  continueAsNewSuggestThreshold?: number;
 }
 
 export interface ServerCore {
@@ -209,6 +237,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     kickWorkflowWorker,
     kickActivityWorker,
     log = silentLogger,
+    continueAsNewSuggestThreshold = DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
   } = deps;
 
   const childrenByParent = new Map<string, Map<number, string>>();
@@ -419,7 +448,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       args: rec.args,
       history: rec.history.slice(),
       continueAsNewSuggested:
-        rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+        rec.history.length >= continueAsNewSuggestThreshold,
       carryover: {...rec.carryover},
     };
   }
@@ -722,7 +751,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         history: rec.history.slice(),
         carryover: {...rec.carryover},
         continueAsNewSuggested:
-          rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+          rec.history.length >= continueAsNewSuggestThreshold,
       };
     }
   }
