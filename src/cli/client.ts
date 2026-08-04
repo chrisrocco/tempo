@@ -19,6 +19,7 @@
 import {
   isStuck,
   type ExecutionDetail,
+  type DescribeOptions,
   type ExecutionFilter,
   type HistoryEvent,
 } from '../protocol';
@@ -200,10 +201,13 @@ export async function describeExecution(
   serverUrl: string,
   workflowId: string,
   asJson: boolean,
+  options: DescribeOptions = {},
 ): Promise<number> {
   await assertReachable(serverUrl);
-  const detail =
-    await createRemoteService(serverUrl).describeExecution(workflowId);
+  const detail = await createRemoteService(serverUrl).describeExecution(
+    workflowId,
+    options,
+  );
   if (!detail) throw new Error(`no execution ${workflowId}`);
   if (asJson) {
     process.stdout.write(`${JSON.stringify(detail, null, 2)}\n`);
@@ -240,9 +244,31 @@ export async function describeExecution(
     );
   }
   out.push('', 'waiting on:', ...formatPending(detail));
-  out.push('', `history (${detail.historyLength}):`);
+  // The range, not just the total — the index column is the event's position in
+  // the whole history, so a page starting at 3600 that numbered its rows from 0
+  // would be quietly lying about which events these are.
+  const shown = detail.history.length;
+  const last = detail.historyOffset + shown - 1;
+  const partial = shown < detail.historyLength;
+  out.push(
+    '',
+    partial
+      ? `history (${detail.historyOffset}–${last} of ${detail.historyLength}):`
+      : `history (${detail.historyLength}):`,
+  );
   const firstTs = detail.history.find((e) => e.ts !== undefined)?.ts;
-  out.push(...detail.history.map((e, i) => formatEvent(e, i, firstTs)));
+  out.push(
+    ...detail.history.map((e, i) =>
+      formatEvent(e, detail.historyOffset + i, firstTs),
+    ),
+  );
+  if (partial)
+    out.push(
+      '',
+      detail.historyOffset > 0
+        ? `… showing the most recent events. Earlier ones: --from=0`
+        : `… more after this. Continue with --from=${last + 1}`,
+    );
   process.stdout.write(`${out.join('\n')}\n`);
   return 0;
 }
