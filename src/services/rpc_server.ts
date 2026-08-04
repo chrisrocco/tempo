@@ -61,6 +61,8 @@ async function dispatch(
       );
     case 'listExecutions':
       return host.listExecutions(request.filter);
+    case 'listQueues':
+      return host.listQueues();
     case 'pollWorkflowTask':
       return (await host.pollWorkflowTask(request.taskQueue)) ?? null;
     case 'completeWorkflowTask':

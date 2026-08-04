@@ -20,6 +20,7 @@ import type {
   ExecutionDetail,
   ExecutionFilter,
   ExecutionPage,
+  QueueWorkers,
   ExecutionStatus,
   LeasedActivityTask,
   RpcRequest,
@@ -137,6 +138,9 @@ export function createRemoteService(
     },
     async listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage> {
       return (await call({method: 'listExecutions', filter})) as ExecutionPage;
+    },
+    async listQueues(): Promise<QueueWorkers[]> {
+      return (await call({method: 'listQueues'})) as QueueWorkers[];
     },
     async pollWorkflowTask(
       taskQueue?: string,

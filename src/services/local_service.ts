@@ -305,6 +305,12 @@ export function createLocalService(
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
     },
+    async listQueues() {
+      // Under the in-process runtime this reports one entry, `ANY_TASK_QUEUE`,
+      // because `createLocalRuntime`'s loops poll with no queue at all — one
+      // set of loops there serves every execution however it was routed.
+      return core.listQueues();
+    },
     // ── worker-facing seam (for out-of-process workers; unused by the in-proc loops) ──
     pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined> {
       return core.pollWorkflowTask(taskQueue);

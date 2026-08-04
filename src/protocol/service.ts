@@ -202,6 +202,84 @@ export interface ExecutionDetail extends ExecutionSummary {
   carryover?: Carryover;
 }
 
+// ── worker liveness ──────────────────────────────────────────────────────
+// Which pools are being asked for work. Everything above describes executions;
+// this describes the fleet, and it is the one question the execution views
+// cannot answer. An execution waiting on an activity looks identical whether a
+// worker is about to pick it up or no worker has ever existed for its queue —
+// and the second is the more common cause of "it's stuck".
+
+/** The two poll loops a worker runs; a queue can have one without the other. */
+export type WorkerRole = 'workflow' | 'activity';
+
+/**
+ * The queue name recorded for a worker that polls with no queue at all.
+ *
+ * Omitting the queue means "any queue" (see `pollWorkflowTask`), which is what
+ * the in-process runtime does — one set of loops there serves every execution
+ * however it was routed. Recording that under a real queue name would be wrong,
+ * and dropping it would report every queue as unserved under `createLocalRuntime`,
+ * which is the configuration most of the suite runs in.
+ */
+export const ANY_TASK_QUEUE = '*';
+
+/**
+ * How recently a queue must have been polled to count as served.
+ *
+ * Generous next to the 5ms idle poll interval, because the thing being detected
+ * is absence, and a false "nothing is serving this" is worse than a slow one:
+ * it sends an operator to look at a deployment that is fine.
+ */
+export const QUEUE_STALE_MS = 10_000;
+
+/**
+ * When each role last asked a queue for work.
+ *
+ * A record of **polls**, not of workers. The server never learns a worker's
+ * identity — nothing in the poll carries one — so it cannot report how many
+ * there are, only whether anything is asking. That is enough for the question
+ * this exists to answer, and claiming more would mean inventing an identity the
+ * protocol does not have.
+ */
+export interface QueueWorkers {
+  taskQueue: string;
+  /** Epoch ms of the last workflow-task poll, absent if there has never been one. */
+  workflowPolledAt?: number;
+  /** Epoch ms of the last activity-task poll. */
+  activityPolledAt?: number;
+}
+
+/**
+ * Is anything currently asking `taskQueue` for `role` work?
+ *
+ * Defined here, beside the type, so the CLI and the dashboard cannot drift into
+ * two different answers — the same reason `isStuck` lives here.
+ *
+ * **A busy worker looks like an absent one.** The activity loop is sequential:
+ * it awaits the activity it claimed before polling again, so a worker running a
+ * single 60-second activity stops polling for 60 seconds and its queue goes
+ * stale. Both readings — nothing is serving this queue, or everything serving
+ * it is saturated — are things an operator wants to know, and this cannot tell
+ * them apart. Callers should say what was observed (nothing has polled) rather
+ * than what it implies (no worker exists). Distinguishing them needs
+ * outstanding-lease tracking, which is a bigger change than this one.
+ */
+export function isQueueServed(
+  queues: QueueWorkers[],
+  taskQueue: string,
+  role: WorkerRole,
+  now: number,
+): boolean {
+  const field = role === 'workflow' ? 'workflowPolledAt' : 'activityPolledAt';
+  return queues.some((q) => {
+    // A worker polling every queue serves this one too.
+    if (q.taskQueue !== taskQueue && q.taskQueue !== ANY_TASK_QUEUE)
+      return false;
+    const at = q[field];
+    return at !== undefined && now - at <= QUEUE_STALE_MS;
+  });
+}
+
 /**
  * The seam both `LocalService` (in-proc) and, later, `RemoteService` (RPC) satisfy.
  * It has two faces: the client-facing methods (start/signal/cancel/get*) and the
@@ -233,6 +311,8 @@ export interface WorkflowService {
   ): Promise<ExecutionDetail | undefined>;
   /** One page of the executions the server knows about, newest first. */
   listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
+  /** Which task queues are being polled, and when each was last asked. */
+  listQueues(): Promise<QueueWorkers[]>;
   // ── worker-facing (poll a task, respond when done) ──
   /**
    * Claim the next workflow task on `taskQueue`.

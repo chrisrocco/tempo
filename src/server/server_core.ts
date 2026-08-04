@@ -66,11 +66,13 @@ import type {
   ContinueAsNewCommand,
   HistoryEvent,
   LeasedActivityTask,
+  QueueWorkers,
   TaskToken,
   WorkflowTask,
   WorkflowTaskResult,
 } from '../protocol';
 import {completedSeqs, pendingWork} from './pending_work';
+import {createWorkerRegistry} from './worker_registry';
 import type {ExecutionRecord, HistoryStore} from './ports/history_store';
 import {silentLogger, type Logger} from './ports/logger';
 import type {TaskQueue} from './ports/task_queue';
@@ -204,6 +206,15 @@ export interface ServerCore {
   terminate(workflowId: string, reason: string): Promise<void>;
   /** Rebuild correlation + re-dispatch pending work from persisted history (crash recovery). */
   resumeFromHistory(records: ExecutionRecord[]): Promise<void>;
+  /**
+   * Which task queues are being polled, and when each was last asked.
+   *
+   * Lives here rather than beside the other read views because it is derived
+   * from the poll calls this module serves, not from history — it is the one
+   * piece of inspection with no durable record behind it. See
+   * `worker_registry.ts`.
+   */
+  listQueues(): QueueWorkers[];
   // ── worker-facing seam (for out-of-process workers; see WorkflowService) ──
   pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
@@ -242,6 +253,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
 
   const childrenByParent = new Map<string, Map<number, string>>();
   const parentOfChild = new Map<string, {parentId: string; seq: number}>();
+  // Not injected and not persisted: worker liveness is an observation this
+  // process made, and must not outlive it. See `worker_registry.ts`.
+  const workerRegistry = createWorkerRegistry();
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
   const activityLeases = new Map<
@@ -759,6 +773,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   async function pollWorkflowTask(
     taskQueue?: string,
   ): Promise<WorkflowTask | undefined> {
+    // Before the queue is consulted, so an idle poll counts. A worker waiting
+    // on an empty queue is the strongest evidence of liveness there is, and
+    // recording only polls that found work would report a healthy idle fleet as
+    // absent — the exact inversion of what this is for.
+    workerRegistry.recordPoll('workflow', taskQueue);
     while (true) {
       const leased = workflowTaskQueue.poll(taskQueue);
       if (!leased) return undefined;
@@ -916,6 +935,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   async function pollActivityTask(
     taskQueue?: string,
   ): Promise<LeasedActivityTask | undefined> {
+    // See the note in `pollWorkflowTask`: recorded before the queue is
+    // consulted, so an idle poll still counts as liveness.
+    workerRegistry.recordPoll('activity', taskQueue);
     const task = activityTaskQueue.poll(taskQueue);
     if (!task) return undefined;
     activityLeases.set(task.token, {
@@ -978,6 +1000,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     requestCancel,
     terminate,
     resumeFromHistory,
+    listQueues: workerRegistry.queues,
     pollWorkflowTask,
     completeWorkflowTask,
     failWorkflowTask,

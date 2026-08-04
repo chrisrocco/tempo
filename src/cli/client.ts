@@ -1,9 +1,9 @@
 /**
  * @fileoverview
  * The workflow-driving CLI commands — `start`, `result`, `signal`, `cancel` — and
- * the read-only ones — `describe`, `list` — over the same `RemoteService` an
- * application client uses. The CLI is a front door onto that seam, not a second
- * protocol.
+ * the read-only ones — `describe`, `list`, `queues` — over the same
+ * `RemoteService` an application client uses. The CLI is a front door onto that
+ * seam, not a second protocol.
  *
  * Note the seam's shape: writes are fire-and-forget (errors surface later) and
  * `getResult` is the authoritative await. So these commands probe the server for
@@ -13,10 +13,15 @@
  * The read commands render; they do not decide. Everything they show is derived
  * server-side (see `server/execution_view.ts`) so that the CLI and any other
  * client see one answer, and `--json` hands that answer over unformatted for
- * anything that would rather parse than read.
+ * anything that would rather parse than read. `queues` is the one read that is
+ * not derived from history at all — worker liveness is an observation the
+ * running server made, and nothing durable backs it (see
+ * `server/worker_registry.ts`).
  */
 
 import {
+  ANY_TASK_QUEUE,
+  QUEUE_STALE_MS,
   isStuck,
   type ExecutionDetail,
   type DescribeOptions,
@@ -323,6 +328,63 @@ export async function listExecutions(
       `\n… more. Continue with --cursor=${page.nextCursor}\n`,
     );
   return 0;
+}
+
+/**
+ * `tempo queues` — which pools are being asked for work.
+ *
+ * The one question the execution commands cannot answer. `tempo describe` on an
+ * execution parked forever on an activity looks identical whether a worker is
+ * about to claim it or nothing has ever polled its queue, and the second is
+ * usually a deployment mistake rather than a code one.
+ *
+ * The wording is deliberately about polling rather than about workers: a
+ * sequential worker inside a long activity stops polling and reads as absent
+ * here (see `isQueueServed`), so "nothing is polling" is what was observed and
+ * "no worker exists" is only one of its two explanations.
+ */
+export async function listQueues(
+  serverUrl: string,
+  asJson: boolean,
+): Promise<number> {
+  await assertReachable(serverUrl);
+  const queues = await createRemoteService(serverUrl).listQueues();
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify(queues, null, 2)}\n`);
+    return 0;
+  }
+  if (queues.length === 0) {
+    process.stdout.write('no worker has polled this server since it started\n');
+    return 0;
+  }
+  const now = Date.now();
+  const width = Math.max(...queues.map((q) => q.taskQueue.length), 10);
+  process.stdout.write(
+    `${'TASK QUEUE'.padEnd(width)}  ${'WORKFLOW'.padEnd(10)}  ACTIVITY\n`,
+  );
+  for (const q of queues) {
+    process.stdout.write(
+      `${q.taskQueue.padEnd(width)}  ${describePoll(q.workflowPolledAt, now).padEnd(10)}  ${describePoll(q.activityPolledAt, now)}\n`,
+    );
+  }
+  if (queues.some((q) => q.taskQueue === ANY_TASK_QUEUE))
+    process.stdout.write(
+      `\n${ANY_TASK_QUEUE} is a worker polling every queue — the in-process runtime does this.\n`,
+    );
+  return 0;
+}
+
+/** How a single role's last poll reads on one line. */
+function describePoll(polledAt: number | undefined, now: number): string {
+  if (polledAt === undefined) return 'never';
+  const ago = now - polledAt;
+  return ago <= QUEUE_STALE_MS ? 'live' : `${formatDuration(ago)} ago`;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  return `${Math.round(ms / 3_600_000)}h`;
 }
 
 export function resolveServerUrl(flag: string | undefined): string {

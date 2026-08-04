@@ -46,6 +46,7 @@ export type RpcRequest =
       options?: DescribeOptions;
     }
   | {method: 'listExecutions'; filter?: ExecutionFilter}
+  | {method: 'listQueues'}
   | {method: 'pollWorkflowTask'; taskQueue?: string}
   | {
       method: 'completeWorkflowTask';

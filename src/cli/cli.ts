@@ -7,7 +7,7 @@
  * Built today: `up <entry>` (run server + worker in the foreground, or one
  * workflow to completion with `--run`), the workflow-driving commands
  * `start` / `result` / `signal` / `cancel`, and the read-only `list` /
- * `describe`.
+ * `describe` / `queues`.
  *
  * The deployment half of the surface is designed but not built (tracked in
  * planning/sprints/01-deployment-api.md). The target:
@@ -33,6 +33,7 @@ import {
   describeExecution,
   fetchResult,
   listExecutions,
+  listQueues,
   parseWorkflowArg,
   resolveServerUrl,
   sendSignal,
@@ -75,11 +76,19 @@ Usage:
   tempo describe <workflow-id> [--json] [--from=N] [--limit=N]
       Status, what the execution is waiting on, and its history. Long
       histories show the most recent page; --from=0 starts at the beginning.
+  tempo queues [--json]
+      Which task queues workers are polling, per role. The question the
+      execution commands cannot answer: an execution parked on an activity
+      reads the same whether a worker is about to claim it or nothing has
+      ever polled its queue. A queue that reads "live" is being asked for
+      work right now. Note that a worker busy inside a long activity stops
+      polling, so a silent queue means "nothing is asking" — which is
+      either no worker, or every worker saturated.
 
 Options:
   --server=URL   Server to talk to. Default $TEMPO_SERVER_URL, else
                  http://127.0.0.1:7233.
-  --json         Machine-readable output, for list and describe.
+  --json         Machine-readable output, for list, describe, and queues.
 `;
 
 interface ParsedArgs {
@@ -171,6 +180,8 @@ async function dispatch(argv: string[]): Promise<number> {
         ...(flags.get('limit') ? {limit: Number(flags.get('limit'))} : {}),
         ...(flags.get('cursor') ? {cursor: flags.get('cursor')} : {}),
       });
+    case 'queues':
+      return listQueues(serverUrl, flags.has('json'));
     case 'describe':
       return describeExecution(
         serverUrl,

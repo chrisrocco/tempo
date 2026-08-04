@@ -31,8 +31,12 @@
  */
 
 import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
-import type {ExecutionDetail as Detail} from '../src/protocol/service';
-import {isStuck} from '../src/protocol/service.js';
+import type {
+  ExecutionDetail as Detail,
+  QueueWorkers,
+  WorkerRole,
+} from '../src/protocol/service';
+import {isQueueServed, isStuck} from '../src/protocol/service.js';
 import {client} from './client.js';
 import {Poller} from './poller.js';
 import {executionsHref} from './routes.js';
@@ -68,6 +72,18 @@ export class ExecutionDetailView extends LitElement {
       this.fromEvent === undefined ? {} : {fromEvent: this.fromEvent},
       signal,
     ),
+  );
+
+  /**
+   * Queue liveness, polled separately from the execution.
+   *
+   * Its own poller because it is a different subject with a different lifetime:
+   * paging the history replaces the detail request, and folding these into one
+   * call would re-read the fleet every time someone turned a page — while
+   * making the "waiting on" panel flicker whenever either half was in flight.
+   */
+  private readonly queues = new Poller<QueueWorkers[]>(this, (signal) =>
+    client.listQueues(signal),
   );
 
   private polling = '';
@@ -169,6 +185,18 @@ export class ExecutionDetailView extends LitElement {
         color: var(--muted);
         font-size: 12px;
         margin-top: 10px;
+      }
+      .unserved {
+        background: var(--warn-bg);
+        color: var(--warn);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin: 0 0 12px;
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+      .unserved code {
+        font-family: var(--mono);
       }
       .status {
         min-height: 18px;
@@ -309,6 +337,39 @@ export class ExecutionDetailView extends LitElement {
    * the diagnosis — it means mid-task or wedged, and an absent panel would read
    * as an absent answer.
    */
+  /**
+   * Whether anything is polling this execution's queue for `role`.
+   *
+   * `undefined` while the fleet has not been read yet, which renders as nothing
+   * rather than as a warning — an unanswered question must not look like a bad
+   * answer, especially on first paint.
+   */
+  private served(detail: Detail, role: WorkerRole): boolean | undefined {
+    const queues = this.queues.value;
+    if (queues === undefined) return undefined;
+    return isQueueServed(queues, detail.taskQueue, role, Date.now());
+  }
+
+  /**
+   * The warning that turns "waiting" into a diagnosis.
+   *
+   * Worded as what was observed rather than what it implies. A sequential
+   * worker inside a long activity stops polling and is indistinguishable from
+   * an absent one (see `isQueueServed`), so this says nothing is asking for
+   * work and names both explanations instead of picking one.
+   */
+  private unservedWarning(
+    detail: Detail,
+    role: WorkerRole,
+  ): TemplateResult | typeof nothing {
+    if (this.served(detail, role) !== false) return nothing;
+    return html`<div class="unserved">
+      Nothing is polling <code>${detail.taskQueue}</code> for ${role} work —
+      either no ${role} worker is running, or every worker on this queue is
+      busy. This execution cannot progress until one asks.
+    </div>`;
+  }
+
   private pendingPanel(detail: Detail): TemplateResult | typeof nothing {
     if (detail.status !== 'running') return nothing;
     const {activities, timers, children} = detail.pending;
@@ -318,6 +379,16 @@ export class ExecutionDetailView extends LitElement {
     return html`
       <div class="panel">
         <h2>Waiting on</h2>
+        ${
+          // A pending activity that nobody is polling for is the case this
+          // whole registry exists to surface. The workflow-role warning goes on
+          // the empty case instead: nothing dispatched and no workflow worker
+          // means the execution has never been replayed at all.
+          activities.length > 0
+            ? this.unservedWarning(detail, 'activity')
+            : nothing
+        }
+        ${empty ? this.unservedWarning(detail, 'workflow') : nothing}
         ${
           empty
             ? html`<div class="muted">

@@ -21,6 +21,7 @@ import type {
   ExecutionFilter,
   ExecutionPage,
   LeasedActivityTask,
+  QueueWorkers,
   StartWorkflowOptions,
   TaskToken,
   WorkflowOutcome,
@@ -84,6 +85,8 @@ export interface ServerHost {
     options?: DescribeOptions,
   ): Promise<ExecutionDetail | undefined>;
   listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
+  /** Which task queues are being polled, and when each was last asked. */
+  listQueues(): Promise<QueueWorkers[]>;
   pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
@@ -208,6 +211,9 @@ export function createServerHost(
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
+    },
+    async listQueues() {
+      return core.listQueues();
     },
     pollWorkflowTask(taskQueue) {
       return core.pollWorkflowTask(taskQueue);

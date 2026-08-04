@@ -16,8 +16,26 @@ and nothing else.
 **Phase 0 is complete**, and the two views built on it are in: the executions
 list (filter bar, paging, `STUCK` badge) and the execution detail view (the two
 failure panels, pending work, carryover, paged history, and the control
-actions). What is left from the plan below is the **Queues & types** view, plus
-the two deferred items — SSE and the worker registry.
+actions).
+
+**The worker registry landed early**, promoted out of "deferred" once the detail
+view made the gap obvious: `Waiting on — activity #0 greet` renders identically
+whether a worker is about to claim it or nothing has ever polled that queue, and
+the second is the more common cause of "it's stuck". The server now records
+which queues are polled per role (`server/worker_registry.ts`), `tempo queues`
+reports it, and the detail view warns when the queue an execution is parked on
+has nothing asking it for work.
+
+It reports **polls, not workers** — no poll carries a worker identity, so the
+server cannot count them. It also cannot distinguish an absent worker from a
+saturated one, because the activity loop is sequential: a worker inside a long
+activity stops polling. Both readings matter to an operator, so the wording says
+what was observed rather than what it implies. Per-worker identity and
+outstanding-lease tracking would separate them, and are the natural follow-ons.
+
+What is left from the plan below is the **Queues & types** view — now much
+cheaper, since queue liveness and `taskQueue` on the summary both exist — and
+SSE.
 
 Two things the sprint did not anticipate, both landed here:
 
@@ -117,7 +135,10 @@ Not optional; nothing below works without it.
 
 Deferred, and worth their own sprint: an SSE endpoint so the UI stops polling,
 and a worker registry so "is anything actually serving my queue" becomes
-answerable at all.
+answerable at all. **The registry was pulled forward and is built — see
+Status.** SSE remains deferred, and is cheap to land whenever: `ui/poller.ts`
+put every repeating read behind one controller, so it is a swap in one module
+rather than in every view.
 
 ## Views
 

@@ -21,6 +21,7 @@ import type {
   ExecutionDetail,
   ExecutionFilter,
   ExecutionPage,
+  QueueWorkers,
   StartWorkflowOptions,
 } from '../src/protocol/service';
 
@@ -58,6 +59,11 @@ export const client = {
     signal?: AbortSignal,
   ): Promise<ExecutionPage> {
     return call<ExecutionPage>({method: 'listExecutions', filter}, signal);
+  },
+
+  /** Which task queues are being polled — see `isQueueServed`. */
+  listQueues(signal?: AbortSignal): Promise<QueueWorkers[]> {
+    return call<QueueWorkers[]>({method: 'listQueues'}, signal);
   },
 
   /** `null` rather than undefined on the wire — an unknown id, not an error. */
