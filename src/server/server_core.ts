@@ -278,8 +278,23 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     return e instanceof Error ? e.message : String(e);
   }
 
+  /**
+   * The one place an event enters durable history, and therefore the one place
+   * it is timestamped.
+   *
+   * The stamp is the *server's* clock at append time, taken once. Workers cannot
+   * supply it: they are stateless and interchangeable, so a task's timings would
+   * be a mix of whichever machines happened to serve it. And it must not be
+   * recomputed on read — an event's time is a fact about when it happened, not
+   * about when someone asked.
+   *
+   * Everything funnels through here so that stays true. `appendSignal` used to
+   * call the store directly, which would have left externally injected signals
+   * as the one event kind with no time on it — the kind an operator is most
+   * likely to be looking for.
+   */
   function appendEvent(workflowId: string, event: HistoryEvent): Promise<void> {
-    return historyStore.append(workflowId, [event]);
+    return historyStore.append(workflowId, [{...event, ts: Date.now()}]);
   }
 
   /**
@@ -626,9 +641,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     signalName: string,
     payload: unknown,
   ): Promise<void> {
-    await historyStore.append(workflowId, [
-      {type: 'signal', name: signalName, payload},
-    ]);
+    await appendEvent(workflowId, {
+      type: 'signal',
+      name: signalName,
+      payload,
+    });
     wake(workflowId);
   }
 

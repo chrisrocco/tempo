@@ -99,14 +99,15 @@ describe('server child dispatch — the fire-and-forget marker', () => {
     await runTask(serverOver(store).core, 'par', spawner);
 
     const history = (await store.get('par'))!.history;
-    expect(history).toEqual([
-      {
+    expect(history.length).toBe(1);
+    expect(history[0]).toEqual(
+      jasmine.objectContaining({
         type: 'childStarted',
         seq: 0,
         childId: childExecutionId('par', 0, 0),
         detached: true,
-      },
-    ]);
+      }),
+    );
   });
 
   /**
@@ -154,7 +155,7 @@ describe('server child dispatch — the fire-and-forget marker', () => {
     await restarted.core.requestCancel('par');
 
     const child = childOf(await store.list());
-    expect(child.history).toContain({type: 'cancelRequested'});
+    expect(child.history.some((e) => e.type === 'cancelRequested')).toBeTrue();
   });
 });
 
@@ -167,14 +168,16 @@ describe('server child dispatch — blocking children still correlate', () => {
 
     await runTask(serverOver(store).core, 'par', blocking);
 
-    expect((await store.get('par'))!.history).toEqual([
-      {
+    const history = (await store.get('par'))!.history;
+    expect(history.length).toBe(1);
+    expect(history[0]).toEqual(
+      jasmine.objectContaining({
         type: 'childStarted',
         seq: 0,
         childId: childExecutionId('par', 0, 0),
         detached: false,
-      },
-    ]);
+      }),
+    );
   });
 
   /**
@@ -192,10 +195,12 @@ describe('server child dispatch — blocking children still correlate', () => {
     const restarted = serverOver(store);
     await restarted.core.resumeFromHistory(await store.list());
 
-    expect((await store.get('par'))!.history).toContain({
-      type: 'childCompleted',
-      seq: 0,
-      result: 'child-result',
-    });
+    expect((await store.get('par'))!.history).toContain(
+      jasmine.objectContaining({
+        type: 'childCompleted',
+        seq: 0,
+        result: 'child-result',
+      }),
+    );
   });
 });
