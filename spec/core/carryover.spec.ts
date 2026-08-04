@@ -31,16 +31,62 @@ function wait(ms: number): Promise<void> {
 }
 
 describe('carryover', () => {
-  it('reads back what was written, later in the same run', async () => {
+  /**
+   * The load-bearing property, and the counter-intuitive one. A write is for the
+   * *next* run; within this run every read keeps returning what the run started
+   * with, however many tasks it takes.
+   *
+   * It has to work this way. Every task re-runs the workflow from line one, so a
+   * read that could see an earlier task's write would make this task's commands
+   * depend on state that is not in history — and replay would diverge from what
+   * history records. The next test is that failure, made concrete.
+   */
+  it('does not show a write to a later read in the same run', async () => {
     const rt = createLocalRuntime()
       .registerActivity('noop', () => 'ok')
       .registerWorkflow('wf', async () => {
         setCarryover('cursor', 41);
         await runActivity('noop'); // suspend and resume across a task boundary
-        return getCarryover<number>('cursor')! + 1;
+        return getCarryover<number>('cursor') ?? 'still unset';
       });
 
-    await expectAsync(rt.start<number>('wf').result()).toBeResolvedTo(42);
+    await expectAsync(rt.start<string>('wf').result()).toBeResolvedTo(
+      'still unset',
+    );
+    rt.shutdown();
+  });
+
+  /**
+   * The regression test for why reads are run-scoped.
+   *
+   * This workflow branches on carryover to choose an activity argument — the
+   * shape any cursor-driven poller has. With per-task reads the second task
+   * passed a different argument than history recorded, and the execution wedged
+   * on `nondeterminism at seq N` while looking merely "running".
+   */
+  it('lets a workflow branch on carryover without breaking replay', async () => {
+    const store = new MemoryHistoryStore();
+    const seen: (number | undefined)[] = [];
+    const rt = createLocalRuntime({historyStore: store})
+      .registerActivity('fetch', (since?: number) => {
+        seen.push(since);
+        return since === undefined ? [1, 2, 3] : [];
+      })
+      .registerWorkflow('wf', async () => {
+        const since = getCarryover<number>('cursor');
+        const items = await runActivity<number[]>('fetch', since);
+        if (items.length > 0) setCarryover('cursor', items[items.length - 1]);
+        await sleep(5);
+        return `saw ${items.length}`;
+      });
+
+    await expectAsync(
+      rt.start<string>('wf', [], {workflowId: 'wf-1'}).result(),
+    ).toBeResolvedTo('saw 3');
+
+    const rec = await store.get('wf-1');
+    expect(rec!.taskFailures).toBe(0); // no nondeterminism
+    expect(rec!.status).toBe('completed');
     rt.shutdown();
   });
 
@@ -76,14 +122,18 @@ describe('carryover', () => {
     rt.shutdown();
   });
 
-  it('is written to the record on every task, not only at a rollover', async () => {
+  /**
+   * The record's carryover is what every task of a run is built from, so it must
+   * not move while the run is in flight — that is precisely what would let two
+   * tasks of one run disagree. Writes wait for the rollover.
+   */
+  it('leaves the stored value alone until the run rolls over', async () => {
     const store = new MemoryHistoryStore();
     const rt = createLocalRuntime({historyStore: store})
       .registerActivity('noop', () => 'ok')
       .registerWorkflow('wf', async () => {
-        setCarryover('cursor', 'first');
+        setCarryover('cursor', 'written');
         await runActivity('noop');
-        setCarryover('cursor', 'second');
         await sleep(10_000); // park here, with no rollover in sight
         return 'unreachable';
       });
@@ -91,29 +141,37 @@ describe('carryover', () => {
     rt.start('wf', [], {workflowId: 'wf-1'});
     await wait(60);
 
-    // A crash here must not lose the write, and `describe` must not show stale
-    // state — both follow from the record already holding it.
     const rec = await store.get('wf-1');
-    expect(rec!.carryover['cursor']).toBe('second');
+    expect(rec!.carryover).toEqual({}); // unchanged mid-run
     expect(rec!.status).toBe('running');
     rt.shutdown();
   });
 
+  // Across a rollover, because that is the only place carryover is adopted —
+  // asserting on a run that never rolls over would pass against an empty record
+  // whether or not clearing worked at all.
   it('drops a cleared key rather than carrying it forward', async () => {
     const store = new MemoryHistoryStore();
     const rt = createLocalRuntime({historyStore: store})
       .registerActivity('noop', () => 'ok')
       .registerWorkflow('wf', async () => {
-        setCarryover('temp', 'here');
+        const run = (getCarryover<number>('run') ?? 0) + 1;
+        setCarryover('run', run);
+        if (run === 1) setCarryover('temp', 'here');
+        else clearCarryover('temp');
         await runActivity('noop');
-        clearCarryover('temp');
-        return 'done';
+        if (run >= 3) return 'done';
+        return continueAsNew();
       });
 
     await rt.start('wf', [], {workflowId: 'wf-1'}).result();
 
     const rec = await store.get('wf-1');
-    expect('temp' in rec!.carryover).toBeFalse();
+    // 2, not 3: carryover is adopted at a rollover, and the third run *completed*
+    // rather than rolling over — there is no next run to adopt it for. So the
+    // stored value is what run 2 left for run 3.
+    expect(rec!.carryover['run']).toBe(2); // the rollovers really happened
+    expect('temp' in rec!.carryover).toBeFalse(); // and the key did not survive
     rt.shutdown();
   });
 
@@ -145,32 +203,28 @@ describe('carryover', () => {
   });
 
   /**
-   * The subtlest thing about carryover, and the reason writes are suppressed
-   * during replay.
-   *
-   * Every task re-runs the workflow from its first line. If a replayed write
-   * applied, this read-modify-write would run once per *task* rather than once
-   * where it is written — the counter would count tasks, and its value would
-   * depend on how the execution happened to be scheduled rather than on its
-   * history. Written before the activity and read after it, this returns 1 only
-   * because the second task's pass over the same line is suppressed.
+   * A read-modify-write increments once per *run*, not once per task, because
+   * the read is the run's seed. Without that, the count would follow how many
+   * tasks the execution happened to take — an artefact of scheduling rather than
+   * anything the author wrote.
    */
-  it('applies a write once, not once per task that replays it', async () => {
-    const store = new MemoryHistoryStore();
-    const rt = createLocalRuntime({historyStore: store})
+  it('increments once per run, however many tasks the run takes', async () => {
+    const rt = createLocalRuntime()
       .registerActivity('noop', () => 'ok')
       .registerWorkflow('wf', async () => {
-        const seen = getCarryover<number>('n') ?? 0;
-        setCarryover('n', seen + 1);
+        const runs = (getCarryover<number>('runs') ?? 0) + 1;
+        setCarryover('runs', runs);
+        // Three task boundaries in one run; the count must still be 1.
         await runActivity('noop');
-        return getCarryover<number>('n');
+        await runActivity('noop');
+        await sleep(5);
+        if (runs >= 2) return `ran ${runs} times`;
+        return continueAsNew();
       });
 
-    // One task per replay; the count must reflect tasks, not replays-within-task.
-    const result = await rt
-      .start<number>('wf', [], {workflowId: 'wf-1'})
-      .result();
-    expect(result).toBe(1);
+    await expectAsync(rt.start<string>('wf').result()).toBeResolvedTo(
+      'ran 2 times',
+    );
     rt.shutdown();
   });
 

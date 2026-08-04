@@ -116,14 +116,14 @@ export function createWorkflowWorker(
         carryover,
       );
       await replay(ctx, fn);
-      assertCarryoverFits(name, ctx.carryover);
+      assertCarryoverFits(name, ctx.carryoverNext);
       return {
         done: ctx.done,
         result: ctx.result,
         failed: ctx.failed,
         failure: ctx.failure,
         commands: ctx.commands,
-        carryover: ctx.carryover,
+        carryover: ctx.carryoverNext,
       };
     },
   };

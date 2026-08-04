@@ -121,6 +121,132 @@ describe('pollForever', () => {
     rt.shutdown();
   });
 
+  /**
+   * Why `cursor` is not an optimization.
+   *
+   * A repeat claim starts no child, but it still writes a `childStarted` marker
+   * — the marker is what stops replay re-dispatching it. So without a cursor a
+   * feed of twenty unchanged items writes twenty events *every cycle*, forever,
+   * and history is bounded only by rolling over constantly. With one, a cycle
+   * that finds nothing new writes no markers at all.
+   */
+  it('stops writing a marker per item once the cursor has passed them', async () => {
+    const started: string[] = [];
+    const store = new MemoryHistoryStore();
+    const feed = Array.from({length: 20}, (_, i) => ({
+      id: `i${i}`,
+      seq: i + 1,
+    }));
+    const rt = createLocalRuntime({historyStore: store})
+      // A source that cannot filter: it returns everything, every time. The
+      // skipping has to happen here.
+      .registerActivity('fetch', () => feed)
+      .registerWorkflow('handle', async (item: {id: string}) => {
+        started.push(item.id);
+        return 'ok';
+      })
+      .registerWorkflow('monitor', async () =>
+        pollForever<{id: string; seq: number}, number>({
+          everyMs: 5,
+          poll: () => runActivity<{id: string; seq: number}[]>('fetch'),
+          child: 'handle',
+          childId: (item) => `c-${item.id}`,
+          cursor: (item) => item.seq,
+        }),
+      );
+
+    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    await wait(250);
+    handle.terminate('done');
+    await wait(20);
+
+    const rec = await store.get('mon');
+    expect(new Set(started).size).toBe(20); // every item handled, once
+    expect(rec!.carryover['pollForever.cursor']).toBe(20);
+    // The steady state: the run it is sitting in claims nothing.
+    expect(rec!.history.filter((e) => e.type === 'childStarted').length).toBe(
+      0,
+    );
+    rt.shutdown();
+  });
+
+  /**
+   * The regression test for the bug this design was built around. A cursor read
+   * feeds the poll activity's argument, so with per-task carryover reads the
+   * second task passed a different argument than history recorded and the
+   * execution wedged on `nondeterminism at seq N` — while still reporting
+   * "running".
+   */
+  it('does not wedge when the cursor feeds the poll arguments', async () => {
+    const store = new MemoryHistoryStore();
+    const feed = [
+      {id: 'a', seq: 1},
+      {id: 'b', seq: 2},
+    ];
+    const seenSince: (number | undefined)[] = [];
+    const rt = createLocalRuntime({historyStore: store})
+      .registerActivity('fetch', (since?: number) => {
+        seenSince.push(since);
+        return since === undefined ? feed : feed.filter((i) => i.seq > since);
+      })
+      .registerWorkflow('handle', async () => 'ok')
+      .registerWorkflow('monitor', async () =>
+        pollForever<{id: string; seq: number}, number>({
+          everyMs: 5,
+          poll: (since) =>
+            runActivity<{id: string; seq: number}[]>('fetch', since),
+          child: 'handle',
+          childId: (item) => `c-${item.id}`,
+          cursor: (item) => item.seq,
+        }),
+      );
+
+    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    await wait(250);
+    handle.terminate('done');
+    await wait(20);
+
+    const rec = await store.get('mon');
+    expect(rec!.taskFailures).toBe(0);
+    expect(rec!.lastTaskFailure).toBeUndefined();
+    // And the cursor really did reach the source, rather than staying undefined.
+    expect(seenSince).toContain(2);
+    rt.shutdown();
+  });
+
+  it('picks up an item that appears above the cursor', async () => {
+    const started: string[] = [];
+    const feed = [{id: 'a', seq: 1}];
+    const rt = createLocalRuntime()
+      .registerActivity('fetch', (since?: number) =>
+        feed.filter((i) => since === undefined || i.seq > since),
+      )
+      .registerWorkflow('handle', async (item: {id: string}) => {
+        started.push(item.id);
+        return 'ok';
+      })
+      .registerWorkflow('monitor', async () =>
+        pollForever<{id: string; seq: number}, number>({
+          everyMs: 5,
+          poll: (since) =>
+            runActivity<{id: string; seq: number}[]>('fetch', since),
+          child: 'handle',
+          childId: (item) => `c-${item.id}`,
+          cursor: (item) => item.seq,
+        }),
+      );
+
+    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    await wait(120);
+    feed.push({id: 'b', seq: 2}); // a new item arrives mid-flight
+    await wait(160);
+    handle.terminate('done');
+    await wait(20);
+
+    expect(started).toEqual(['a', 'b']);
+    rt.shutdown();
+  });
+
   it('stops when the execution is cancelled', async () => {
     let cycles = 0;
     const {rt} = harness(() => {

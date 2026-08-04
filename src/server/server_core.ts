@@ -430,12 +430,16 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   ): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
-    // Before any disposition below, and unconditionally: carryover is state as
-    // of the end of this task whatever the task decided, and storing it per task
-    // rather than only at rollover is what makes it survive a crash and what
-    // makes `describe` show the live value.
-    if (result.carryover !== undefined)
-      await historyStore.setCarryover(workflowId, result.carryover);
+    // Note what is deliberately *not* here: storing carryover on every task.
+    //
+    // The record's carryover is what every task of this run is built from, so
+    // updating it mid-run would make two tasks of one run see different values.
+    // The workflow re-runs from its first line on every task, so its commands
+    // would then depend on state that is not in history and replay would diverge
+    // — `nondeterminism at seq N`, and a wedged execution. It is adopted at
+    // continue-as-new instead, which is where a new run legitimately begins.
+    // Nothing is lost by waiting: the value is a function of the seed and the
+    // history, so each replay recomputes it.
     if (result.done) {
       await historyStore.setStatus(workflowId, 'completed', {
         result: result.result,
@@ -470,6 +474,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       (c): c is ContinueAsNewCommand => c.type === 'continueAsNew',
     );
     if (caN) {
+      // Adopt the run's writes first: the new run must be built from them, and
+      // this is the one moment where changing the seed cannot split a run.
+      if (result.carryover !== undefined)
+        await historyStore.setCarryover(workflowId, result.carryover);
       await historyStore.resetForContinueAsNew(workflowId, caN.args);
       wake(workflowId); // drive the fresh run
       return;

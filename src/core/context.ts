@@ -70,11 +70,22 @@ export interface WorkflowContext {
   /** Server-provided hint: history has grown enough to consider continue-as-new. */
   continueAsNewSuggested: boolean;
   /**
-   * Durable state the workflow keeps across its own runs, seeded from the task
-   * and reported back at the end of it. Mutable by workflow code through
-   * `carryover.ts` — see there for what it is for.
+   * What this **run** started with. Constant for the whole run: every task of it
+   * is built from the same value, so a read cannot vary between replays. That is
+   * what lets workflow code branch on carryover without breaking determinism —
+   * see `carryover.ts`.
    */
   carryover: Carryover;
+  /**
+   * What the *next* run should start with: this run's writes, applied on top of
+   * the seed. Reported at the end of every task and adopted at continue-as-new.
+   *
+   * Separate from `carryover` because they are read at different times. Folding
+   * them into one field is the bug this pair exists to prevent: a write would
+   * become visible to a later task of the same run, the commands that task
+   * issues would depend on it, and replay would diverge from history.
+   */
+  carryoverNext: Carryover;
 }
 
 // ── context propagation ────────────────────────────────────────────────
@@ -95,10 +106,11 @@ export function createContext(
   return {
     args,
     events,
-    // Copied, not aliased: the task's carryover belongs to the caller, and a
-    // replay that mutated it in place would leave the caller's copy holding the
-    // *result* of the replay it was supposed to be the input to.
+    // Both copied, not aliased: the task's carryover belongs to the caller, and
+    // a replay that mutated it in place would leave the caller's copy holding
+    // the *result* of the replay it was supposed to be the input to.
     carryover: {...carryover},
+    carryoverNext: {...carryover},
     idx: 0,
     seq: 0,
     condSeq: 0,
