@@ -89,6 +89,11 @@ export interface UpOptions {
   /** Persist history here; omit for an in-memory server. */
   dataDir?: string;
   /**
+   * Serve the dashboard at /ui from this directory. Off unless asked for: it can
+   * terminate executions and the transport has no auth.
+   */
+  uiRoot?: string;
+  /**
    * Run one workflow, print its result, and tear the topology down again,
    * instead of staying up until interrupted.
    */
@@ -117,6 +122,7 @@ export async function up(options: UpOptions): Promise<number> {
       HOST: options.host,
       PORT: String(options.port ?? 0),
       DATA_DIR: options.dataDir,
+      UI_ROOT: options.uiRoot,
     },
   });
   forwardOutput(server, 'server');
@@ -132,6 +138,8 @@ export async function up(options: UpOptions): Promise<number> {
     );
     const serverUrl = `http://${connectableHost(boundHost!)}:${port}`;
     process.stdout.write(`tempo: server listening on ${serverUrl}\n`);
+    if (options.uiRoot)
+      process.stdout.write(`tempo: dashboard at ${serverUrl}/ui\n`);
     if (!isLoopbackHost(boundHost!))
       process.stdout.write(
         `tempo: bound ${boundHost} — reachable from other machines, and the RPC has no auth or TLS\n`,
