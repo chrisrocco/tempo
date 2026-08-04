@@ -138,7 +138,7 @@ with this in mind.
 
 ## Chapters
 
-Each is one runnable example plus enough prose to say why. **Part I is the
+Twelve, each one runnable example plus enough prose to say why. **Part I is the
 vertical slice**: if the format is wrong, it is wrong by chapter three.
 
 ### Part I — the model
@@ -159,24 +159,52 @@ vertical slice**: if the format is wrong, it is wrong by chapter three.
 
 ### Part III — interaction and composition
 
-| #   | Chapter            | What it has to earn                                                    |
-| --- | ------------------ | ---------------------------------------------------------------------- |
-| 7   | Signals and waiting on them | Hold a booking until someone approves it                       |
-| 8   | Child workflows    | Fan out per passenger; a failed child's id is spent for good           |
-| 9   | Running forever    | Rolling over, what survives it, and watching a fare feed               |
+| #   | Chapter                     | What it has to earn                                             |
+| --- | --------------------------- | --------------------------------------------------------------- |
+| 7   | Signals and waiting on them | Hold a booking until someone approves it                        |
+| 8   | Signals that keep arriving  | Seat changes during the pipeline, consumed as ordinary control flow, on a branch beside the main line |
+| 9   | Child workflows             | Fan out per passenger; a failed child's id is spent for good    |
+| 10  | Running forever             | Rolling over, what survives it, and watching a fare feed        |
 
 ### Part IV — operating
 
 | #   | Chapter             | What it has to earn                                                        |
 | --- | ------------------- | -------------------------------------------------------------------------- |
-| 10  | Going distributed   | Server and workers as separate processes, and the failure semantics that **change** |
-| 11  | When it goes wrong  | Break determinism deliberately, find it, fix it, resume                    |
+| 11  | Going distributed   | Server and workers as separate processes, and the failure semantics that **change** |
+| 12  | When it goes wrong  | Break determinism deliberately, find it, fix it, resume                    |
 
-**Chapter 11 is the one worth fighting for.** Rules become intuition only after
+**Chapter 12 is the one worth fighting for.** Rules become intuition only after
 you have broken one and recovered. It is also the only chapter that exercises
 the observability surface end to end — a wedged execution reporting `running`,
 the badge that says so, and the queue view that answers "is anything even
 serving this?", which is the failure most often misdiagnosed as a code bug.
+
+### Why chapter 8 is its own chapter
+
+Chapter 7 is one signal and one wait. Consuming a *stream* of them looks like the
+same topic and is a different idea, because of what carries it: a consumer
+running on its own branch, beside the main line, whose commands still have to
+interleave identically on replay. **That is concurrency inside a workflow**, and
+it is the hardest thing on the author-facing surface. Folded into chapter 7 it
+would make chapter 7 the one readers bounce off.
+
+The spine already has the scenario: the passenger keeps changing seats while the
+booking pipeline runs. A watcher consuming seat changes until the ticket issues,
+beside `reserve → charge → issue`. It is the shape the helper's own
+documentation reaches for, and it needs nothing invented to motivate it.
+
+Four sharp edges the chapter exists to land, roughly in order of how badly they
+bite:
+
+| edge                                       | what happens if it is not taught |
+| ------------------------------------------ | -------------------------------- |
+| The stream's end condition must be an *engine* promise | A host promise makes the end point depend on wall-clock timing and diverges on replay — a determinism trap wearing a convenience API |
+| A branch is not a bare floating async call  | The bare form swallows the branch's failure and lets the workflow complete **successfully** with a dead branch |
+| One consumer per signal name                | A second consumer is rejected rather than silently displacing the first |
+| The default start position drops the backlog | Right for a window that just opened, wrong if catching up was the intent |
+
+Each is documented properly where it lives. The chapter shows the shape and
+names the trap; it does not restate the contract.
 
 ## What every chapter must not do
 
@@ -195,7 +223,7 @@ serving this?", which is the failure most often misdiagnosed as a code bug.
     for the "must not" list. The split to hold: the tutorial owns *sequence and
     motivation*, the module owns *contract and caveat*. When a chapter starts
     listing options, it has crossed over.
--   **Abandonment.** Eleven chapters is a lot to keep true. Mitigated by the
+-   **Abandonment.** Twelve chapters is a lot to keep true. Mitigated by the
     examples carrying the code and the specs carrying the examples, so what can
     rot is prose about *why*, which changes far more slowly than code.
 -   **Two audiences in one repo.** The README's reading order and this have
