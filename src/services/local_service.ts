@@ -360,6 +360,10 @@ export function createLocalService(
     },
     shutdown() {
       timerService.stop();
+      // Both are needed: the timer service holds workflow `sleep`, the core
+      // holds retry backoffs, and both are ref'd so that pending work keeps a
+      // process alive. Clearing only one leaves the other holding the loop.
+      core.stop();
     },
   };
 }
