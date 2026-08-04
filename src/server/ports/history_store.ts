@@ -30,6 +30,12 @@ export interface ExecutionRecord {
   result?: unknown;
   failure?: unknown;
   /**
+   * The stack behind `failure`, stored separately because `failure` is an
+   * arbitrary thrown value: over RPC it arrives already flattened to a message,
+   * and an `Error` does not survive JSON with its stack attached.
+   */
+  failureStack?: string;
+  /**
    * Consecutive workflow-task failures, reset by the next success. Durable
    * because the queues are not: a counter kept in the queue would reset on
    * exactly the restart a frustrated operator reaches for first, making a poison
@@ -120,7 +126,7 @@ export interface HistoryStore {
   setStatus(
     workflowId: string,
     status: ExecutionStatus,
-    outcome?: {result?: unknown; failure?: unknown},
+    outcome?: {result?: unknown; failure?: unknown; failureStack?: string},
   ): Promise<void>;
   /**
    * Continue-as-new: close the current run and begin a fresh one on the SAME

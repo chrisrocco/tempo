@@ -109,8 +109,15 @@ export function createRemoteService(
         // Any non-running status is terminal and must break the loop. Testing for
         // 'failed' alone would poll a terminated execution forever, since nothing
         // will ever move it to a status this knows about.
-        if (outcome.status !== 'running')
-          throw new Error(outcome.failure ?? `workflow ${outcome.status}`);
+        if (outcome.status !== 'running') {
+          const error = new Error(
+            outcome.failure ?? `workflow ${outcome.status}`,
+          );
+          // The stack from where it broke, not from this poll loop.
+          if (outcome.failureStack !== undefined)
+            error.stack = outcome.failureStack;
+          throw error;
+        }
         await sleep(pollIntervalMs);
       }
     },
@@ -150,7 +157,17 @@ export function createRemoteService(
         method: 'completeWorkflowTask',
         token,
         result: result.failed
-          ? {...result, failure: errorMessage(result.failure)}
+          ? {
+              ...result,
+              failure: errorMessage(result.failure),
+              // Sent alongside, because the flattening above is exactly what
+              // loses it: an Error JSON-serializes to `{}`.
+              failureStack:
+                result.failureStack ??
+                (result.failure instanceof Error
+                  ? result.failure.stack
+                  : undefined),
+            }
           : result,
       });
     },

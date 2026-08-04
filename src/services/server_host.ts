@@ -194,6 +194,7 @@ export function createServerHost(
           rec.status === 'failed' || rec.status === 'terminated'
             ? errorMessage(rec.failure)
             : undefined,
+        failureStack: rec.status === 'failed' ? rec.failureStack : undefined,
       };
     },
     async describeExecution(workflowId) {

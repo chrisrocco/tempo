@@ -444,6 +444,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (result.failed) {
       await historyStore.setStatus(workflowId, 'failed', {
         failure: result.failure,
+        // In-process the stack is on `failure` itself; over RPC that object was
+        // flattened to a message and the stack arrives here instead.
+        failureStack:
+          result.failureStack ??
+          (result.failure instanceof Error ? result.failure.stack : undefined),
       });
       log('execution.settled', {
         workflowId,
@@ -555,7 +560,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowId,
       result.ok
         ? {type: 'activityCompleted', seq, result: result.result}
-        : {type: 'activityFailed', seq, error: result.error},
+        : {
+            type: 'activityFailed',
+            seq,
+            error: result.error,
+            stack: result.stack,
+          },
     );
     await historyStore.clearActivityAttempts(workflowId, seq);
     log('activity.settled', {

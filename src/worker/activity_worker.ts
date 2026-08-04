@@ -65,7 +65,14 @@ export function createActivityWorker(
           try {
             return {ok: true, result: await fn(...task.args)};
           } catch (e) {
-            return {ok: false, error: (e as Error).message};
+            // This is the only place in the system holding the thrown Error, so
+            // it is the only place the stack can be taken from. Everything
+            // downstream sees strings.
+            return {
+              ok: false,
+              error: (e as Error).message,
+              stack: e instanceof Error ? e.stack : undefined,
+            };
           }
         },
       );

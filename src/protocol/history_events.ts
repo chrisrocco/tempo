@@ -23,6 +23,12 @@ export interface ActivityCompletedEvent extends CompletionEventBase {
 export interface ActivityFailedEvent extends CompletionEventBase {
   type: 'activityFailed';
   error: string;
+  /**
+   * The activity's own stack, from the worker process that ran it. Optional
+   * because history written before this field existed has none, and because a
+   * thrown non-Error has none to take.
+   */
+  stack?: string;
 }
 
 export interface TimerFiredEvent extends CompletionEventBase {

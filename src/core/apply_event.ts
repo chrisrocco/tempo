@@ -136,7 +136,27 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     });
   ctx.completions.delete(ev.seq);
   if (ev.type === 'activityFailed' || ev.type === 'childFailed')
-    waiter.reject(new Error(ev.error));
+    waiter.reject(failureError(ev));
   else if (ev.type === 'timerFired') waiter.resolve(undefined);
   else waiter.resolve(ev.result);
+}
+
+/**
+ * Rebuild the error a failed activity or child hands back to workflow code.
+ *
+ * The recorded stack is assigned unconditionally — **including when there is
+ * none**. The stack this Error is born with describes *replay*: frames inside
+ * apply_event, in a different process from the failure, re-derived on every
+ * re-run. That is worse than no stack at all, because it looks like one while
+ * pointing at the engine rather than at the line that threw, and it would be
+ * stored and printed as though it were the origin. So an origin without a stack
+ * (a thrown non-Error) yields an error without one, which is the honest answer.
+ *
+ * Determinism is unaffected: the value comes out of history, so every replay
+ * reconstructs the same error.
+ */
+function failureError(ev: {error: string; stack?: string}): Error {
+  const error = new Error(ev.error);
+  error.stack = ev.stack;
+  return error;
 }

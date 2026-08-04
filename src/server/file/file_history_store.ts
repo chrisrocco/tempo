@@ -39,11 +39,25 @@ interface PersistedMeta {
   status: ExecutionStatus;
   result?: unknown;
   failureMessage?: string;
+  /** Absent in data dirs written before stacks were carried; reads as undefined. */
+  failureStack?: string;
   /** Absent in data dirs written before task-failure tracking; reads as 0. */
   taskFailures?: number;
   lastTaskFailure?: string;
   /** Absent in data dirs written before server-decided retry; reads as empty. */
   activityAttempts?: Record<number, number>;
+}
+
+/**
+ * Rebuild the failure an in-process caller sees after a restart. The stack is
+ * reattached rather than left as the one `new Error` just synthesized here,
+ * which would describe the *loader* — frames inside the store, on the wrong
+ * process, dated to boot time.
+ */
+function restoreFailure(message: string, stack?: string): Error {
+  const error = new Error(message);
+  if (stack !== undefined) error.stack = stack;
+  return error;
 }
 
 function errorMessage(e: unknown): string {
@@ -191,13 +205,15 @@ export class FileHistoryStore implements HistoryStore {
   async setStatus(
     workflowId: string,
     status: ExecutionStatus,
-    outcome?: {result?: unknown; failure?: unknown},
+    outcome?: {result?: unknown; failure?: unknown; failureStack?: string},
   ): Promise<void> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.status = status;
     if (outcome && 'result' in outcome) rec.result = outcome.result;
     if (outcome && 'failure' in outcome) rec.failure = outcome.failure;
+    if (outcome && 'failureStack' in outcome)
+      rec.failureStack = outcome.failureStack;
     await this.enqueue(workflowId, () => this.writeMeta(rec));
   }
 
@@ -258,6 +274,7 @@ export class FileHistoryStore implements HistoryStore {
       result: rec.result,
       failureMessage:
         rec.failure !== undefined ? errorMessage(rec.failure) : undefined,
+      failureStack: rec.failureStack,
       taskFailures: rec.taskFailures,
       lastTaskFailure: rec.lastTaskFailure,
       activityAttempts: rec.activityAttempts,
@@ -303,8 +320,9 @@ export class FileHistoryStore implements HistoryStore {
         result: meta.result,
         failure:
           meta.failureMessage !== undefined
-            ? new Error(meta.failureMessage)
+            ? restoreFailure(meta.failureMessage, meta.failureStack)
             : undefined,
+        failureStack: meta.failureStack,
         taskFailures: meta.taskFailures ?? 0,
         lastTaskFailure: meta.lastTaskFailure,
         activityAttempts: meta.activityAttempts ?? {},

@@ -181,6 +181,23 @@ export async function runCli(argv: string[]): Promise<number> {
     process.stderr.write(
       `tempo: ${e instanceof Error ? e.message : String(e)}\n`,
     );
+    // A workflow that failed carries the stack from where it actually broke —
+    // in an activity, in another process. Usage errors and unreachable-server
+    // errors are thrown right here, and their stack is only ever this file, so
+    // they are filtered out by asking whether the stack says anything the
+    // message did not.
+    if (e instanceof Error && e.stack && !isLocalStack(e.stack))
+      process.stderr.write(`${e.stack}\n`);
     return 1;
   }
+}
+
+/**
+ * Was this error thrown by the CLI itself? Such a stack begins in `src/cli/` and
+ * tells the user nothing they cannot see from the message — printing it turns
+ * every typo into a wall of frames.
+ */
+function isLocalStack(stack: string): boolean {
+  const firstFrame = stack.split('\n').find((l) => l.trim().startsWith('at '));
+  return firstFrame === undefined || /[/\\]src[/\\]cli[/\\]/.test(firstFrame);
 }

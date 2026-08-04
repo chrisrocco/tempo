@@ -18,6 +18,8 @@ export interface WorkflowOutcome {
   status: ExecutionStatus;
   result?: unknown;
   failure?: string;
+  /** The stack behind `failure`, so a waiting client can print more than a message. */
+  failureStack?: string;
 }
 
 export type RpcRequest =
@@ -54,5 +56,4 @@ export type RpcRequest =
     };
 
 export type RpcResponse =
-  | {ok: true; value: unknown}
-  | {ok: false; error: string};
+  {ok: true; value: unknown} | {ok: false; error: string};

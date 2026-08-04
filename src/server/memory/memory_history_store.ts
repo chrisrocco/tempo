@@ -105,13 +105,15 @@ export class MemoryHistoryStore implements HistoryStore {
   async setStatus(
     workflowId: string,
     status: ExecutionStatus,
-    outcome?: {result?: unknown; failure?: unknown},
+    outcome?: {result?: unknown; failure?: unknown; failureStack?: string},
   ): Promise<void> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.status = status;
     if (outcome && 'result' in outcome) rec.result = outcome.result;
     if (outcome && 'failure' in outcome) rec.failure = outcome.failure;
+    if (outcome && 'failureStack' in outcome)
+      rec.failureStack = outcome.failureStack;
   }
 
   async resetForContinueAsNew(

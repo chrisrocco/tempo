@@ -20,6 +20,11 @@ import {isStuck, type ExecutionDetail, type HistoryEvent} from '../protocol';
 import {createRemoteService} from '../services';
 import {DEFAULT_SERVER_URL} from '../tempo';
 
+/** Two spaces, so a copied stack still reads as one block under its heading. */
+function indent(line: string): string {
+  return `  ${line}`;
+}
+
 /** Print a string result bare; anything else as JSON. */
 function formatResult(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value);
@@ -184,6 +189,10 @@ export async function describeExecution(
   if (detail.result !== undefined)
     out.push(`result:    ${formatResult(detail.result)}`);
   if (detail.failure !== undefined) out.push(`failure:   ${detail.failure}`);
+  // The stack goes below the summary lines rather than inline: it is multi-line
+  // and would wreck the aligned block above it.
+  if (detail.failureStack !== undefined)
+    out.push('', 'stack:', ...detail.failureStack.split('\n').map(indent));
   // The wedged case. Loud on purpose: a running execution the engine cannot
   // replay looks identical to a healthy parked one without this. Only while it
   // is still running, though — the count outlives the execution, and announcing

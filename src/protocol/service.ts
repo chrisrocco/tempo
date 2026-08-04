@@ -103,6 +103,8 @@ export interface ExecutionDetail extends ExecutionSummary {
   result?: unknown;
   /** A message, not an Error — failures cross the wire as text. */
   failure?: string;
+  /** The stack behind `failure`, when the failure originated somewhere that had one. */
+  failureStack?: string;
 }
 
 /**
@@ -180,8 +182,14 @@ export interface ActivityTask {
 }
 
 /** What an activity worker reports back after running an activity function. */
+/**
+ * `stack` is the activity's own stack, captured in the worker that ran it — the
+ * only process that ever holds the thrown `Error`. Without it a failure arrives
+ * as a bare message ("Cannot read properties of undefined") naming no file and no
+ * line, and the frames are unrecoverable: they died with the object.
+ */
 export type ActivityResult =
-  {ok: true; result: unknown} | {ok: false; error: string};
+  {ok: true; result: unknown} | {ok: false; error: string; stack?: string};
 
 /** An activity task handed to a worker, with the lease token to complete it. */
 export interface LeasedActivityTask extends ActivityTask {
@@ -208,5 +216,11 @@ export interface WorkflowTaskResult {
   result: unknown;
   failed: boolean;
   failure: unknown;
+  /**
+   * The failure's stack, carried separately because `failure` is flattened to a
+   * message at the RPC boundary (an `Error` JSON-serializes to `{}`). In-process
+   * callers read it off `failure` itself; this is what survives the wire.
+   */
+  failureStack?: string;
   commands: Command[];
 }
