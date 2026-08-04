@@ -25,9 +25,37 @@
  */
 
 import {createContext, replay, type WorkflowFn} from '../core';
-import type {HistoryEvent, WorkflowTaskResult} from '../protocol';
+import {
+  MAX_CARRYOVER_BYTES,
+  type Carryover,
+  type HistoryEvent,
+  type WorkflowTaskResult,
+} from '../protocol';
 
 export type WorkflowRegistry = Map<string, WorkflowFn>;
+
+/**
+ * Refuse a task whose carryover has outgrown the cap.
+ *
+ * Thrown rather than truncated, and thrown *here* rather than at the server: the
+ * worker is where the offending code just ran, so this surfaces on the first
+ * task that crosses the line, naming the biggest key. It becomes a workflow-task
+ * failure, which is retried rather than fatal — so shipping a fix and rolling the
+ * workers recovers the execution, and nothing durable has been written yet.
+ */
+function assertCarryoverFits(name: string, carryover: Carryover): void {
+  const size = JSON.stringify(carryover).length;
+  if (size <= MAX_CARRYOVER_BYTES) return;
+  const biggest = Object.entries(carryover)
+    .map(([key, value]) => ({key, size: JSON.stringify(value).length}))
+    .sort((a, b) => b.size - a.size)[0];
+  throw new Error(
+    `workflow "${name}" carryover is ${size} bytes, over the ${MAX_CARRYOVER_BYTES} limit ` +
+      `(largest key "${biggest?.key}" at ${biggest?.size}). Carryover is written on every ` +
+      `task and copied into every run, so it must stay small — keep a cursor, not a ` +
+      `collection. To avoid acting on an item twice, give its child an explicit workflowId.`,
+  );
+}
 
 export interface WorkflowWorker {
   has(name: string): boolean;
@@ -36,6 +64,13 @@ export interface WorkflowWorker {
     args: unknown[],
     history: HistoryEvent[],
     continueAsNewSuggested: boolean,
+    /**
+     * Required, not optional-with-a-default: a default here type-checks at every
+     * call site that forgets it and silently starts the workflow from empty
+     * state, which is indistinguishable from a workflow that never wrote any.
+     * Both in-tree callers were written that way before this was tightened.
+     */
+    carryover: Carryover,
   ): Promise<WorkflowTaskResult>;
 }
 
@@ -55,6 +90,7 @@ export function createWorkflowWorker(
       args: unknown[],
       history: HistoryEvent[],
       continueAsNewSuggested: boolean,
+      carryover: Carryover,
     ): Promise<WorkflowTaskResult> {
       const fn = registry.get(name);
       // Throw, so the poll loop reports this through `failWorkflowTask` and the
@@ -73,14 +109,21 @@ export function createWorkflowWorker(
       // policy applied consistently: retry and surface, never give up on the
       // author's behalf (planning/sprints/05).
       if (!fn) throw new Error(`no workflow registered as ${name}`);
-      const ctx = createContext(args, history, continueAsNewSuggested);
+      const ctx = createContext(
+        args,
+        history,
+        continueAsNewSuggested,
+        carryover,
+      );
       await replay(ctx, fn);
+      assertCarryoverFits(name, ctx.carryover);
       return {
         done: ctx.done,
         result: ctx.result,
         failed: ctx.failed,
         failure: ctx.failure,
         commands: ctx.commands,
+        carryover: ctx.carryover,
       };
     },
   };

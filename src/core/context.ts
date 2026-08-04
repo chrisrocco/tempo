@@ -17,7 +17,7 @@
  */
 
 import {AsyncLocalStorage} from 'node:async_hooks';
-import type {Command, HistoryEvent, SignalEvent} from '../protocol';
+import type {Carryover, Command, HistoryEvent, SignalEvent} from '../protocol';
 
 interface Waiter {
   resolve: (v: unknown) => void;
@@ -69,6 +69,12 @@ export interface WorkflowContext {
   cancelled: boolean;
   /** Server-provided hint: history has grown enough to consider continue-as-new. */
   continueAsNewSuggested: boolean;
+  /**
+   * Durable state the workflow keeps across its own runs, seeded from the task
+   * and reported back at the end of it. Mutable by workflow code through
+   * `carryover.ts` — see there for what it is for.
+   */
+  carryover: Carryover;
 }
 
 // ── context propagation ────────────────────────────────────────────────
@@ -84,10 +90,15 @@ export function createContext(
   args: unknown[],
   events: HistoryEvent[],
   continueAsNewSuggested = false,
+  carryover: Carryover = {},
 ): WorkflowContext {
   return {
     args,
     events,
+    // Copied, not aliased: the task's carryover belongs to the caller, and a
+    // replay that mutated it in place would leave the caller's copy holding the
+    // *result* of the replay it was supposed to be the input to.
+    carryover: {...carryover},
     idx: 0,
     seq: 0,
     condSeq: 0,

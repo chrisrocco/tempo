@@ -420,6 +420,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       history: rec.history.slice(),
       continueAsNewSuggested:
         rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+      carryover: {...rec.carryover},
     };
   }
 
@@ -429,6 +430,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   ): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
+    // Before any disposition below, and unconditionally: carryover is state as
+    // of the end of this task whatever the task decided, and storing it per task
+    // rather than only at rollover is what makes it survive a crash and what
+    // makes `describe` show the live value.
+    if (result.carryover !== undefined)
+      await historyStore.setCarryover(workflowId, result.carryover);
     if (result.done) {
       await historyStore.setStatus(workflowId, 'completed', {
         result: result.result,
@@ -705,6 +712,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         name: rec.name,
         args: rec.args,
         history: rec.history.slice(),
+        carryover: {...rec.carryover},
         continueAsNewSuggested:
           rec.history.length >= CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
       };

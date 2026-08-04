@@ -134,6 +134,7 @@ export function createLocalService(
                 task.args,
                 task.history,
                 task.continueAsNewSuggested,
+                task.carryover,
               );
             } catch (e) {
               // Same contract as the out-of-process loop: report, do not throw.
