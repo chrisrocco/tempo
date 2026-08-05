@@ -201,6 +201,21 @@ export interface HistoryStore {
   ): Promise<void>;
   /** Forget an activity's attempts once it reaches a terminal event. */
   clearActivityAttempts(workflowId: string, seq: number): Promise<void>;
+  /**
+   * Drop every event from index `keep` onward, so the execution can be replayed
+   * from a point before something went wrong.
+   *
+   * **Bumps `version`**, unlike every other mutation that is "not history". That
+   * is the point: a workflow task already polled carries the version it replayed
+   * against, and without the bump its `appendIfVersion` would succeed and stack
+   * events built from a history that no longer exists on top of the truncated
+   * one. With it, the in-flight task fails its CAS and is redelivered against
+   * what is actually there.
+   *
+   * Truncation is destructive and there is no undo: the dropped events are gone
+   * from the log, not tombstoned. Callers are expected to have said so.
+   */
+  truncateHistory(workflowId: string, keep: number): Promise<void>;
   /** Replace the execution carryover with what the last workflow task reported. */
   setCarryover(workflowId: string, carryover: Carryover): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */

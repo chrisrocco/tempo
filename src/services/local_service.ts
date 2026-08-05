@@ -297,6 +297,20 @@ export function createLocalService(
         rejectWaiter(workflowId, new Error(reason));
       });
     },
+    reset(workflowId, keep) {
+      if (!statusMirror.has(workflowId))
+        throw new Error(`no execution ${workflowId}`);
+      // Unlike terminate, a reset *does* produce a task, so the drain loop
+      // observes the execution again and settles the waiter the normal way.
+      //
+      // The mirror is put back by hand because the core reopens the record
+      // directly: without this, `getStatus` would keep reporting the outcome of
+      // a run whose history has just been discarded. A `getResult` promise that
+      // already settled stays settled — a caller holding one took delivery of an
+      // answer, and this cannot un-deliver it.
+      statusMirror.set(workflowId, 'running');
+      void core.resetToEvent(workflowId, keep);
+    },
     getResult(workflowId) {
       return ensureWaiter(workflowId).promise;
     },

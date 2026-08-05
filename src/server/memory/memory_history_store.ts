@@ -144,6 +144,13 @@ export class MemoryHistoryStore implements HistoryStore {
       rec.failureStack = outcome.failureStack;
   }
 
+  async truncateHistory(workflowId: string, keep: number): Promise<void> {
+    const rec = this.records.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.history = rec.history.slice(0, keep);
+    rec.version += 1;
+  }
+
   async resetForContinueAsNew(
     workflowId: string,
     args: unknown[],

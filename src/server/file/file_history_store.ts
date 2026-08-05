@@ -286,6 +286,25 @@ export class FileHistoryStore implements HistoryStore {
     await this.enqueue(workflowId, () => this.writeMeta(rec));
   }
 
+  async truncateHistory(workflowId: string, keep: number): Promise<void> {
+    const rec = this.cache.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.history = rec.history.slice(0, keep);
+    rec.version += 1;
+    // The log is append-only in the normal case; this is the one operation that
+    // rewrites it. Written whole rather than truncated in place, through the
+    // same temp+rename the meta uses, so a crash mid-write leaves the previous
+    // log intact rather than a half-written one.
+    const events = rec.history.map((e) => `${JSON.stringify(e)}\n`).join('');
+    await this.enqueue(workflowId, async () => {
+      const logPath = path.join(this.execDir(workflowId), 'events.jsonl');
+      const tmp = `${logPath}.tmp`;
+      await fs.writeFile(tmp, events);
+      await fs.rename(tmp, logPath);
+      await this.writeMeta(rec);
+    });
+  }
+
   async resetForContinueAsNew(
     workflowId: string,
     args: unknown[],

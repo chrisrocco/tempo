@@ -396,6 +396,20 @@ export interface WorkflowService {
    * the thing that throws.
    */
   terminate(workflowId: string, reason: string): void;
+  /**
+   * Drop every event from `keep` onward and replay from there.
+   *
+   * The counterpart to `terminate` for a wedged execution: that one ends it,
+   * this one rewinds it to before whatever the deployed code cannot replay, so
+   * the work is kept. Destructive — the dropped events do not come back — and
+   * the caller is expected to have said so.
+   *
+   * `keep` is an index into the history, so event `keep` is the first one
+   * dropped. Out-of-range values are clamped rather than rejected: a history
+   * that grew between reading it and acting on it is ordinary, and a reset to
+   * "the end" is a no-op rather than an error.
+   */
+  reset(workflowId: string, keep: number): void;
   getResult(workflowId: string): Promise<unknown>;
   getStatus(workflowId: string): ExecutionStatus;
   /** Inspect one execution: status, history, and what it is waiting on. */

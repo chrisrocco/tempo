@@ -255,6 +255,25 @@ export class HistoryTimeline extends LitElement {
         font-size: 12px;
         margin: 0 0 10px;
       }
+      .reset-cell {
+        text-align: right;
+        white-space: nowrap;
+      }
+      /* Quiet until the row is hovered: it is on every row and destructive. */
+      .reset {
+        font-size: 11.5px;
+        padding: 2px 8px;
+        color: var(--muted);
+        opacity: 0;
+      }
+      tr:hover .reset,
+      .reset:focus-visible {
+        opacity: 1;
+      }
+      .reset:hover {
+        color: var(--danger);
+        border-color: var(--danger);
+      }
       .views {
         display: flex;
         gap: 4px;
@@ -460,6 +479,7 @@ export class HistoryTimeline extends LitElement {
             <th>Event</th>
             <th>When</th>
             <th>Took</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -467,6 +487,37 @@ export class HistoryTimeline extends LitElement {
         </tbody>
       </table>
     `;
+  }
+
+  /**
+   * The reset control for one row.
+   *
+   * Only in the table, and only on rows that can be a cut point. "Reset to this
+   * event" is an operation *on a row*, which is why the one intervention that is
+   * not in the action bar lives here — see the fileoverview of
+   * `execution_detail.ts`.
+   *
+   * `keep` is the row's own index, so the event named on the row is the first
+   * one dropped: "reset to here" reads as "put it back to just before this
+   * happened", which is what someone pointing at the failure means.
+   */
+  private resetCell(index: number): TemplateResult | typeof nothing {
+    // Nothing to drop at the very end, and event 0 is the whole history.
+    if (index >= this.total) return nothing;
+    return html`<button
+      class="reset"
+      title="drop event ${index} and everything after it, then replay"
+      @click=${() =>
+        this.dispatchEvent(
+          new CustomEvent('history-reset', {
+            detail: {keep: index},
+            bubbles: true,
+            composed: true,
+          }),
+        )}
+    >
+      reset to here
+    </button>`;
   }
 
   /**
@@ -647,6 +698,7 @@ export class HistoryTimeline extends LitElement {
           ${relativeTime(event.ts, now)}
         </td>
         <td class="took">${took === undefined ? '' : formatDuration(took)}</td>
+        <td class="reset-cell">${this.resetCell(this.offset + index)}</td>
       </tr>
     `;
   }

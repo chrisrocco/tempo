@@ -39,6 +39,7 @@ export type RpcRequest =
     }
   | {method: 'cancel'; workflowId: string}
   | {method: 'terminate'; workflowId: string; reason: string}
+  | {method: 'reset'; workflowId: string; keep: number}
   | {method: 'getOutcome'; workflowId: string}
   | {
       method: 'describeExecution';

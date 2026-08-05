@@ -117,6 +117,9 @@ export class ExecutionDetailView extends LitElement {
     history: {attribute: false},
     fromEvent: {state: true},
     exportError: {state: true},
+    resetTo: {state: true},
+    resetting: {state: true},
+    resetError: {state: true},
   };
 
   declare workflowId: string;
@@ -128,6 +131,10 @@ export class ExecutionDetailView extends LitElement {
   declare fromEvent: number | undefined;
   /** Why the last export did not produce a complete file, if it did not. */
   declare exportError: string | undefined;
+  /** The cut point a reset is being confirmed for; undefined means none is. */
+  declare resetTo: number | undefined;
+  declare resetting: boolean;
+  declare resetError: string | undefined;
 
   private readonly poller = new Poller<Detail | undefined>(this, (signal) =>
     client.describeExecution(
@@ -158,6 +165,9 @@ export class ExecutionDetailView extends LitElement {
     this.history = {view: DEFAULT_HISTORY_VIEW};
     this.fromEvent = undefined;
     this.exportError = undefined;
+    this.resetTo = undefined;
+    this.resetting = false;
+    this.resetError = undefined;
   }
 
   override willUpdate(): void {
@@ -272,6 +282,11 @@ export class ExecutionDetailView extends LitElement {
       .export-error {
         font-size: 12.5px;
         margin-bottom: 10px;
+      }
+      .reset-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
       }
       .retry {
         display: flex;
@@ -466,8 +481,79 @@ export class ExecutionDetailView extends LitElement {
     navigate(executionHref(this.workflowId, {tab: this.tab, history}));
   }
 
+  /**
+   * The confirmation a reset gets before it runs.
+   *
+   * Terminate takes a typed reason; this takes an explicit second click on a
+   * control that names exactly what is about to disappear. Both are irreversible
+   * and neither should fire on one press — but a reason field would be the wrong
+   * gate here, because the thing worth checking is the *cut point*, and a reader
+   * who mis-clicked a row wants to see which one before it happens.
+   */
+  private resetConfirm(detail: Detail): TemplateResult | typeof nothing {
+    const keep = this.resetTo;
+    if (keep === undefined) return nothing;
+    const dropped = detail.historyLength - keep;
+    return html`
+      <div class="panel fail-panel">
+        <h2>Reset to event ${keep}</h2>
+        <div class="note">
+          Drops ${dropped} event${dropped === 1 ? '' : 's'} — everything from
+          ${keep} onward — and replays this execution from there. The dropped
+          events do not come back, and any activity still running is abandoned.
+          ${
+            detail.status === 'running'
+              ? nothing
+              : html`This execution is ${detail.status}; resetting reopens it
+                and discards its outcome.`
+          }
+        </div>
+        <div class="reset-actions">
+          <button
+            class="danger"
+            ?disabled=${this.resetting}
+            @click=${() => void this.performReset(detail, keep)}
+          >
+            reset and replay
+          </button>
+          <button
+            @click=${() => {
+              this.resetTo = undefined;
+            }}
+          >
+            cancel
+          </button>
+        </div>
+        ${
+          this.resetError
+            ? html`<div class="error export-error">${this.resetError}</div>`
+            : nothing
+        }
+      </div>
+    `;
+  }
+
+  private async performReset(detail: Detail, keep: number): Promise<void> {
+    this.resetting = true;
+    this.resetError = undefined;
+    try {
+      await client.reset(detail.workflowId, keep);
+      this.resetTo = undefined;
+      // The history just changed under the current page, and `fromEvent` is an
+      // index into one that no longer exists. Back to the default — the end of
+      // the truncated history is where the replay will start writing.
+      this.fromEvent = undefined;
+      this.poller.refresh();
+    } catch (e) {
+      this.resetError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.resetting = false;
+    }
+  }
+
   private historyPanel(detail: Detail): TemplateResult {
     return html`
+      ${this.resetConfirm(detail)}
       <div class="panel">
         ${
           this.exportError
@@ -487,6 +573,9 @@ export class ExecutionDetailView extends LitElement {
             e: CustomEvent<{view?: HistoryView; events?: EventCategory}>,
           ) => this.applyHistoryOptions(e.detail)}
           @history-export=${() => void this.exportHistory(detail)}
+          @history-reset=${(e: CustomEvent<{keep: number}>) => {
+            this.resetTo = e.detail.keep;
+          }}
         ></history-timeline>
       </div>
     `;
