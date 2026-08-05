@@ -101,6 +101,58 @@ describe('queryExecutions — filtering', () => {
   });
 });
 
+describe('queryExecutions — the time range', () => {
+  const records = [
+    record('t1000', {createdAt: 1_000}),
+    record('t2000', {createdAt: 2_000}),
+    record('t3000', {createdAt: 3_000}),
+  ];
+
+  function ids(filter: ExecutionFilter): string[] {
+    return queryExecutions(records, filter).executions.map((e) => e.workflowId);
+  }
+
+  it('narrows to executions created at or after a lower bound', () => {
+    expect(ids({createdAfter: 2_000})).toEqual(['t3000', 't2000']);
+  });
+
+  it('narrows to executions created strictly before an upper bound', () => {
+    expect(ids({createdBefore: 3_000})).toEqual(['t2000', 't1000']);
+  });
+
+  it('narrows to a window when given both ends', () => {
+    expect(ids({createdAfter: 2_000, createdBefore: 3_000})).toEqual(['t2000']);
+  });
+
+  /**
+   * The half-open interval, which is the whole reason the two ends differ.
+   * Adjacent windows have to tile: an execution created exactly on the join
+   * belongs to the later one and to only one of them, or a reader paging
+   * through consecutive hours sees it twice.
+   */
+  it('puts an execution created exactly on a boundary in the later window', () => {
+    expect(ids({createdAfter: 1_000, createdBefore: 2_000})).toEqual(['t1000']);
+    expect(ids({createdAfter: 2_000, createdBefore: 3_000})).toEqual(['t2000']);
+  });
+
+  it('returns nothing for a window that ends before it starts', () => {
+    expect(ids({createdAfter: 3_000, createdBefore: 1_000})).toEqual([]);
+  });
+
+  it('combines the range with the other filters rather than replacing them', () => {
+    const mixed = [
+      record('recent-ok', {createdAt: 3_000, status: 'completed'}),
+      record('recent-bad', {createdAt: 3_000, status: 'failed'}),
+      record('old-bad', {createdAt: 1_000, status: 'failed'}),
+    ];
+    const page = queryExecutions(mixed, {
+      status: 'failed',
+      createdAfter: 2_000,
+    });
+    expect(page.executions.map((e) => e.workflowId)).toEqual(['recent-bad']);
+  });
+});
+
 describe('queryExecutions — ordering', () => {
   it('returns newest first', () => {
     const records = [

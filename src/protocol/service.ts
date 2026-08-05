@@ -141,6 +141,24 @@ export interface ExecutionFilter {
   workflowIdPrefix?: string;
   /** Only executions the engine cannot replay. */
   stuck?: boolean;
+  /**
+   * Created at or after this instant, as epoch milliseconds.
+   *
+   * Absolute rather than a duration, because this is a wire contract and
+   * "the last hour" would be relative to a clock the two ends do not share.
+   * A client that thinks in durations resolves them before it asks; the
+   * dashboard does exactly that in `time_range.ts`.
+   */
+  createdAfter?: number;
+  /**
+   * Created strictly before this instant, as epoch milliseconds.
+   *
+   * The range is half-open — `[createdAfter, createdBefore)` — so adjacent
+   * windows tile exactly rather than double-counting the execution that lands
+   * on the boundary. The names read as though both ends were exclusive; only
+   * this one is.
+   */
+  createdBefore?: number;
   /** How many to return. The server caps this; see `MAX_PAGE_SIZE`. */
   limit?: number;
   /** Resume after this point — an opaque value from a previous page. */

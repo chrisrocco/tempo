@@ -20,6 +20,19 @@
  * load. `createdAt` alone is not enough, and neither is insertion order: the file
  * store rebuilds its cache from a directory read, whose order is not defined.
  *
+ * ## Why the order is not configurable
+ *
+ * Considered and declined when the time range was added — the change that would
+ * have made an oldest-first option look natural.
+ *
+ * The cursor *is* the sort key, so a second ordering means a second cursor
+ * encoding, and a link built under one resolves into the middle of a
+ * differently-ordered set under the other. Silently, because a cursor is opaque
+ * and cannot announce which sort it belongs to. That is a real cost paid on
+ * every page, for an option that is close to always wrong: a listing is asked
+ * "what happened recently", and a reader who wants the oldest of something is
+ * better served by narrowing to a window, which the time range now allows.
+ *
  * ## Why filtering happens here rather than in the caller
  *
  * The caller most likely to want "just the broken ones" is a dashboard polling
@@ -69,6 +82,18 @@ function matches(
   )
     return false;
   if (filter.stuck !== undefined && isStuck(execution) !== filter.stuck)
+    return false;
+  // Half-open, per `ExecutionFilter`: an execution created exactly on a
+  // boundary belongs to the later window and to only one of two adjacent ones.
+  if (
+    filter.createdAfter !== undefined &&
+    execution.createdAt < filter.createdAfter
+  )
+    return false;
+  if (
+    filter.createdBefore !== undefined &&
+    execution.createdAt >= filter.createdBefore
+  )
     return false;
   return true;
 }
