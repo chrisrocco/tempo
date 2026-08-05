@@ -84,16 +84,16 @@ describe('the dashboard process', () => {
     await new Promise<void>((resolve) => engine.close(() => resolve()));
   });
 
-  it('serves a shell with the import map substituted in', async () => {
+  it('serves a shell', async () => {
     const html = await (await fetch(base)).text();
 
-    expect(html).toContain('<script type="importmap">');
-    expect(html).not.toContain('<!--IMPORT_MAP-->');
+    expect(html).toContain('<tempo-app>');
   });
 
   /**
    * The one that would have caught it. Everything else can pass while the shell
-   * names a module the server has never heard of.
+   * names a module the server has never heard of — which is exactly what
+   * happened when the app moved and `index.html` did not.
    */
   it('serves the entry module the shell actually asks for', async () => {
     const html = await (await fetch(base)).text();
@@ -109,21 +109,23 @@ describe('the dashboard process', () => {
   });
 
   /**
-   * The engine reaches the browser as a vendored dependency. Its protocol
-   * modules name their siblings without an extension, which a browser cannot
-   * resolve on its own — so this walks one hop deeper than the barrel.
+   * The bundle has to contain the engine's own code, not a reference to it.
+   * `isStuck` is a value rather than a type, so a build that resolved the
+   * engine only for type-checking would produce a bundle that throws on load —
+   * and the page would look identical until an element tried to render.
    */
-  it('serves the engine protocol, including its extensionless siblings', async () => {
-    const barrel = await fetch(
-      `${base}/vendor/workflow-engine/src/protocol/index.ts`,
-    );
-    const sibling = await fetch(
-      `${base}/vendor/workflow-engine/src/protocol/service`,
-    );
+  it('inlines the engine protocol into the bundle', async () => {
+    const html = await (await fetch(base)).text();
+    const src = /<script type="module" src="([^"]+)"><\/script>/.exec(
+      html,
+    )?.[1];
+    const bundle = await (await fetch(`${base}${src}`)).text();
 
-    expect(barrel.status).toBe(200);
-    expect(sibling.status).toBe(200);
-    expect(await sibling.text()).toContain('isStuck');
+    expect(bundle).toContain('isStuck');
+    // Nothing left for the browser to resolve: a bare specifier here would mean
+    // an unbundled import, which fails at load with no import map to catch it.
+    expect(bundle).not.toMatch(/from\s*["']lit["']/);
+    expect(bundle).not.toMatch(/from\s*["']workflow-engine/);
   });
 
   it('forwards an RPC call to the engine', async () => {

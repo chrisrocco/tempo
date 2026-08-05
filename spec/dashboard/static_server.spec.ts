@@ -1,25 +1,24 @@
 /**
  * @fileoverview
- * Serving the dashboard's own code: what it answers, and — more importantly, what
- * it refuses.
+ * Serving the dashboard's built code: what it answers, and — more importantly —
+ * what it refuses.
  *
- * The extension tests exist because the live wiring failed in exactly those
- * ways. A module imported as `./client.js` — which is what type-checked
- * TypeScript must say, since the rule is that you name the *emitted* file —
- * 404'd, because only `client.ts` exists on disk. And the engine's own modules
- * name their siblings with no extension at all, which a browser cannot resolve.
- * Neither produced a useful error in the browser: the symptom was a custom
- * element that silently never upgraded.
+ * This spec used to be much larger, and most of what it covered is gone with
+ * the code: per-request transpilation, a generated import map, a vendored
+ * package route, and two flavours of missing-extension resolution. All of that
+ * substituted for a build step. The build is real now, so the server reads
+ * files and nothing else.
  *
- * The path-containment tests are the ones to keep honest. Everything here is
- * read from disk by a path derived from a URL, on a server with no auth.
+ * What remains is the part worth keeping honest whatever the server does:
+ * **everything here is read from disk by a path derived from a URL, on a
+ * listener with no authentication.** The containment tests are the ones that
+ * matter; the rest is a content type and a cache header.
  */
 
 import {mkdtempSync, mkdirSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {
-  buildImportMap,
   createStaticServer,
   resolveWithin,
   type StaticServer,
@@ -48,7 +47,7 @@ describe('resolveWithin', () => {
   const root = path.resolve('/srv/ui');
 
   it('resolves a path inside the root', () => {
-    expect(resolveWithin(root, 'app.ts')).toBe(path.join(root, 'app.ts'));
+    expect(resolveWithin(root, 'app.js')).toBe(path.join(root, 'app.js'));
   });
 
   it('refuses a path that climbs out', () => {
@@ -66,145 +65,83 @@ describe('resolveWithin', () => {
   });
 });
 
-describe('buildImportMap', () => {
-  const map = buildImportMap(path.resolve('node_modules')).imports;
-
-  it('maps the bare specifier to the package entry point', () => {
-    expect(map['lit']).toMatch(/^\/vendor\/lit\/.+\.js$/);
-  });
-
-  // Directives and decorators are imported by subpath — `lit-html/directives/…`
-  // — which a bare mapping alone does not cover.
-  it('maps a trailing-slash prefix for subpath imports', () => {
-    expect(map['lit-html/']).toBe('/vendor/lit-html/');
-  });
-
-  /**
-   * `lit` is the only declared dependency, but it re-exports from three more
-   * packages that reach for a fourth. A map naming only what package.json says
-   * would leave the browser unable to resolve `lit`'s own internals.
-   */
-  it('covers what lit reaches for, not just lit', () => {
-    for (const name of [
-      'lit-html',
-      'lit-element',
-      '@lit/reactive-element',
-      '@lit-labs/ssr-dom-shim',
-    ])
-      expect(map[name]).withContext(name).toBeDefined();
-  });
-});
-
 describe('the dashboard file server', () => {
   let server: StaticServer;
   let appRoot: string;
 
   beforeAll(() => {
-    appRoot = mkdtempSync(path.join(tmpdir(), 'tempo-app-'));
+    appRoot = mkdtempSync(path.join(tmpdir(), 'tempo-dist-'));
     writeFileSync(
       path.join(appRoot, 'index.html'),
-      '<title>tempo</title><!--IMPORT_MAP--><tempo-app></tempo-app>',
+      '<title>tempo</title><script type="module" src="/app.js"></script>',
     );
-    writeFileSync(
-      path.join(appRoot, 'client.ts'),
-      'export const answer: number = 42;',
-    );
+    writeFileSync(path.join(appRoot, 'app.js'), 'export const a = 1;');
+    writeFileSync(path.join(appRoot, 'app.js.map'), '{"version":3}');
     mkdirSync(path.join(appRoot, 'nested'), {recursive: true});
     writeFileSync(
-      path.join(appRoot, 'nested', 'real.js'),
-      'export const a = 1;',
+      path.join(appRoot, 'nested', 'deep.js'),
+      'export const b = 2;',
     );
 
-    server = createStaticServer({
-      appRoot,
-      nodeModules: path.resolve('node_modules'),
-    });
+    server = createStaticServer({appRoot});
   });
 
-  it('serves the shell at the root, with the import map substituted in', () => {
+  it('serves the shell at the root', () => {
     const response = serve(server, '/')!;
 
     expect(response.status).toBe(200);
     expect(response.headers['content-type']).toContain('text/html');
-    expect(response.body).toContain('<script type="importmap">');
-    expect(response.body).toContain('/vendor/lit/');
-    expect(response.body).not.toContain('<!--IMPORT_MAP-->');
+    expect(response.body).toContain('<title>tempo</title>');
   });
 
-  it('transpiles TypeScript on the way out', () => {
-    const response = serve(server, '/client.ts')!;
+  it('serves the same shell for an explicit index.html', () => {
+    expect(serve(server, '/index.html')!.body).toContain(
+      '<title>tempo</title>',
+    );
+  });
+
+  it('serves the bundle as JavaScript', () => {
+    const response = serve(server, '/app.js')!;
 
     expect(response.status).toBe(200);
     expect(response.headers['content-type']).toContain('text/javascript');
-    expect(response.body).toContain('export const answer = 42');
-    expect(response.body).not.toContain(': number'); // types are gone
+    expect(response.body).toContain('export const a = 1');
   });
 
   /**
-   * The first live failure. Type-checked TypeScript must import `./client.js`,
-   * because the rule is that you name the *emitted* file — so the browser asks
-   * for a name that does not exist on disk.
+   * Bundled code is unreadable without one, and a browser only asks for it when
+   * devtools are open — so a wrong content type here stays invisible until the
+   * moment someone is already debugging something else.
    */
-  it('serves client.ts for a request for client.js', () => {
-    const response = serve(server, '/client.js')!;
+  it('serves a source map as JSON', () => {
+    const response = serve(server, '/app.js.map')!;
 
     expect(response.status).toBe(200);
-    expect(response.body).toContain('export const answer = 42');
+    expect(response.headers['content-type']).toContain('application/json');
   });
 
-  it('prefers a real .js over the .ts fallback', () => {
-    expect(serve(server, '/nested/real.js')!.body).toContain(
-      'export const a = 1',
-    );
+  it('serves a nested file', () => {
+    expect(serve(server, '/nested/deep.js')!.body).toContain('export const b');
   });
 
-  /**
-   * The engine's own modules are written for a bundler-style resolver and name
-   * their siblings without an extension, which a browser cannot resolve at all.
-   * Serving the protocol barrel means answering those.
-   */
-  it('resolves an extensionless specifier to the TypeScript beside it', () => {
-    writeFileSync(
-      path.join(appRoot, 'sibling.ts'),
-      'export const sibling = 1;',
-    );
-
-    expect(serve(server, '/sibling')!.status).toBe(200);
-    expect(serve(server, '/sibling')!.body).toContain('export const sibling');
-  });
-
-  /**
-   * The engine reaches the browser as a vendored dependency now, not through a
-   * path escape into a sibling directory. `isStuck` is a value rather than a
-   * type, so the module is genuinely fetched.
-   */
-  it('serves the engine protocol as a vendored package', () => {
-    const response = serve(
-      server,
-      '/vendor/workflow-engine/src/protocol/index.ts',
-    )!;
-
-    expect(response.status).toBe(200);
-    expect(response.headers['content-type']).toContain('text/javascript');
-  });
-
-  it('names the engine protocol in the import map', () => {
-    const {imports} = buildImportMap(path.resolve('node_modules'));
-
-    expect(imports['workflow-engine/protocol']).toBe(
-      '/vendor/workflow-engine/src/protocol/index.ts',
-    );
+  it('ignores a query string when resolving', () => {
+    expect(serve(server, '/app.js?v=2')!.status).toBe(200);
   });
 
   it('refuses a path that climbs out of its root', () => {
     for (const url of [
       '/../package.json',
       '/../../etc/passwd',
-      '/vendor/../package.json',
+      '/nested/../../x',
     ])
       expect(serve(server, url)!.status).withContext(url).toBe(403);
   });
 
+  /**
+   * The likeliest real 404 is a bundle that was never built. It has to read as
+   * a missing file rather than as a server that failed to start, because the
+   * two are diagnosed completely differently.
+   */
   it('reports a missing file as missing', () => {
     expect(serve(server, '/nope.js')!.status).toBe(404);
   });
@@ -213,8 +150,6 @@ describe('the dashboard file server', () => {
   // that costs an extra request.
   it('tells the browser not to cache anything', () => {
     expect(serve(server, '/')!.headers['cache-control']).toBe('no-store');
-    expect(serve(server, '/client.js')!.headers['cache-control']).toBe(
-      'no-store',
-    );
+    expect(serve(server, '/app.js')!.headers['cache-control']).toBe('no-store');
   });
 });

@@ -43,13 +43,16 @@ const DEFAULT_ENGINE_URL = 'http://127.0.0.1:7233';
 // so `npm start -w @tempo/dashboard` works from anywhere in the tree.
 const packageRoot = path.resolve(process.argv[1] ?? '.', '..', '..');
 
-const appRoot = path.join(packageRoot, 'app');
-const nodeModules = path.join(packageRoot, '..', 'node_modules');
+// The build output, not the sources: `app/` holds TypeScript the browser never
+// sees. `npm run build -w @tempo/dashboard` puts `index.html` and the bundle
+// here, and a server started without that having run answers 404 for the
+// bundle — which is a clearer failure than one that refuses to start.
+const appRoot = path.join(packageRoot, 'dist');
 const engineUrl = process.env['ENGINE_URL'] ?? DEFAULT_ENGINE_URL;
 const port = Number(process.env['PORT'] ?? 0);
 const host = process.env['HOST'] ?? '127.0.0.1';
 
-const files = createStaticServer({appRoot, nodeModules});
+const files = createStaticServer({appRoot});
 
 const server = http.createServer((req, res) => {
   if (req.method === 'POST') {

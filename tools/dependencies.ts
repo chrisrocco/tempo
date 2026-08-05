@@ -21,9 +21,21 @@
  * what replaces each one.
  *
  * The dev toolchain is a separate list, deliberately short: TypeScript, its
- * runner, the test runner, the formatter. `tsx` is the only thing that executes
- * TypeScript; there is no bundler, and adding one is a decision to make out
- * loud rather than a package to install.
+ * runner, the test runner, the formatter, and one bundler.
+ *
+ * **`esbuild` is the bundler, and it was argued for rather than installed.**
+ * The rule used to be that there was none, and the cost of that was paid in the
+ * dashboard: it shipped a server that compiled TypeScript per request and
+ * generated an import map at page load, which put the TypeScript compiler in
+ * its *runtime* dependencies. That is not expressible under a real build system
+ * — "compile when asked" is not a build step — so the no-bundler rule was the
+ * thing standing between this repo and one.
+ *
+ * It earns its place by deleting more than it adds: the transpile path, the
+ * import map, the vendored-package route, and two flavours of extension
+ * guessing all went with it. It is also a single binary driven entirely by
+ * command-line flags, so the same invocation works from npm and from a build
+ * rule with no configuration file to keep in step.
  */
 
 import {readFileSync} from 'node:fs';
@@ -68,6 +80,7 @@ const ALLOWED_DASHBOARD_RUNTIME: readonly string[] = ['lit', 'workflow-engine'];
 const ALLOWED_DEV = [
   '@types/jasmine',
   '@types/node',
+  'esbuild',
   'jasmine',
   'prettier',
   'tsx',

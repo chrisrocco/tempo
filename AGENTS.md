@@ -35,21 +35,35 @@ pre-release by definition — and not `@lit/*` either: "part of Lit" means the
 `lit` package. A router, a virtualizer, a context library are each a few dozen
 lines against the platform, and writing them is cheaper than carrying an
 unstable dependency in infrastructure other things depend on. The dev toolchain
-is a separate, equally short list: TypeScript, `tsx`, Jasmine, Prettier. **`tsx`
-is the only thing that executes TypeScript — there is no bundler**, and adding
-one is a decision to argue for out loud, not a package to install. This is
-**checked, not trusted** — [`tools/dependencies.ts`](tools/dependencies.ts)
-holds a list per package, and `npm run lint` and the suite both fail on anything
-else. Adding to a list is fine; doing it in the same commit that needs it, with
-a reason, is the point.
+is a separate, equally short list: TypeScript, `tsx`, Jasmine, Prettier, and
+`esbuild`. This is **checked, not trusted** —
+[`tools/dependencies.ts`](tools/dependencies.ts) holds a list per package, and
+`npm run lint` and the suite both fail on anything else. Adding to a list is
+fine; doing it in the same commit that needs it, with a reason, is the point.
+
+**There is a bundler now, and there did not used to be.** The old rule was that
+`tsx` was the only thing that executed TypeScript, and the dashboard paid for it:
+it shipped a server that compiled TypeScript *per request* and generated an
+import map at page load, which put the TypeScript compiler in its runtime
+dependencies. "Compile when asked" is not something a build system can express,
+so the no-bundler rule was the thing standing between this repo and one.
+
+`esbuild` replaced all of it and deleted more than it added — the transpile
+path, the import map, the vendored-package route, and two flavours of extension
+guessing. It is a single binary driven entirely by command-line flags, so the
+same invocation works from an npm script and from a build rule with no config
+file to keep in step. **It bundles the dashboard's browser code and nothing
+else**: the engine still runs from source under `tsx`, and adding a build step
+to it would be its own argument.
 
 **The dashboard is a separate package, and the edge points one way.** It depends
 on the engine — for the RPC it calls and the projection types it renders — and
 the engine has never heard of it. That is why `lit` is not the engine's problem
 and why `services/` does not contain a TypeScript transpiler. It is also
-**checked**: [`tools/boundaries.ts`](tools/boundaries.ts) fails any import from
-`src/` into `dashboard/`, because this is exactly the coupling that grew last
-time nothing was watching for it.
+**checked**: [`tools/boundaries.ts`](tools/boundaries.ts) fails any mention of
+`dashboard/` from `src/` — an import or a spawned path, since a hardcoded
+sibling path is the same dependency and a worse one. This is exactly the
+coupling that grew last time nothing was watching for it.
 
 **Put seams behind interfaces, implementations behind them.** `server/ports/`
 declares a contract; `server/memory/` and `server/file/` satisfy it. This splits
