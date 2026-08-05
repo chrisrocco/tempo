@@ -202,6 +202,8 @@ class TempoApp extends LitElement {
       case 'execution':
         return html`<execution-detail
           .workflowId=${route.workflowId}
+          .tab=${route.tab}
+          .history=${route.history}
         ></execution-detail>`;
       case 'queues':
         return html`<queues-view></queues-view>`;

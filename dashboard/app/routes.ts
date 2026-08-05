@@ -21,9 +21,22 @@
  * mechanics rather than a description of what is being looked at, and a stale
  * cursor in a pasted link would resolve to a page that no longer means
  * anything.
+ *
+ * ## So does the detail view's tab
+ *
+ * Same test, same answer: "the history of execution X" is a thing worth sending
+ * someone, and a tab held in component state is not sendable. It is a query
+ * parameter rather than a path segment (`?tab=state`, not `/state`) because it
+ * describes *how* one execution is being looked at rather than naming a
+ * different resource — the same reason the listing's filter is a query.
+ *
+ * `fromEvent` is not encoded, and is the detail view's equivalent of `cursor`:
+ * which page of history is on screen is mechanics, and an index pasted into a
+ * ticket would point at a different event once the history grew.
  */
 
 import type {ExecutionFilter, ExecutionStatus} from 'workflow-engine/protocol';
+import {EVENT_CATEGORIES, type EventCategory} from './history_view.js';
 
 /** The filter fields the URL round-trips; the rest are paging mechanics. */
 export type RouteFilter = Pick<
@@ -31,10 +44,64 @@ export type RouteFilter = Pick<
   'status' | 'name' | 'taskQueue' | 'workflowIdPrefix' | 'stuck'
 >;
 
+/**
+ * Which section of one execution is being read.
+ *
+ * Only the *bulk* of the detail view is tabbed. Everything diagnostic — the
+ * failure, the replay failure, the result, what it is waiting on — stays
+ * visible whichever tab is selected, so this never decides whether a reader can
+ * see what went wrong. See `execution_detail.ts`.
+ *
+ * `relationships` is the third of these and arrives with the parent-and-run-chain
+ * work; until then there is nothing to put in it, and an empty tab is worse than
+ * an absent one. A URL naming it already degrades to the default rather than
+ * rendering blank, which is what makes adding it later a pure addition.
+ */
+export type DetailTab = 'history' | 'state';
+
+/** Every tab, in the order the view offers them. */
+export const DETAIL_TABS: readonly DetailTab[] = ['history', 'state'];
+
+/**
+ * History is the default: it is why the page is usually open, and it is the
+ * only section whose absence would be noticed.
+ */
+export const DEFAULT_DETAIL_TAB: DetailTab = 'history';
+
+/** Whether the history reads as an ordered table or as bars on a time axis. */
+export type HistoryView = 'table' | 'compact';
+
+/** Both, in the order the timeline offers them. */
+export const HISTORY_VIEWS: readonly HistoryView[] = ['table', 'compact'];
+
+/** The table is the default because it is the lossless one. */
+export const DEFAULT_HISTORY_VIEW: HistoryView = 'table';
+
+/**
+ * How the history is being read, within the History tab.
+ *
+ * These are in the URL for the same reason the listing's filter is: "the failed
+ * activities of execution X, as bars" is a thing worth sending someone. They
+ * also have to outlive a tab switch, which tears the timeline element down —
+ * holding them in that component made them vanish on a round trip through
+ * another tab, and hoisting them into a parent purely to survive that would be
+ * state with no reason to exist beyond the accident that created it.
+ */
+export interface HistoryOptions {
+  view: HistoryView;
+  /** Which event family is showing; absent means all of them. */
+  events?: EventCategory;
+}
+
 /** Where the user is. Unrecognized hashes fall back to the listing. */
 export type Route =
   | {view: 'executions'; filter: RouteFilter}
-  | {view: 'execution'; workflowId: string}
+  | {
+      view: 'execution';
+      workflowId: string;
+      tab: DetailTab;
+      history: HistoryOptions;
+    }
   | {view: 'queues'};
 
 const STATUSES: readonly ExecutionStatus[] = [
@@ -46,6 +113,20 @@ const STATUSES: readonly ExecutionStatus[] = [
 
 function isStatus(value: string): value is ExecutionStatus {
   return (STATUSES as readonly string[]).includes(value);
+}
+
+function isDetailTab(value: string | null): value is DetailTab {
+  return value !== null && (DETAIL_TABS as readonly string[]).includes(value);
+}
+
+function isHistoryView(value: string | null): value is HistoryView {
+  return value !== null && (HISTORY_VIEWS as readonly string[]).includes(value);
+}
+
+function isEventCategory(value: string | null): value is EventCategory {
+  return (
+    value !== null && (EVENT_CATEGORIES as readonly string[]).includes(value)
+  );
 }
 
 /**
@@ -61,6 +142,7 @@ function isStatus(value: string): value is ExecutionStatus {
 export function parseRoute(hash: string): Route {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const [pathname = '/', query = ''] = raw.split('?');
+  const params = new URLSearchParams(query);
 
   if (pathname === '/queues') return {view: 'queues'};
 
@@ -75,10 +157,24 @@ export function parseRoute(hash: string): Route {
     } catch {
       workflowId = detail[1]!;
     }
-    return {view: 'execution', workflowId};
+    // An unknown tab falls back rather than rendering nothing — the same choice
+    // an unknown `status` gets, and what lets a `?tab=relationships` link
+    // written against a later version still open the execution.
+    const tab = params.get('tab');
+    const historyView = params.get('view');
+    const events = params.get('events');
+    const history: HistoryOptions = {
+      view: isHistoryView(historyView) ? historyView : DEFAULT_HISTORY_VIEW,
+    };
+    if (isEventCategory(events)) history.events = events;
+    return {
+      view: 'execution',
+      workflowId,
+      tab: isDetailTab(tab) ? tab : DEFAULT_DETAIL_TAB,
+      history,
+    };
   }
 
-  const params = new URLSearchParams(query);
   const filter: RouteFilter = {};
   const status = params.get('status');
   if (status && isStatus(status)) filter.status = status;
@@ -93,9 +189,37 @@ export function parseRoute(hash: string): Route {
   return {view: 'executions', filter};
 }
 
-/** The link to one execution's detail view. */
-export function executionHref(workflowId: string): string {
-  return `#/executions/${encodeURIComponent(workflowId)}`;
+/** What a link to a detail view can say. Everything omitted takes its default. */
+export interface DetailLink {
+  tab?: DetailTab;
+  history?: Partial<HistoryOptions>;
+}
+
+/**
+ * The link to one execution's detail view.
+ *
+ * Defaults are omitted rather than written out, so the plain link to an
+ * execution stays `#/executions/id` and the link from a listing row compares
+ * equal to the one from the History tab — the same rule `executionsHref`
+ * follows for empty filter fields.
+ */
+export function executionHref(
+  workflowId: string,
+  link: DetailLink = {},
+): string {
+  const path = `#/executions/${encodeURIComponent(workflowId)}`;
+  const params = new URLSearchParams();
+  if (link.tab !== undefined && link.tab !== DEFAULT_DETAIL_TAB)
+    params.set('tab', link.tab);
+  if (
+    link.history?.view !== undefined &&
+    link.history.view !== DEFAULT_HISTORY_VIEW
+  )
+    params.set('view', link.history.view);
+  if (link.history?.events !== undefined)
+    params.set('events', link.history.events);
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
 }
 
 /** The link to the queues and workflow-types view. */
