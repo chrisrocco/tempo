@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "A minimal-but-correct durable workflow engine (a small Temporal-shaped system).",
-  "workspaces": ["dashboard"],
+  "workspaces": [
+    "dashboard"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./protocol": "./src/protocol/index.ts",
@@ -16,11 +18,13 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard/tsconfig.json && tsc --noEmit -p dashboard/app/tsconfig.json",
     "lint": "tsx tools/lint.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "pretest": "npm run build -w @tempo/dashboard"
   },
   "devDependencies": {
     "@types/jasmine": "^5.1.4",
     "@types/node": "^22.10.0",
+    "esbuild": "^0.25.0",
     "jasmine": "^5.5.0",
     "prettier": "^3.9.6",
     "tsx": "^4.19.2",
