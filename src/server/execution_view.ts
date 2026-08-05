@@ -116,6 +116,7 @@ export function describeExecution(
         detached: e.detached,
       })),
     },
+    parked: rec.parked ?? [],
     cancelRequested: pending.cancelRequested,
     result: rec.status === 'completed' ? rec.result : undefined,
     failure:

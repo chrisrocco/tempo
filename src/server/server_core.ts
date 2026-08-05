@@ -66,6 +66,7 @@ import type {
   ContinueAsNewCommand,
   HistoryEvent,
   LeasedActivityTask,
+  ParkedCondition,
   QueueWorkers,
   TaskToken,
   WorkflowTask,
@@ -557,6 +558,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   ): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
+    // Before the dispositions below, all of which return early. What the replay
+    // ended parked on is true regardless of how the task then settles — and a
+    // task that *completes* the execution reports an empty list, which is what
+    // clears the entry left by the task that parked.
+    await recordParked(workflowId, rec, result.parked);
     // Note what is deliberately *not* here: storing carryover on every task.
     //
     // The record's carryover is what every task of this run is built from, so
@@ -612,6 +618,34 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // Dispatch this batch; the execution then parks until a completion wakes it.
     for (const cmd of result.commands)
       await applyCommand(workflowId, rec.runId, rec.taskQueue, cmd);
+  }
+
+  /**
+   * Store where the workflow is now parked, if that changed.
+   *
+   * The guard is the point. Most workflows never call `condition`, so both sides
+   * are empty on nearly every task — and without the comparison this would add a
+   * store write to each one, which for the file adapter is a whole meta rewrite,
+   * to record that nothing is waiting on anything.
+   *
+   * An absent `parked` means the worker predates this and said nothing, which is
+   * different from a worker reporting an empty list. Only the latter clears.
+   */
+  async function recordParked(
+    workflowId: string,
+    rec: ExecutionRecord,
+    parked: ParkedCondition[] | undefined,
+  ): Promise<void> {
+    if (parked === undefined) return;
+    const stored = rec.parked ?? [];
+    if (
+      stored.length === parked.length &&
+      stored.every(
+        (s, i) => s.seq === parked[i]?.seq && s.site === parked[i]?.site,
+      )
+    )
+      return;
+    await historyStore.setParkedConditions(workflowId, parked);
   }
 
   /**

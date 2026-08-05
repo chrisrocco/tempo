@@ -24,7 +24,12 @@
  * history whether or not the cache lands.
  */
 
-import {createContext, replay, type WorkflowFn} from '../core';
+import {
+  createContext,
+  parkedConditions,
+  replay,
+  type WorkflowFn,
+} from '../core';
 import {
   MAX_CARRYOVER_BYTES,
   type Carryover,
@@ -124,6 +129,9 @@ export function createWorkflowWorker(
         failure: ctx.failure,
         commands: ctx.commands,
         carryover: ctx.carryoverNext,
+        // Read after the replay has settled, so this is what the workflow is
+        // waiting on *now* rather than everywhere it waited along the way.
+        parked: parkedConditions(ctx),
       };
     },
   };

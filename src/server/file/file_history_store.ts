@@ -26,6 +26,7 @@ import {
   type Carryover,
   type ExecutionStatus,
   type HistoryEvent,
+  type ParkedCondition,
 } from '../../protocol';
 import type {
   ActivityRetryState,
@@ -69,6 +70,9 @@ interface PersistedMeta {
    * what it had before.
    */
   parent?: ExecutionParent;
+  /** Absent in data dirs written before park sites were recorded, and whenever
+   * the execution is not parked on anything. */
+  parked?: ParkedCondition[];
 }
 
 /**
@@ -264,6 +268,17 @@ export class FileHistoryStore implements HistoryStore {
     await this.enqueue(workflowId, () => this.writeMeta(rec));
   }
 
+  async setParkedConditions(
+    workflowId: string,
+    parked: ParkedCondition[],
+  ): Promise<void> {
+    const rec = this.cache.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    if (parked.length === 0) delete rec.parked;
+    else rec.parked = parked.map((p) => ({...p}));
+    await this.enqueue(workflowId, () => this.writeMeta(rec));
+  }
+
   async setCarryover(workflowId: string, carryover: Carryover): Promise<void> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
@@ -369,6 +384,7 @@ export class FileHistoryStore implements HistoryStore {
       activityAttempts: rec.activityAttempts,
       carryover: rec.carryover,
       parent: rec.parent,
+      parked: rec.parked,
     };
     const metaPath = path.join(this.execDir(rec.workflowId), 'meta.json');
     const tmp = `${metaPath}.tmp`;
@@ -425,6 +441,7 @@ export class FileHistoryStore implements HistoryStore {
         activityAttempts: restoreActivityAttempts(meta.activityAttempts),
         carryover: meta.carryover ?? {},
         ...(meta.parent === undefined ? {} : {parent: meta.parent}),
+        ...(meta.parked === undefined ? {} : {parked: meta.parked}),
       });
     }
   }

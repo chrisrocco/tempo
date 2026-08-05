@@ -27,6 +27,17 @@ interface BlockedCondition {
   fn: () => boolean;
   resolve: () => void;
   reject: (e: unknown) => void;
+  /**
+   * Where `condition()` was called, captured unformatted.
+   *
+   * A pure diagnostic side-channel: it is never read by replay, never reaches a
+   * command, and never influences a predicate — which is the only reason a
+   * non-deterministic value is allowed anywhere near this context. See
+   * `condition.ts` for why it is an `Error` rather than a string.
+   *
+   * Absent outside V8, where the capture API does not exist.
+   */
+  site?: Error;
 }
 
 /**

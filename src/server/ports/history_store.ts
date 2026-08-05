@@ -8,7 +8,12 @@
  * concurrent workers make it meaningful.
  */
 
-import type {Carryover, ExecutionStatus, HistoryEvent} from '../../protocol';
+import type {
+  Carryover,
+  ExecutionStatus,
+  HistoryEvent,
+  ParkedCondition,
+} from '../../protocol';
 
 /** One execution's durable state: its identity, history, and terminal outcome. */
 export interface ExecutionRecord {
@@ -51,6 +56,19 @@ export interface ExecutionRecord {
   carryover: Carryover;
   /** Absent on an execution a client started directly, which is most of them. */
   parent?: ExecutionParent;
+  /**
+   * What the last workflow task left the execution parked on.
+   *
+   * Current state, not history — the same category as `taskFailures` and
+   * `activityAttempts`, and stored for the same reason. A parked condition
+   * writes no event by design (that is what makes `condition` free), so history
+   * cannot answer where an execution is waiting, and only the worker that
+   * replayed it knows.
+   *
+   * Replaced wholesale on each task rather than accumulated. Absent on an
+   * execution whose tasks predate this, which reads the same as "not parked".
+   */
+  parked?: ParkedCondition[];
   /**
    * Consecutive workflow-task failures, reset by the next success. Durable
    * because the queues are not: a counter kept in the queue would reset on
@@ -216,6 +234,18 @@ export interface HistoryStore {
    * from the log, not tombstoned. Callers are expected to have said so.
    */
   truncateHistory(workflowId: string, keep: number): Promise<void>;
+  /**
+   * Replace what the execution is parked on with what the last task reported.
+   *
+   * Like `recordTaskFailure`, this must not bump `version` — where a workflow is
+   * waiting is not history. Callers are expected to skip the write when nothing
+   * changed, which is the common case: most workflows never park a condition, so
+   * most tasks would otherwise pay a store write to record the same empty list.
+   */
+  setParkedConditions(
+    workflowId: string,
+    parked: ParkedCondition[],
+  ): Promise<void>;
   /** Replace the execution carryover with what the last workflow task reported. */
   setCarryover(workflowId: string, carryover: Carryover): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */
