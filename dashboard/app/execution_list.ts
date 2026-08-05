@@ -48,7 +48,13 @@ import {failuresOf, runBatch, type BatchOutcome} from './batch.js';
 import {client} from './client.js';
 import {Poller} from './poller.js';
 import {navigate} from './router.js';
-import {executionHref, executionsHref, type RouteFilter} from './routes.js';
+import {
+  executionHref,
+  executionsHref,
+  queryFilter,
+  type RouteFilter,
+} from './routes.js';
+import {TIME_RANGES, rangeLabel} from './time_range.js';
 import {
   absoluteTime,
   badge,
@@ -90,11 +96,26 @@ export class ExecutionList extends LitElement {
   declare terminateReason: string;
 
   private readonly poller = new Poller<ExecutionPage>(this, (signal) =>
-    client.listExecutions(
-      {...this.filter, limit: PAGE_SIZE, cursor: this.cursors.at(-1)},
-      signal,
-    ),
+    this.readPage(signal),
   );
+
+  /**
+   * One page, as the current filter and position ask for it.
+   *
+   * `Date.now()` is read here rather than held anywhere, which is what makes a
+   * `since` window slide: every poll resolves it again, so a listing left open
+   * on "last hour" keeps meaning the last hour. See `time_range.ts`.
+   */
+  private readPage(signal: AbortSignal): Promise<ExecutionPage> {
+    return client.listExecutions(
+      {
+        ...queryFilter(this.filter, Date.now()),
+        limit: PAGE_SIZE,
+        cursor: this.cursors.at(-1),
+      },
+      signal,
+    );
+  }
 
   /** What the poller was last reading, so a change can be detected. */
   private polling = '';
@@ -124,17 +145,16 @@ export class ExecutionList extends LitElement {
    * would not do so until the *next* tick, leaving up to a poll interval of
    * visibly wrong data after a filter change. Comparing a serialization of the
    * inputs is what makes the change immediate.
+   *
+   * The key is built from the *route* filter, so it holds `since=1h` rather
+   * than the instant that resolves to. Keying on the resolved bound would
+   * differ on every update and restart the poll continuously.
    */
   override willUpdate(): void {
     const key = JSON.stringify([this.filter, this.cursors.at(-1)]);
     if (key === this.polling) return;
     this.polling = key;
-    this.poller.replaceTask((signal) =>
-      client.listExecutions(
-        {...this.filter, limit: PAGE_SIZE, cursor: this.cursors.at(-1)},
-        signal,
-      ),
-    );
+    this.poller.replaceTask((signal) => this.readPage(signal));
   }
 
   /** Any filter change starts again at the first page. */
@@ -295,6 +315,21 @@ export class ExecutionList extends LitElement {
           <option value="completed">completed</option>
           <option value="failed">failed</option>
           <option value="terminated">terminated</option>
+        </select>
+        <select
+          aria-label="created within"
+          .value=${filter.since ?? ''}
+          @change=${(e: Event) =>
+            this.applyFilter({
+              since: ((e.target as HTMLSelectElement).value ||
+                undefined) as RouteFilter['since'],
+            })}
+        >
+          <option value="">any time</option>
+          ${TIME_RANGES.map(
+            (range) =>
+              html`<option value=${range}>${rangeLabel(range)}</option>`,
+          )}
         </select>
         <label class="check">
           <input

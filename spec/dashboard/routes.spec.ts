@@ -15,9 +15,11 @@ import {
   executionHref,
   executionsHref,
   parseRoute,
+  queryFilter,
   type HistoryOptions,
   type RouteFilter,
 } from '../../dashboard/app/routes';
+import {TIME_RANGES} from '../../dashboard/app/time_range';
 
 /** What the History tab looks like when nothing has been chosen. */
 const PLAIN: HistoryOptions = {view: 'table'};
@@ -71,7 +73,9 @@ describe('dashboard routes — parsing', () => {
 
   it('reads each filter field from the query string', () => {
     expect(
-      parseRoute('#/?status=failed&name=greet&taskQueue=email&id=ord&stuck=1'),
+      parseRoute(
+        '#/?status=failed&name=greet&taskQueue=email&id=ord&stuck=1&since=1h',
+      ),
     ).toEqual({
       view: 'executions',
       filter: {
@@ -80,7 +84,18 @@ describe('dashboard routes — parsing', () => {
         taskQueue: 'email',
         workflowIdPrefix: 'ord',
         stuck: true,
+        since: '1h',
       },
+    });
+  });
+
+  it('drops a time range it does not recognize rather than filtering on nothing', () => {
+    // Same rule as an unknown status. It also covers the absolute form a reader
+    // might reasonably guess at — `?since=1754400000000` is not a duration, and
+    // showing everything says so more clearly than an empty table would.
+    expect(parseRoute('#/?since=1754400000000')).toEqual({
+      view: 'executions',
+      filter: {},
     });
   });
 
@@ -170,11 +185,20 @@ describe('dashboard routes — building links', () => {
       taskQueue: 'email/high',
       workflowIdPrefix: 'ord-',
       stuck: true,
+      since: '24h',
     };
     expect(parseRoute(executionsHref(filter))).toEqual({
       view: 'executions',
       filter,
     });
+  });
+
+  it('round-trips every time range through a link', () => {
+    for (const since of TIME_RANGES)
+      expect(parseRoute(executionsHref({since}))).toEqual({
+        view: 'executions',
+        filter: {since},
+      });
   });
 
   it('writes a plain execution link with nothing on it', () => {
@@ -218,5 +242,52 @@ describe('dashboard routes — building links', () => {
         history,
       });
     }
+  });
+});
+
+describe('dashboard routes — what the server is asked for', () => {
+  const NOON = Date.parse('2026-08-05T12:00:00.000Z');
+
+  it('passes a filter with no time range through untouched', () => {
+    expect(queryFilter({status: 'failed', name: 'charge'}, NOON)).toEqual({
+      status: 'failed',
+      name: 'charge',
+    });
+  });
+
+  it('resolves a duration into the instant the window starts', () => {
+    expect(queryFilter({since: '1h'}, NOON)).toEqual({
+      createdAfter: Date.parse('2026-08-05T11:00:00.000Z'),
+    });
+  });
+
+  /**
+   * `since` is the dashboard's word, not the protocol's. Leaking it would send
+   * a field the server does not know while omitting the bound it stands for —
+   * a filter that silently narrows nothing.
+   */
+  it('does not pass the duration itself to the server', () => {
+    expect(queryFilter({since: '7d'}, NOON)).not.toEqual(
+      jasmine.objectContaining({since: '7d'}),
+    );
+  });
+
+  /**
+   * The property that makes the window slide. The same route filter asked twice
+   * an hour apart describes two different windows, which is why the listing
+   * resolves it on every poll rather than once when the filter changes.
+   */
+  it('resolves the same range against a later clock as a later window', () => {
+    const later = NOON + 3_600_000;
+    expect(queryFilter({since: '1h'}, later).createdAfter).toBe(
+      queryFilter({since: '1h'}, NOON).createdAfter! + 3_600_000,
+    );
+  });
+
+  it('keeps the other filters alongside the resolved bound', () => {
+    expect(queryFilter({stuck: true, since: '15m'}, NOON)).toEqual({
+      stuck: true,
+      createdAfter: NOON - 900_000,
+    });
   });
 });

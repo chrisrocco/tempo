@@ -22,6 +22,11 @@
  * cursor in a pasted link would resolve to a page that no longer means
  * anything.
  *
+ * The time range is the one filter whose URL form is not the form the server
+ * takes — `?since=1h`, resolved against the clock on each poll. `time_range.ts`
+ * owns that decision and the reasoning behind it; `queryFilter` below is where
+ * the two representations meet.
+ *
  * ## So does the detail view's tab
  *
  * Same test, same answer: "the history of execution X" is a thing worth sending
@@ -37,12 +42,22 @@
 
 import type {ExecutionFilter, ExecutionStatus} from 'workflow-engine/protocol';
 import {EVENT_CATEGORIES, type EventCategory} from './history_view.js';
+import {isTimeRange, rangeStart, type TimeRange} from './time_range.js';
 
-/** The filter fields the URL round-trips; the rest are paging mechanics. */
+/**
+ * The filter fields the URL round-trips; the rest are paging mechanics.
+ *
+ * Not a plain `Pick` any more: `since` is a *duration*, and `ExecutionFilter`
+ * carries instants. The two are one field apart and `queryFilter` is the
+ * conversion — see `time_range.ts` for why the URL holds the duration.
+ */
 export type RouteFilter = Pick<
   ExecutionFilter,
   'status' | 'name' | 'taskQueue' | 'workflowIdPrefix' | 'stuck'
->;
+> & {
+  /** How far back the listing reaches; absent means all of time. */
+  since?: TimeRange;
+};
 
 /**
  * Which section of one execution is being read.
@@ -185,8 +200,27 @@ export function parseRoute(hash: string): Route {
   const prefix = params.get('id');
   if (prefix) filter.workflowIdPrefix = prefix;
   if (params.get('stuck') === '1') filter.stuck = true;
+  const since = params.get('since');
+  if (isTimeRange(since)) filter.since = since;
 
   return {view: 'executions', filter};
+}
+
+/**
+ * What to ask the server for, given what the URL says and the time now.
+ *
+ * The one place a `RouteFilter` becomes an `ExecutionFilter`. It exists because
+ * the two differ by exactly one field and spreading the route filter into an
+ * RPC call — which is what the listing used to do — would send `since` to a
+ * server that has never heard of it while omitting the bound it stands for.
+ *
+ * `now` is a parameter rather than a `Date.now()` call so this stays a pure
+ * function of its inputs, and so the spec can pin a window without a clock.
+ */
+export function queryFilter(filter: RouteFilter, now: number): ExecutionFilter {
+  const {since, ...rest} = filter;
+  if (since === undefined) return rest;
+  return {...rest, createdAfter: rangeStart(since, now)};
 }
 
 /** What a link to a detail view can say. Everything omitted takes its default. */
@@ -237,6 +271,7 @@ export function executionsHref(filter: RouteFilter = {}): string {
   if (filter.taskQueue) params.set('taskQueue', filter.taskQueue);
   if (filter.workflowIdPrefix) params.set('id', filter.workflowIdPrefix);
   if (filter.stuck) params.set('stuck', '1');
+  if (filter.since) params.set('since', filter.since);
   const query = params.toString();
   return query ? `#/?${query}` : '#/';
 }
