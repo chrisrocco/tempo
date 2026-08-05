@@ -23,6 +23,7 @@ import type {
   ExecutionPage,
   LeasedActivityTask,
   QueueWorkers,
+  StartResult,
   StartWorkflowOptions,
   TaskToken,
   WorkflowOutcome,
@@ -41,6 +42,7 @@ import {
   queryExecutions,
   silentLogger,
   type ExecutionParent,
+  type ExecutionRecord,
   type HistoryStore,
   type Logger,
 } from '../server';
@@ -70,11 +72,18 @@ function highestGeneratedSuffix(records: {workflowId: string}[]): number {
 }
 
 export interface ServerHost {
+  /**
+   * Start an execution, or claim an id that already names one.
+   *
+   * Async where `WorkflowService.start` is not, and that difference is the point:
+   * this one waits to find out whether it created anything, so an RPC caller
+   * learns which happened. The in-process seam cannot wait — see `StartResult`.
+   */
   start(
     name: string,
     args?: unknown[],
     opts?: StartWorkflowOptions,
-  ): {workflowId: string};
+  ): Promise<StartResult>;
   signal(
     workflowId: string,
     signalName: string,
@@ -143,32 +152,68 @@ export function createServerHost(
   });
   timerService.recover();
 
-  function createAndEnqueue(
+  /**
+   * Create the execution, or report that the id was already claimed.
+   *
+   * An id already in use is not an error — see `StartWorkflowOptions.workflowId`.
+   * A caller-chosen id names something in the world, so a second start under it
+   * is deduplication working, and the caller gets the execution that holds the
+   * id back.
+   *
+   * What it *is* is worth recording. `sameRequest` says whether the second call
+   * asked for the same thing; when it did not, the caller's arguments were
+   * discarded and that is a bug in the caller. The engine will not arbitrate it —
+   * the two starts are equally entitled to the name — but it will not hide it
+   * either.
+   *
+   * The existence check runs first because that is the ordinary path for a
+   * dedupe key, and it mirrors what `applyCommand` already does for a child's
+   * claimed id. The `catch` handles the narrow race where two starts both look
+   * before either writes: the loser of `create` finds the record on the recheck
+   * and takes the same claim path. A `create` that failed for any other reason
+   * has no record to find, and that error reaches the caller.
+   */
+  async function createAndEnqueue(
     workflowId: string,
     name: string,
     args: unknown[],
     taskQueue: string,
     parent?: ExecutionParent,
-  ): void {
-    void historyStore
-      .create(workflowId, name, args, taskQueue, parent)
-      .then(() => {
-        workflowTaskQueue.enqueue(workflowId, taskQueue);
-        log('execution.started', {workflowId, name, taskQueue});
-      })
-      // `create` rejects an id that already exists, and this is a floating
-      // promise: without a handler that reject is an unhandled rejection, which
-      // Node treats as fatal. A duplicate start must never be able to take the
-      // server down — it is a client-visible error at worst.
-      .catch((error: unknown) => {
-        log('execution.start_rejected', {
-          workflowId,
-          name,
-          error: errorMessage(error),
-        });
+  ): Promise<boolean> {
+    const claimed = (existing: ExecutionRecord): false => {
+      log('execution.start_reused', {
+        workflowId,
+        name,
+        sameRequest:
+          existing.name === name &&
+          JSON.stringify(existing.args) === JSON.stringify(args),
       });
+      return false;
+    };
+
+    const existing = await historyStore.get(workflowId);
+    if (existing) return claimed(existing);
+
+    try {
+      await historyStore.create(workflowId, name, args, taskQueue, parent);
+    } catch (error: unknown) {
+      const raced = await historyStore.get(workflowId);
+      if (!raced) throw error;
+      return claimed(raced);
+    }
+
+    workflowTaskQueue.enqueue(workflowId, taskQueue);
+    log('execution.started', {workflowId, name, taskQueue});
+    return true;
   }
 
+  /**
+   * The core's hook for dispatching a child. Stays fire-and-forget because the
+   * core cannot wait — it is mid-way through applying a command batch — and
+   * because a child's id is already claim-checked by `applyCommand` before this
+   * is reached. The `catch` is what stops a store failure here from becoming an
+   * unhandled rejection, which Node treats as fatal.
+   */
   function launch(
     workflowId: string,
     name: string,
@@ -176,19 +221,27 @@ export function createServerHost(
     taskQueue: string,
     parent: ExecutionParent,
   ): void {
-    createAndEnqueue(workflowId, name, args, taskQueue, parent);
+    void createAndEnqueue(workflowId, name, args, taskQueue, parent).catch(
+      (error: unknown) => {
+        log('execution.start_failed', {
+          workflowId,
+          name,
+          error: errorMessage(error),
+        });
+      },
+    );
   }
 
   return {
-    start(name, args = [], opts = {}) {
+    async start(name, args = [], opts = {}) {
       const workflowId = opts.workflowId ?? `${name}-${++counter}`;
-      createAndEnqueue(
+      const created = await createAndEnqueue(
         workflowId,
         name,
         args,
         opts.taskQueue ?? DEFAULT_TASK_QUEUE,
       );
-      return {workflowId};
+      return {workflowId, created};
     },
     signal(workflowId, signalName, payload) {
       return core.appendSignal(workflowId, signalName, payload);

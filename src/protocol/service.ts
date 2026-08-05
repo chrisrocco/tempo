@@ -30,6 +30,24 @@ export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'terminated';
 export const DEFAULT_TASK_QUEUE = 'default';
 
 export interface StartWorkflowOptions {
+  /**
+   * The execution's id. Generated when omitted; **a claim on a name when given**.
+   *
+   * A caller-chosen id exists to tie an execution to something in the world — an
+   * order, a ticket, a calendar event — and the caller owns making it uniquely
+   * identify that thing. Starting twice under one id therefore does not start
+   * twice: the second call returns the execution that already holds the id, and
+   * `StartResult.created` says which happened. This is the same rule
+   * `startChild` follows, and it is what makes "one workflow per order"
+   * expressible without the caller keeping its own table of what it has started.
+   *
+   * The consequence to know: **the second call's arguments are discarded.** The
+   * execution you get back is the one that already existed, running what it was
+   * started with. Two starts for one order with different amounts is a bug in
+   * the caller, and the engine will not arbitrate it — it records the reuse and
+   * flags whether the request matched, so the bug is greppable rather than
+   * invisible.
+   */
   workflowId?: string;
   /**
    * Which pool of workers runs this execution. Recorded on the execution, so
@@ -37,6 +55,25 @@ export interface StartWorkflowOptions {
    * and children inherit it unless they say otherwise.
    */
   taskQueue?: string;
+}
+
+/**
+ * What a start did.
+ *
+ * `created` is the whole reason this is not just an id: starting under an id
+ * that already exists is a claim rather than an error (see
+ * `StartWorkflowOptions.workflowId`), and a caller that cannot tell the two
+ * apart has no way to notice that its arguments went nowhere.
+ *
+ * Only the RPC-facing `ServerHost` returns this. `WorkflowService.start` stays
+ * synchronous and returns the id alone, because `client.ts` builds a handle from
+ * it in one expression and `RemoteService` generates the id locally so that
+ * handle works before the round trip lands — neither can wait to find out.
+ */
+export interface StartResult {
+  workflowId: string;
+  /** False when the id was already taken and this returned that execution. */
+  created: boolean;
 }
 
 // ── inspection (read-only views) ─────────────────────────────────────────

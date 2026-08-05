@@ -63,7 +63,7 @@ describe('the dashboard process', () => {
       engine.listen(0, '127.0.0.1', () => resolve()),
     );
     const enginePort = (engine.address() as AddressInfo).port;
-    host.start('demo', [], {workflowId: 'demo-1'});
+    await host.start('demo', [], {workflowId: 'demo-1'});
 
     dashboard = spawn(process.execPath, ['--import', 'tsx', DASHBOARD_MAIN], {
       stdio: ['ignore', 'pipe', 'pipe'],

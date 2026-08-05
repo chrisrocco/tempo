@@ -21,21 +21,18 @@
  * watching it — the alternative is a list where the new row is one of fifty and
  * the operator's next move is to find and click it.
  *
- * ## A duplicate id is silently a no-op
+ * ## A reused id opens what is already there, and says so
  *
- * The id is caller-chosen and may already exist, and reusing one does **not**
- * produce an error here. `historyStore.create` does reject it, but the call is a
- * floating promise inside `createAndEnqueue` (`services/server_host.ts`): `start`
- * has already returned the id by the time it settles, so the rejection reaches
- * the server log as `execution.start_rejected` and nothing else. The RPC reports
- * success, and this form navigates to the execution that was already there —
- * with whatever arguments it was originally started with, not the ones just
- * typed.
+ * A caller-chosen id is a claim on a name rather than a demand for a new
+ * execution (see `StartWorkflowOptions.workflowId`), so typing one that already
+ * exists returns that execution instead of starting a second — with the
+ * arguments it was originally started with, not the ones just typed.
  *
- * That is a pre-existing property of `start` rather than something this form
- * introduces, but the form is what makes it easy to hit: typing an id by hand is
- * the only way to collide with one. The note under the fields says so, because
- * the alternative is an operator concluding their arguments took effect.
+ * That is deduplication working, and it is the reason to type an id at all. But
+ * it is indistinguishable from a successful start unless something says which
+ * happened, so this reports it: `StartResult.created` decides whether the form
+ * says it started something or opened something. Without that the operator
+ * concludes their arguments took effect, which is the one way this can mislead.
  *
  * **There is no auth behind this** — the caveat on `action_bar.ts` applies
  * unchanged, and this button creates work rather than ending it.
@@ -54,6 +51,7 @@ export class StartForm extends LitElement {
     open: {state: true},
     busy: {state: true},
     error: {state: true},
+    outcome: {state: true},
     name: {state: true},
     args: {state: true},
     workflowId: {state: true},
@@ -63,6 +61,8 @@ export class StartForm extends LitElement {
   declare open: boolean;
   declare busy: boolean;
   declare error: string | undefined;
+  /** What the last start actually did, when that was not starting something. */
+  declare outcome: string | undefined;
   declare name: string;
   declare args: string;
   declare workflowId: string;
@@ -73,6 +73,7 @@ export class StartForm extends LitElement {
     this.open = false;
     this.busy = false;
     this.error = undefined;
+    this.outcome = undefined;
     this.name = '';
     this.args = '';
     this.workflowId = '';
@@ -109,6 +110,11 @@ export class StartForm extends LitElement {
         margin-top: 8px;
         font-size: 12.5px;
       }
+      /* Not an error — the id did its job — but it is not what was asked for
+         either, so it reads as a caution rather than as a failure. */
+      .reused {
+        color: var(--warn);
+      }
     `,
   ];
 
@@ -135,11 +141,18 @@ export class StartForm extends LitElement {
     this.busy = true;
     this.error = undefined;
     try {
-      const {workflowId} = await client.start(
+      const {workflowId, created} = await client.start(
         this.name.trim(),
         parsed.args,
         options,
       );
+      // Said on the way out rather than on the page being navigated to: the
+      // detail view has no idea a start just happened, and the difference
+      // between "started" and "this already existed" is only meaningful to the
+      // person who pressed the button.
+      this.outcome = created
+        ? undefined
+        : `${workflowId} already existed — opened it instead of starting a second. Its arguments are the ones it was started with.`;
       this.open = false;
       this.name = '';
       this.args = '';
@@ -171,13 +184,18 @@ export class StartForm extends LitElement {
           this.open
             ? html`<div class="note">
               Arguments are a JSON array — <code>["world"]</code> passes one
-              string. An id is optional; the server generates one. Reusing an
-              existing id starts nothing and opens the execution that already
-              holds it.
+              string. An id is optional; the server generates one. An id you
+              choose is a claim on a name: reusing one opens the execution that
+              already holds it rather than starting a second.
             </div>`
             : nothing
         }
         ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
+        ${
+          this.outcome === undefined
+            ? nothing
+            : html`<div class="note reused">${this.outcome}</div>`
+        }
       </div>
     `;
   }

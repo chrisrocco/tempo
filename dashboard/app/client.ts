@@ -23,6 +23,7 @@ import type {
   ExecutionGroups,
   ExecutionPage,
   QueueWorkers,
+  StartResult,
   StartWorkflowOptions,
 } from 'workflow-engine/protocol';
 
@@ -89,12 +90,16 @@ export const client = {
     );
   },
 
+  /**
+   * `created` is false when the id was already taken and this returned the
+   * execution that holds it — see `StartWorkflowOptions.workflowId`.
+   */
   start(
     name: string,
     args: unknown[] = [],
     opts: StartWorkflowOptions = {},
-  ): Promise<{workflowId: string}> {
-    return call<{workflowId: string}>({method: 'start', name, args, opts});
+  ): Promise<StartResult> {
+    return call<StartResult>({method: 'start', name, args, opts});
   },
 
   signal(workflowId: string, signalName: string, payload?: unknown) {
