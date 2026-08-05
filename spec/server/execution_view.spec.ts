@@ -195,6 +195,20 @@ describe('describeExecution — history paging', () => {
   });
 });
 
+describe('describeExecution — lineage', () => {
+  it('carries the parent, so a child is not a dead end', () => {
+    const detail = describeExecution(
+      record({parent: {workflowId: 'order-42', seq: 3}}),
+    );
+
+    expect(detail.parent).toEqual({workflowId: 'order-42', seq: 3});
+  });
+
+  it('omits it for an execution a client started directly', () => {
+    expect(describeExecution(record()).parent).toBeUndefined();
+  });
+});
+
 /**
  * A retrying activity and a first-try one are both "waiting on: charge" without
  * these fields, which is the case an operator most often has open. The count

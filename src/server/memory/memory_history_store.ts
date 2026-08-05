@@ -13,7 +13,11 @@ import {
   type ExecutionStatus,
   type HistoryEvent,
 } from '../../protocol';
-import type {ExecutionRecord, HistoryStore} from '../ports/history_store';
+import type {
+  ExecutionParent,
+  ExecutionRecord,
+  HistoryStore,
+} from '../ports/history_store';
 import {VersionConflictError} from '../ports/history_store';
 
 export class MemoryHistoryStore implements HistoryStore {
@@ -24,10 +28,12 @@ export class MemoryHistoryStore implements HistoryStore {
     name: string,
     args: unknown[],
     taskQueue: string = DEFAULT_TASK_QUEUE,
+    parent?: ExecutionParent,
   ): Promise<void> {
     if (this.records.has(workflowId))
       throw new Error(`execution ${workflowId} already exists`);
     this.records.set(workflowId, {
+      ...(parent === undefined ? {} : {parent}),
       workflowId,
       runId: 0,
       name,

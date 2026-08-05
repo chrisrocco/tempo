@@ -73,7 +73,11 @@ import type {
 } from '../protocol';
 import {completedSeqs, pendingWork} from './pending_work';
 import {createWorkerRegistry} from './worker_registry';
-import type {ExecutionRecord, HistoryStore} from './ports/history_store';
+import type {
+  ExecutionParent,
+  ExecutionRecord,
+  HistoryStore,
+} from './ports/history_store';
 import {silentLogger, type Logger} from './ports/logger';
 import type {TaskQueue} from './ports/task_queue';
 import type {TimerService} from './ports/timer_service';
@@ -149,6 +153,7 @@ export interface ServerCoreDeps {
     name: string,
     args: unknown[],
     taskQueue: string,
+    parent: ExecutionParent,
   ): void;
   /** Nudge the (async, in-proc) workflow worker to drain the workflow-task queue. */
   kickWorkflowWorker(): void;
@@ -476,12 +481,16 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           status: existing.status,
         });
       } else {
-        // A child is part of the same application unless told otherwise.
+        // A child is part of the same application unless told otherwise. The
+        // parent goes on at creation for both kinds — a detached child has
+        // nobody waiting on it, but it still came from somewhere, and that is
+        // the question an operator looking at one arrives with.
         launch(
           childId,
           cmd.childName,
           cmd.childArgs,
           cmd.taskQueue ?? taskQueue,
+          {workflowId, seq: cmd.seq},
         );
       }
       recordChild(workflowId, cmd.seq, childId);

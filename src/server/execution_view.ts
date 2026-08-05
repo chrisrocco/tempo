@@ -87,6 +87,7 @@ export function describeExecution(
   return {
     ...summarizeExecution(rec),
     args: rec.args,
+    ...(rec.parent === undefined ? {} : {parent: rec.parent}),
     history: rec.history.slice(offset, offset + limit),
     historyOffset: offset,
     pending: {

@@ -356,6 +356,25 @@ export class ExecutionDetailView extends LitElement {
         >
         <span>${detail.historyLength} events</span>
         ${
+          // The one thing on this page that points *outward*. In the meta line
+          // rather than a panel or a tab of its own: it is a single link, and a
+          // reader who followed a child id down wants the way back where they
+          // are already looking, not somewhere they have to go and find.
+          detail.parent === undefined
+            ? nothing
+            : html`<span
+              >child of
+              <a
+                class="mono"
+                href=${executionHref(detail.parent.workflowId)}
+                title="started by #${detail.parent.seq} in ${
+                  detail.parent.workflowId
+                }"
+                >${detail.parent.workflowId}</a
+              ></span
+            >`
+        }
+        ${
           detail.cancelRequested
             ? html`<span class="warn">cancellation requested</span>`
             : nothing

@@ -63,6 +63,7 @@ import {
   describeExecution,
   groupExecutions,
   queryExecutions,
+  type ExecutionParent,
   type HistoryStore,
 } from '../server';
 import type {ActivityWorker, WorkflowWorker} from '../worker';
@@ -103,8 +104,8 @@ export function createLocalService(
     timerService,
     // The core supplies the child's id; it is derived from lineage so it stays
     // stable across a restart (see `server_core.childExecutionId`).
-    launch: (workflowId, name, args, taskQueue) => {
-      launch(name, args, {workflowId, taskQueue});
+    launch: (workflowId, name, args, taskQueue, parent) => {
+      launch(name, args, {workflowId, taskQueue}, parent);
     },
     kickWorkflowWorker,
     kickActivityWorker,
@@ -244,10 +245,16 @@ export function createLocalService(
     else w.reject(failure);
   }
 
+  /**
+   * `parent` is not part of `StartWorkflowOptions` on purpose: a client does not
+   * get to declare itself the child of something. Only the core passes it, when
+   * it is dispatching a `startChild`.
+   */
   function launch(
     name: string,
     args: unknown[],
     opts: StartWorkflowOptions = {},
+    parent?: ExecutionParent,
   ): string {
     // Unlike the remote host this already had a `.catch`, so a duplicate id
     // rejects the caller's `getResult` rather than escaping as an unhandled
@@ -257,7 +264,7 @@ export function createLocalService(
     statusMirror.set(workflowId, 'running');
     ensureWaiter(workflowId);
     void historyStore
-      .create(workflowId, name, args, taskQueue)
+      .create(workflowId, name, args, taskQueue, parent)
       .then(() => {
         workflowTaskQueue.enqueue(workflowId, taskQueue);
         kickWorkflowWorker();

@@ -210,9 +210,30 @@ export interface PendingActivityView {
   nextAttemptAt?: number;
 }
 
+/**
+ * Which execution started this one.
+ *
+ * On the detail rather than the summary: a listing has no column for lineage and
+ * most executions have no parent, so putting it on every row would grow the
+ * common response to answer a question only the detail view asks.
+ */
+export interface ExecutionParentView {
+  workflowId: string;
+  /** The `startChild` seq in the parent, which its history is keyed by. */
+  seq: number;
+}
+
 /** `tempo describe`: the summary, plus history and what the execution awaits. */
 export interface ExecutionDetail extends ExecutionSummary {
   args: unknown[];
+  /**
+   * Absent on an execution a client started directly.
+   *
+   * Also absent on a child created before the parent was recorded — the two are
+   * indistinguishable, and both degrade to the dead end this field exists to
+   * remove rather than to a link that goes nowhere.
+   */
+  parent?: ExecutionParentView;
   /**
    * One page of history — see `DescribeOptions`. `historyLength` on the summary
    * is the total, so `historyOffset + history.length < historyLength` means

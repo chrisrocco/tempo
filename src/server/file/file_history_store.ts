@@ -29,6 +29,7 @@ import {
 } from '../../protocol';
 import type {
   ActivityRetryState,
+  ExecutionParent,
   ExecutionRecord,
   HistoryStore,
 } from '../ports/history_store';
@@ -61,6 +62,13 @@ interface PersistedMeta {
   activityAttempts?: Record<number, number | ActivityRetryState>;
   /** Absent in data dirs written before carryover existed; reads as empty. */
   carryover?: Carryover;
+  /**
+   * Absent both on an execution started directly and in data dirs written before
+   * the parent was recorded. The two are indistinguishable on read, which is
+   * acceptable: the older case degrades to a child with no link back, which is
+   * what it had before.
+   */
+  parent?: ExecutionParent;
 }
 
 /**
@@ -134,10 +142,12 @@ export class FileHistoryStore implements HistoryStore {
     name: string,
     args: unknown[],
     taskQueue: string = DEFAULT_TASK_QUEUE,
+    parent?: ExecutionParent,
   ): Promise<void> {
     if (this.cache.has(workflowId))
       throw new Error(`execution ${workflowId} already exists`);
     const rec: ExecutionRecord = {
+      ...(parent === undefined ? {} : {parent}),
       workflowId,
       runId: 0,
       name,
@@ -339,6 +349,7 @@ export class FileHistoryStore implements HistoryStore {
       lastTaskFailure: rec.lastTaskFailure,
       activityAttempts: rec.activityAttempts,
       carryover: rec.carryover,
+      parent: rec.parent,
     };
     const metaPath = path.join(this.execDir(rec.workflowId), 'meta.json');
     const tmp = `${metaPath}.tmp`;
@@ -394,6 +405,7 @@ export class FileHistoryStore implements HistoryStore {
         lastTaskFailure: meta.lastTaskFailure,
         activityAttempts: restoreActivityAttempts(meta.activityAttempts),
         carryover: meta.carryover ?? {},
+        ...(meta.parent === undefined ? {} : {parent: meta.parent}),
       });
     }
   }

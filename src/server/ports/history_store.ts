@@ -49,6 +49,8 @@ export interface ExecutionRecord {
    * reported, kept so the next one can start from it.
    */
   carryover: Carryover;
+  /** Absent on an execution a client started directly, which is most of them. */
+  parent?: ExecutionParent;
   /**
    * Consecutive workflow-task failures, reset by the next success. Durable
    * because the queues are not: a counter kept in the queue would reset on
@@ -74,6 +76,23 @@ export interface ExecutionRecord {
    * and skew the continue-as-new hint.
    */
   activityAttempts: Record<number, ActivityRetryState>;
+}
+
+/**
+ * The execution that started this one, on a child's record.
+ *
+ * Recorded on the child rather than derived from the parent because the parent's
+ * `childStarted` event is the only other place it exists, and finding it from a
+ * child would mean scanning every execution's history for one naming this id.
+ * `parentOfChild` in `server_core` holds the same fact in memory, but only for
+ * blocking children and only to route a completion — it is not an answer to
+ * "where did this come from", which is asked of settled and detached children
+ * too.
+ */
+export interface ExecutionParent {
+  workflowId: string;
+  /** The `startChild` seq in the parent, which its history is keyed by. */
+  seq: number;
 }
 
 /**
@@ -118,6 +137,7 @@ export interface HistoryStore {
     name: string,
     args: unknown[],
     taskQueue?: string,
+    parent?: ExecutionParent,
   ): Promise<void>;
   /** A snapshot of the record, or undefined if unknown. */
   get(workflowId: string): Promise<ExecutionRecord | undefined>;

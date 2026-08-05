@@ -40,6 +40,7 @@ import {
   groupExecutions,
   queryExecutions,
   silentLogger,
+  type ExecutionParent,
   type HistoryStore,
   type Logger,
 } from '../server';
@@ -145,9 +146,10 @@ export function createServerHost(
     name: string,
     args: unknown[],
     taskQueue: string,
+    parent?: ExecutionParent,
   ): void {
     void historyStore
-      .create(workflowId, name, args, taskQueue)
+      .create(workflowId, name, args, taskQueue, parent)
       .then(() => {
         workflowTaskQueue.enqueue(workflowId, taskQueue);
         log('execution.started', {workflowId, name, taskQueue});
@@ -170,8 +172,9 @@ export function createServerHost(
     name: string,
     args: unknown[],
     taskQueue: string,
+    parent: ExecutionParent,
   ): void {
-    createAndEnqueue(workflowId, name, args, taskQueue);
+    createAndEnqueue(workflowId, name, args, taskQueue, parent);
   }
 
   return {
