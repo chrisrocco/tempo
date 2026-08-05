@@ -1,5 +1,6 @@
 {
   "printWidth": 80,
   "singleQuote": true,
+  "bracketSpacing": false,
   "embeddedLanguageFormatting": "off"
 }

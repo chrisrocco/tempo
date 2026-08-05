@@ -2,22 +2,29 @@
  * @fileoverview
  * `<tempo-app>` — the shell: a header, and whichever view the route names.
  *
- * Deliberately thin. It owns the route and nothing else; the two views own
- * their own polling, their own errors, and their own paging. An earlier version
- * of this file *was* the executions list — the walking skeleton that proved the
- * serving chain worked (transpile on request, the generated import map, a
- * custom element, and the RPC answering same-origin). That chain is proven, so
- * the shell went back to being a shell.
+ * Deliberately thin. It owns the route and the header, and the views own their
+ * own polling, errors, and paging. An earlier version of this file *was* the
+ * executions list — the walking skeleton that proved the serving chain worked
+ * (transpile on request, the generated import map, a custom element, and the RPC
+ * answering same-origin). That chain is proven, so the shell went back to being
+ * a shell.
+ *
+ * The palette selector lives here because it lives in the header; the choice
+ * itself is `theme_mode.ts`, and no view knows a theme exists.
  *
  * ## No decorators
  *
  * `static properties` and `customElements.define`, not `@customElement` and
- * `@property`. Decorators would need `experimentalDecorators` and a
- * transformation; without them the served JavaScript is a straight
- * transcription of this file with the types removed, which keeps the
- * on-request transpile trivial and leaves the door open to native type
- * stripping later. Every component here follows the same rule — see
- * `services/ui_server.ts`.
+ * `@property`. Decorators need `experimentalDecorators` and a transformation to
+ * emit; without them every component is a straight transcription of its source
+ * with the types removed.
+ *
+ * That rule was originally load-bearing: the server transpiled each module on
+ * request, and anything needing a real transformation would have broken it. That
+ * server is gone — esbuild bundles the app now, and would handle decorators
+ * without complaint. The rule stays because the output remains readable against
+ * the source and native type stripping stays available, which is a preference
+ * rather than a constraint. Every component here follows it.
  *
  * ## Where the pieces are
  *
@@ -27,24 +34,38 @@
  * | `router.ts`           | binding those to `hashchange`                   |
  * | `poller.ts`           | every repeating read: backoff, pause, abort     |
  * | `client.ts`           | the RPC, typed from `protocol/`                 |
- * | `theme.ts`            | the palette and the shared element styles       |
+ * | `theme.ts`            | the shared element styles                       |
+ * | `theme_mode.ts`       | which palette is showing, and remembering it    |
+ * | `index.html`          | the palettes themselves, on `:root`             |
  * | `execution_list.ts`   | the home view: filter bar and paged table       |
  * | `execution_detail.ts` | one execution, and the panels that explain it   |
  * | `queues_view.ts`      | which pools and types are in trouble            |
- * | `history_view.ts`     | how an event reads, and how long it took        |
- * | `history_timeline.ts` | laying those out, and paging them               |
+ * | `history_view.ts`     | how an event reads, its family, how long it took|
+ * | `history_spans.ts`    | those events as intervals on a time axis        |
+ * | `history_export.ts`   | a whole history, across the pages it arrives in |
+ * | `history_timeline.ts` | laying all that out, and paging it              |
  * | `action_bar.ts`       | signal, cancel, terminate                       |
+ * | `start_form.ts`       | starting a workflow                             |
+ * | `start_args.ts`       | what the arguments box accepts                  |
  * | `status_badge.ts`     | the one place `isStuck` becomes a pill          |
  * | `json_view.ts`        | any payload the user's own code produced        |
  *
- * `routes.ts` and `history_view.ts` are deliberately DOM-free, which is what
- * lets the suite cover them (`spec/ui/`) without a browser.
+ * `routes.ts`, `history_view.ts`, `history_spans.ts`, `history_export.ts`, and
+ * `start_args.ts` are deliberately DOM-free, which is what lets the suite cover
+ * them (`spec/dashboard/`) without a browser. Everything with a decision in it
+ * belongs on that side of the line.
  */
 
 import {LitElement, css, html, type TemplateResult} from 'lit';
 import {RouteController} from './router.js';
 import {QUEUES_HREF, executionsHref, type Route} from './routes.js';
 import {heading, surface} from './theme.js';
+import {
+  THEME_MODES,
+  applyThemeMode,
+  readThemeMode,
+  type ThemeMode,
+} from './theme_mode.js';
 import './execution_detail.js';
 import './execution_list.js';
 import './queues_view.js';
@@ -58,7 +79,23 @@ function assertNever(route: never): never {
 }
 
 class TempoApp extends LitElement {
+  static override properties = {
+    theme: {state: true},
+  };
+
   private readonly router = new RouteController(this);
+
+  /** Which palette is showing. Held only so the select renders its own value. */
+  declare theme: ThemeMode;
+
+  constructor() {
+    super();
+    // Applied here rather than at module load: the stored choice has to reach
+    // the document before first paint, and this runs once, when the shell is
+    // constructed.
+    this.theme = readThemeMode(localStorage);
+    applyThemeMode(this.theme, document.documentElement, localStorage);
+  }
 
   static override styles = [
     surface,
@@ -96,6 +133,15 @@ class TempoApp extends LitElement {
         color: var(--text);
         font-weight: 600;
       }
+      nav select {
+        font: inherit;
+        font-size: 12px;
+        color: var(--muted);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 2px 6px;
+      }
     `,
   ];
 
@@ -116,9 +162,36 @@ class TempoApp extends LitElement {
           <a class=${onQueues ? 'here' : ''} href=${QUEUES_HREF}
             >queues &amp; types</a
           >
+          ${this.themePicker()}
         </nav>
       </header>
       ${this.view(route)}
+    `;
+  }
+
+  /**
+   * The palette selector.
+   *
+   * In the nav rather than in a settings view, because there is no settings
+   * view and one control does not justify inventing one.
+   */
+  private themePicker(): TemplateResult {
+    return html`
+      <select
+        aria-label="colour theme"
+        @change=${(e: Event) => {
+          this.theme = (e.target as HTMLSelectElement).value as ThemeMode;
+          applyThemeMode(this.theme, document.documentElement, localStorage);
+        }}
+      >
+        ${THEME_MODES.map(
+          (mode) => html`
+            <option value=${mode} ?selected=${this.theme === mode}>
+              ${mode}
+            </option>
+          `,
+        )}
+      </select>
     `;
   }
 

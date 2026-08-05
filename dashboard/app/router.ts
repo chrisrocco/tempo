@@ -5,13 +5,13 @@
  *
  * A router library was considered and rejected (see
  * planning/sprints/06-dashboard.md): `@lit-labs/router` is pre-release, this app
- * has two routes, and the platform already fires an event when the hash
+ * has three routes, and the platform already fires an event when the hash
  * changes.
  *
  * **The hash, not the path.** Path routing needs the server to answer every URL
- * with the shell, which would mean `ui_server.ts` deciding whether `/ui/foo` is
- * a route or a missing file. The hash never reaches the server, so deep links
- * work with no server-side routing table at all.
+ * with the shell, which would mean `server/static_server.ts` deciding whether
+ * `/foo` is a route or a missing file. The hash never reaches the server, so
+ * deep links work with no server-side routing table at all.
  *
  * What a URL *means* lives in `routes.ts`, which touches no DOM and is covered
  * by the suite. This module is only the wiring.

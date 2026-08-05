@@ -1,7 +1,7 @@
 /**
  * @fileoverview
- * The dashboard's shared visual vocabulary — colors, and the few element styles
- * that appear in more than one component.
+ * The dashboard's shared visual vocabulary — the element styles that appear in
+ * more than one component.
  *
  * Shadow DOM is why this is a module rather than a stylesheet. Styles do not
  * cross a shadow boundary, so every component that renders a table or a badge
@@ -10,42 +10,35 @@
  * looks like. Each component composes what it needs:
  * `static styles = [surface, table, css\`…\`]`.
  *
- * The palette is CSS custom properties on `:host` because custom properties
- * *do* inherit through shadow boundaries — they are the one thing that crosses,
- * so they are what the theme is built from. Declared on `:host` in `surface`,
- * which every component includes.
+ * ## The palette is not here
+ *
+ * The colors live on `:root` in `index.html`, and everything below refers to
+ * them by name. Custom properties are the one thing that crosses a shadow
+ * boundary, so a single declaration at the document root reaches every
+ * component.
+ *
+ * They used to be declared on `:host` in `surface`, which reached every
+ * component too — but a property set directly on `:host` beats the same property
+ * inherited from an ancestor, so the palette could not be overridden from
+ * outside. That made a theme switch impossible without touching all thirteen
+ * components. Moving one declaration up is what `theme_mode.ts` swaps.
+ *
+ * Every rule here names a role (`--danger`, not a red), so a component asking
+ * for "the color of something broken" does not have to know which one that
+ * currently is — or which palette is loaded.
  */
 
 import {css} from 'lit';
 
 /**
- * The palette and the base type treatment. Include first in every component.
+ * The base treatment every component starts from. Include first.
  *
- * The colors are named for their role rather than their hue (`--danger`, not
- * `--red`), so a component that wants "the color of something broken" does not
- * have to know which one that currently is.
+ * `color` is restated rather than left to inherit because a shadow root's host
+ * does not inherit it from the document in every case a component is used
+ * standalone, and restating it costs nothing.
  */
 export const surface = css`
   :host {
-    --bg: #0f1115;
-    --panel: #151922;
-    --border: #232733;
-    --border-soft: #1a1e27;
-    --text: #e6e6e6;
-    --muted: #8b93a7;
-    --dim: #6b7280;
-    --accent: #7cc4ff;
-    --accent-bg: #17324d;
-    --ok: #6ee7a0;
-    --ok-bg: #12331f;
-    --danger: #ff9aa2;
-    --danger-bg: #3d1a1d;
-    --warn: #ffc46b;
-    --warn-bg: #4a2f0a;
-    --neutral: #b0b4bd;
-    --neutral-bg: #2a2a2f;
-    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-
     display: block;
     color: var(--text);
   }

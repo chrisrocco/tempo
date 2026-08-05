@@ -10,8 +10,10 @@
 
 import type {HistoryEvent} from '../../src/protocol/history_events';
 import {
+  EVENT_CATEGORIES,
   describeEvent,
   durationOf,
+  eventCategory,
   formatDuration,
   markerTimes,
 } from '../../dashboard/app/history_view';
@@ -91,6 +93,67 @@ describe('dashboard history — reading an event', () => {
     });
     expect(view.label).toContain('approve');
     expect(view.payload).toEqual({by: 'ops'});
+  });
+});
+
+describe('dashboard history — grouping events into families', () => {
+  it('puts an activity and its outcome in the same family', () => {
+    // The property the whole grouping rests on: filtering to activities keeps
+    // the dispatch that names them, so the duration pairing still resolves.
+    const scheduled: HistoryEvent = {
+      type: 'activityScheduled',
+      seq: 1,
+      name: 'charge',
+      args: [],
+      options: OPTIONS,
+    };
+    const failed: HistoryEvent = {
+      type: 'activityFailed',
+      seq: 1,
+      error: 'declined',
+    };
+    expect(eventCategory(scheduled)).toBe('activity');
+    expect(eventCategory(failed)).toBe('activity');
+  });
+
+  it('puts a timer and its firing in the same family', () => {
+    expect(eventCategory({type: 'timerStarted', seq: 1, fireAt: 9})).toBe(
+      'timer',
+    );
+    expect(eventCategory({type: 'timerFired', seq: 1})).toBe('timer');
+  });
+
+  it('puts a child and its outcome in the same family', () => {
+    expect(
+      eventCategory({
+        type: 'childStarted',
+        seq: 1,
+        childId: 'c',
+        detached: false,
+      }),
+    ).toBe('child');
+    expect(eventCategory({type: 'childCompleted', seq: 1, result: 1})).toBe(
+      'child',
+    );
+  });
+
+  it('separates a signal from a cancellation, which arrive the same way', () => {
+    expect(
+      eventCategory({type: 'signal', name: 'approve', payload: undefined}),
+    ).toBe('signal');
+    expect(eventCategory({type: 'cancelRequested'})).toBe('cancellation');
+  });
+
+  it('offers every family it can return, so none is unreachable', () => {
+    const every: HistoryEvent[] = [
+      {type: 'activityCompleted', seq: 1, result: 1},
+      {type: 'timerFired', seq: 1},
+      {type: 'childCompleted', seq: 1, result: 1},
+      {type: 'signal', name: 'go', payload: undefined},
+      {type: 'cancelRequested'},
+    ];
+    const reachable = new Set(every.map(eventCategory));
+    expect([...reachable].sort()).toEqual([...EVENT_CATEGORIES].sort());
   });
 });
 
