@@ -36,14 +36,14 @@ describe('generated ids across a restart', () => {
     const store = new MemoryHistoryStore();
 
     const first = createServerHost(store);
-    const before = first.start('planner').workflowId;
+    const before = (await first.start('planner')).workflowId;
     await new Promise<void>((r) => setTimeout(r, 10)); // let create() land
     first.shutdown();
 
     // Restart: a new host over the same durable store.
     const second = createServerHost(store);
     await second.resume();
-    const after = second.start('planner').workflowId;
+    const after = (await second.start('planner')).workflowId;
     second.shutdown();
 
     expect(after).not.toBe(before);
@@ -54,13 +54,13 @@ describe('generated ids across a restart', () => {
 
     const rejections = await unhandledDuring(async () => {
       const first = createServerHost(store);
-      first.start('planner');
+      await first.start('planner');
       await new Promise<void>((r) => setTimeout(r, 10));
       first.shutdown();
 
       const second = createServerHost(store);
       await second.resume();
-      second.start('planner');
+      await second.start('planner');
       await new Promise<void>((r) => setTimeout(r, 10));
       second.shutdown();
     });
@@ -115,7 +115,7 @@ describe('child ids derived from lineage', () => {
       for (const seq of [0, 1]) {
         const id = childExecutionId('poller', run, seq);
         ids.push(id);
-        host.start('planner', [], {workflowId: id});
+        await host.start('planner', [], {workflowId: id});
       }
       await new Promise<void>((r) => setTimeout(r, 10));
       host.shutdown();
