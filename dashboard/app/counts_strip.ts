@@ -14,6 +14,21 @@
  * than a wall display — making the page that is already open do the job is
  * smaller and better.
  *
+ * ## It does not follow the listing's filter, and should not
+ *
+ * "3 failed" sitting above a table showing one reads oddly the first time, and
+ * the time range made it easy to notice — but it is not new, and narrowing the
+ * strip is the wrong fix. These numbers are how a reader gets *out* of a filter
+ * that is hiding the problem: every one is a link that replaces the current
+ * filter rather than refining it, so a strip that already agreed with the
+ * filter would have nothing left to say. Filtered to `name=charge` and blind to
+ * the outage on another workflow is exactly the state the strip exists to
+ * break.
+ *
+ * What it is, then, is a fleet-wide summary that happens to sit on a page which
+ * can be narrowed. The labels are unqualified because "running (all)" invites
+ * the question on every load to prevent it being asked once.
+ *
  * ## It polls slower than the list it sits above
  *
  * Two reads on the home view that were not there before, and `groupExecutions`
