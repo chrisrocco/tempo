@@ -41,6 +41,7 @@ import {
   surface,
   table,
 } from './theme.js';
+import './counts_strip.js';
 import './start_form.js';
 import './status_badge.js';
 
@@ -269,6 +270,7 @@ export class ExecutionList extends LitElement {
     const executions = page?.executions ?? [];
     return html`
       <h1>Executions</h1>
+      <counts-strip></counts-strip>
       <start-form></start-form>
       ${this.filterBar()}
       <div class="status">

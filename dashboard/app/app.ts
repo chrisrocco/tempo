@@ -38,6 +38,8 @@
  * | `theme_mode.ts`       | which palette is showing, and remembering it    |
  * | `index.html`          | the palettes themselves, on `:root`             |
  * | `execution_list.ts`   | the home view: filter bar and paged table       |
+ * | `triage_counts.ts`    | what "is anything wrong" adds up to             |
+ * | `counts_strip.ts`     | those numbers, as links into the filters        |
  * | `execution_detail.ts` | one execution, and the panels that explain it   |
  * | `queues_view.ts`      | which pools and types are in trouble            |
  * | `history_view.ts`     | how an event reads, its family, how long it took|
@@ -50,10 +52,12 @@
  * | `status_badge.ts`     | the one place `isStuck` becomes a pill          |
  * | `json_view.ts`        | any payload the user's own code produced        |
  *
- * `routes.ts`, `history_view.ts`, `history_spans.ts`, `history_export.ts`, and
- * `start_args.ts` are deliberately DOM-free, which is what lets the suite cover
- * them (`spec/dashboard/`) without a browser. Everything with a decision in it
- * belongs on that side of the line.
+ * `routes.ts`, `history_view.ts`, `history_spans.ts`, `history_export.ts`,
+ * `start_args.ts`, `triage_counts.ts`, and `theme_mode.ts` are deliberately
+ * DOM-free, which is what lets the suite cover them (`spec/dashboard/`) without
+ * a browser. Everything with a decision in it belongs on that side of the line —
+ * and the root `tsconfig.json` has no DOM lib, so a spec importing a module that
+ * names `document` does not compile.
  */
 
 import {LitElement, css, html, type TemplateResult} from 'lit';
