@@ -45,11 +45,19 @@
  * count says which events were actually searched. The filter never claims to
  * have looked at more than it did.
  *
- * The choice is deliberately *not* in the URL, unlike the executions filter
- * (`routes.ts`). That is a defensible default rather than a settled one — "the
- * failed activities of execution X" is exactly the kind of link that view's
- * design argues for, and the case for adding it gets stronger the moment
- * anything else about a detail view becomes linkable.
+ * ## This component holds no state
+ *
+ * The filter, the table/timeline choice, and which page of history is showing
+ * are all given to it; it renders what it is handed and dispatches an event to
+ * ask for something else. The first two live in the URL (`routes.ts`) and the
+ * third belongs to `execution_detail.ts`, which owns the poller.
+ *
+ * That is not ceremony. This element is torn down whenever the detail view
+ * switches tabs, so anything it held locally would silently reset on a round
+ * trip through another tab — which is exactly what happened when the filter and
+ * the view mode lived here. Putting them in the URL fixes that and makes "the
+ * failed activities of execution X, as bars" a link, which is what the
+ * executions filter is already built around.
  */
 
 import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
@@ -70,7 +78,11 @@ import {
   type HistorySpan,
   type TimelineMark,
 } from './history_spans.js';
-import {executionHref} from './routes.js';
+import {
+  DEFAULT_HISTORY_VIEW,
+  executionHref,
+  type HistoryView,
+} from './routes.js';
 import {
   absoluteTime,
   heading,
@@ -86,8 +98,8 @@ export class HistoryTimeline extends LitElement {
     history: {attribute: false},
     offset: {attribute: false},
     total: {attribute: false},
-    category: {state: true},
-    view: {state: true},
+    category: {attribute: false},
+    view: {attribute: false},
   };
 
   declare history: HistoryEvent[];
@@ -95,7 +107,13 @@ export class HistoryTimeline extends LitElement {
   declare offset: number;
   /** The execution's total history length, for the paging controls. */
   declare total: number;
-  /** Which family to show; undefined means all of them. */
+  /**
+   * Which family to show; undefined means all of them.
+   *
+   * A property rather than local state: it lives in the URL, so this component
+   * renders what it is given and asks for a change rather than holding one. See
+   * the fileoverview.
+   */
   declare category: EventCategory | undefined;
   /**
    * Ordered rows, or bars on a time axis.
@@ -105,7 +123,7 @@ export class HistoryTimeline extends LitElement {
    * question — where did the time go — and is the wrong thing to land on when
    * the reason for opening the page was to read an error.
    */
-  declare view: 'table' | 'compact';
+  declare view: HistoryView;
 
   constructor() {
     super();
@@ -113,7 +131,27 @@ export class HistoryTimeline extends LitElement {
     this.offset = 0;
     this.total = 0;
     this.category = undefined;
-    this.view = 'table';
+    this.view = DEFAULT_HISTORY_VIEW;
+  }
+
+  /**
+   * Ask for a different reading of the same history.
+   *
+   * An event rather than a local assignment, for the same reason `history-page`
+   * is one: these live in the URL, and the view that owns the route is the only
+   * thing that can change them.
+   */
+  private requestOptions(patch: {
+    view?: HistoryView;
+    events?: EventCategory | undefined;
+  }): void {
+    this.dispatchEvent(
+      new CustomEvent('history-options', {
+        detail: patch,
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   static override styles = [
@@ -394,17 +432,13 @@ export class HistoryTimeline extends LitElement {
       <div class="views">
         <button
           class=${this.view === 'table' ? 'on' : ''}
-          @click=${() => {
-            this.view = 'table';
-          }}
+          @click=${() => this.requestOptions({view: 'table'})}
         >
           table
         </button>
         <button
           class=${this.view === 'compact' ? 'on' : ''}
-          @click=${() => {
-            this.view = 'compact';
-          }}
+          @click=${() => this.requestOptions({view: 'compact'})}
         >
           timeline
         </button>
@@ -532,7 +566,9 @@ export class HistoryTimeline extends LitElement {
       <select
         @change=${(e: Event) => {
           const value = (e.target as HTMLSelectElement).value;
-          this.category = value === '' ? undefined : (value as EventCategory);
+          this.requestOptions({
+            events: value === '' ? undefined : (value as EventCategory),
+          });
         }}
       >
         <option value="" ?selected=${this.category === undefined}>

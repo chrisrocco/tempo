@@ -13,6 +13,37 @@
  * opened this page because something is wrong should not have to scroll past
  * the arguments to find out what.
  *
+ * ## Two regions, and why the split falls where it does
+ *
+ * Everything above the tabs is **diagnosis**: the two failures, the result, and
+ * what the execution is parked on. Most of it is conditional and renders nothing
+ * at all when there is no problem, so a healthy execution costs a few lines and
+ * a broken one leads with the reason. None of it goes behind a tab — that would
+ * put the failure one click away from a reader who arrived *because* of the
+ * failure, which is the rule above, restated.
+ *
+ * Below the tabs is **bulk**: history, and the state the execution was given.
+ * Long, always present regardless of health, and not what the page is usually
+ * open for. This is also where every planned addition lands, which is the reason
+ * the split exists — the view was eight panels in one scroll and the work queued
+ * against it would have made twelve.
+ *
+ * The tab is a route (`routes.ts`), not component state, so a section is
+ * linkable. `fromEvent` is not, for the same reason `cursor` is not: which page
+ * of history is on screen is mechanics rather than a description of what is
+ * being looked at.
+ *
+ * ### Where the two open questions land
+ *
+ * **A query or stack trace** answers "where is this actually blocked" and is
+ * diagnosis, so it belongs beside "waiting on" rather than in a tab.
+ *
+ * **Reset** is the exception. It attaches to a history *row* — "reset to this
+ * event" is the whole operation — so it lives inside the History tab even though
+ * it is an intervention and every other intervention is in the action bar. That
+ * is acceptable because reset is not something anyone reaches for before
+ * diagnosing: by the time it is wanted, the reader is already reading history.
+ *
  * ## Two different failures
  *
  * `failure` is the workflow raising — a normal, recorded outcome. `taskFailures`
@@ -40,8 +71,19 @@ import {
 } from 'workflow-engine/protocol';
 import {client} from './client.js';
 import {collectHistory} from './history_export.js';
+import type {EventCategory} from './history_view.js';
 import {Poller} from './poller.js';
-import {executionsHref} from './routes.js';
+import {navigate} from './router.js';
+import {
+  DEFAULT_DETAIL_TAB,
+  DEFAULT_HISTORY_VIEW,
+  DETAIL_TABS,
+  executionHref,
+  executionsHref,
+  type DetailTab,
+  type HistoryOptions,
+  type HistoryView,
+} from './routes.js';
 import {
   absoluteTime,
   badge,
@@ -58,14 +100,29 @@ import './history_timeline.js';
 import './json_view.js';
 import './status_badge.js';
 
+/**
+ * Adding a tab becomes a compile error here rather than a blank section — the
+ * same reason `app.ts` ends its route dispatch this way (see AGENTS.md). This is
+ * what will catch `relationships` when it arrives.
+ */
+function assertNever(tab: never): never {
+  throw new Error(`unhandled detail tab: ${JSON.stringify(tab)}`);
+}
+
 export class ExecutionDetailView extends LitElement {
   static override properties = {
     workflowId: {attribute: false},
+    tab: {attribute: false},
+    history: {attribute: false},
     fromEvent: {state: true},
     exportError: {state: true},
   };
 
   declare workflowId: string;
+  /** Which section is showing. Owned by the route, not by this component. */
+  declare tab: DetailTab;
+  /** How the history reads. Also the route's, for the same reason. */
+  declare history: HistoryOptions;
   /** Which history page to read; undefined means the most recent. */
   declare fromEvent: number | undefined;
   /** Why the last export did not produce a complete file, if it did not. */
@@ -96,6 +153,8 @@ export class ExecutionDetailView extends LitElement {
   constructor() {
     super();
     this.workflowId = '';
+    this.tab = DEFAULT_DETAIL_TAB;
+    this.history = {view: DEFAULT_HISTORY_VIEW};
     this.fromEvent = undefined;
     this.exportError = undefined;
   }
@@ -213,6 +272,28 @@ export class ExecutionDetailView extends LitElement {
         font-size: 12.5px;
         margin-bottom: 10px;
       }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        margin: 0 0 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .tab {
+        font-size: 12.5px;
+        text-transform: capitalize;
+        color: var(--muted);
+        padding: 6px 12px;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+      }
+      .tab:hover {
+        color: var(--text);
+        text-decoration: none;
+      }
+      .tab.on {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
     `,
   ];
 
@@ -265,20 +346,92 @@ export class ExecutionDetailView extends LitElement {
       </div>
 
       ${this.stuckPanel(detail)} ${this.failurePanel(detail)}
-      ${this.resultPanel(detail)}
+      ${this.resultPanel(detail)} ${this.pendingPanel(detail)}
 
       <action-bar
         .execution=${detail}
         @acted=${() => this.poller.refresh()}
       ></action-bar>
 
-      ${this.pendingPanel(detail)} ${this.carryoverPanel(detail)}
+      ${this.tabStrip(detail)} ${this.tabPanel(detail)}
+    `;
+  }
 
+  /**
+   * The tabs, as links.
+   *
+   * Anchors rather than buttons because they are navigation — the tab is in the
+   * URL (see `routes.ts`), so these want to be middle-clickable, copyable, and
+   * reachable by the back button, all of which a button would have to
+   * reimplement badly.
+   */
+  private tabStrip(detail: Detail): TemplateResult {
+    return html`
+      <div class="tabs">
+        ${DETAIL_TABS.map(
+          (tab) => html`
+            <a
+              class="tab ${this.tab === tab ? 'on' : ''}"
+              href=${executionHref(detail.workflowId, {
+                tab,
+                history: this.history,
+              })}
+              >${tab}</a
+            >
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  private tabPanel(detail: Detail): TemplateResult {
+    switch (this.tab) {
+      case 'state':
+        return this.statePanel(detail);
+      case 'history':
+        return this.historyPanel(detail);
+      default:
+        return assertNever(this.tab);
+    }
+  }
+
+  /** What the execution was given, and what it is carrying. */
+  private statePanel(detail: Detail): TemplateResult {
+    return html`
       <div class="panel">
         <h2>Arguments</h2>
         <json-view .value=${detail.args}></json-view>
       </div>
+      ${this.carryoverPanel(detail)}
+    `;
+  }
 
+  /**
+   * Navigate to the same execution read a different way.
+   *
+   * `events` is patched by presence rather than by `!== undefined`, because
+   * clearing the filter back to "all events" *is* an undefined value — testing
+   * for it would make the one control that turns the filter off do nothing.
+   */
+  private applyHistoryOptions(patch: {
+    view?: HistoryView;
+    events?: EventCategory;
+  }): void {
+    const history: HistoryOptions = {
+      view: patch.view ?? this.history.view,
+      ...('events' in patch
+        ? patch.events === undefined
+          ? {}
+          : {events: patch.events}
+        : this.history.events === undefined
+          ? {}
+          : {events: this.history.events}),
+    };
+    navigate(executionHref(this.workflowId, {tab: this.tab, history}));
+  }
+
+  private historyPanel(detail: Detail): TemplateResult {
+    return html`
       <div class="panel">
         ${
           this.exportError
@@ -289,9 +442,14 @@ export class ExecutionDetailView extends LitElement {
           .history=${detail.history}
           .offset=${detail.historyOffset}
           .total=${detail.historyLength}
+          .view=${this.history.view}
+          .category=${this.history.events}
           @history-page=${(e: CustomEvent<{fromEvent: number}>) => {
             this.fromEvent = e.detail.fromEvent;
           }}
+          @history-options=${(
+            e: CustomEvent<{view?: HistoryView; events?: EventCategory}>,
+          ) => this.applyHistoryOptions(e.detail)}
           @history-export=${() => void this.exportHistory(detail)}
         ></history-timeline>
       </div>
