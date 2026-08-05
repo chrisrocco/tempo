@@ -243,6 +243,16 @@ export interface ExecutionDetail extends ExecutionSummary {
   /** Index of the first event in `history`, within the whole history. */
   historyOffset: number;
   pending: PendingWorkView;
+  /**
+   * The `condition()` calls the execution is parked on.
+   *
+   * Empty is the common case and does not mean "not waiting" — an execution
+   * parked on an activity has pending work and no parked conditions. The two
+   * together are what distinguish a workflow that is genuinely waiting from one
+   * that is mid-task, which `pending` alone could not: a `running` execution
+   * with neither is the only remaining shape, and it means the task is in flight.
+   */
+  parked: ParkedCondition[];
   cancelRequested: boolean;
   result?: unknown;
   /** A message, not an Error — failures cross the wire as text. */
@@ -518,6 +528,32 @@ export interface WorkflowTask {
 }
 
 /** What a workflow worker returns after replaying one workflow task. */
+/**
+ * A `condition()` the workflow is still waiting on.
+ *
+ * The answer to the one diagnostic question the engine could not previously
+ * answer: an execution that is `running` with nothing pending is either mid-task
+ * or parked, and those are opposite conclusions. Pending work is derived from
+ * history; a parked condition leaves no history at all — that is the point of it
+ * — so it has to be reported by the worker that replayed it.
+ */
+export interface ParkedCondition {
+  /**
+   * The condition's own id. From `condSeq`, which is deliberately separate from
+   * the command `seq` counter so that parking never perturbs command numbering —
+   * this is *not* a seq you will find in history.
+   */
+  seq: number;
+  /**
+   * Where `condition()` was called, frames innermost first.
+   *
+   * Absent when the runtime has no stack-capture API, and absent on state
+   * recorded before sites were captured. A reader must treat it as unknown
+   * rather than as "no site".
+   */
+  site?: string;
+}
+
 export interface WorkflowTaskResult {
   done: boolean;
   result: unknown;
@@ -537,4 +573,12 @@ export interface WorkflowTaskResult {
    * rather than the one from the last rollover.
    */
   carryover?: Carryover;
+  /**
+   * What the workflow is parked on at the end of this task.
+   *
+   * Reported on every task and replaces whatever was stored, rather than
+   * accumulating: a condition that unparked is no longer where the workflow is,
+   * and a list that only grew would describe everywhere it had ever waited.
+   */
+  parked?: ParkedCondition[];
 }

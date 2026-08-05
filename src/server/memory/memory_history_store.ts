@@ -12,6 +12,7 @@ import {
   type Carryover,
   type ExecutionStatus,
   type HistoryEvent,
+  type ParkedCondition,
 } from '../../protocol';
 import type {
   ExecutionParent,
@@ -122,6 +123,16 @@ export class MemoryHistoryStore implements HistoryStore {
     const rec = this.records.get(workflowId);
     if (!rec) return;
     delete rec.activityAttempts[seq];
+  }
+
+  async setParkedConditions(
+    workflowId: string,
+    parked: ParkedCondition[],
+  ): Promise<void> {
+    const rec = this.records.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    if (parked.length === 0) delete rec.parked;
+    else rec.parked = parked.map((p) => ({...p}));
   }
 
   async setCarryover(workflowId: string, carryover: Carryover): Promise<void> {

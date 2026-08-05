@@ -288,6 +288,31 @@ export class ExecutionDetailView extends LitElement {
         gap: 8px;
         margin-top: 10px;
       }
+      .parked {
+        background: var(--accent-bg);
+        border-radius: 6px;
+        padding: 9px 11px;
+        margin: 0 0 10px;
+      }
+      .parked-head {
+        color: var(--accent);
+        font-size: 12.5px;
+        margin-bottom: 6px;
+      }
+      .parked-row {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 2px 0;
+      }
+      .parked-row .seq {
+        color: var(--muted);
+        font-size: 12px;
+        flex: none;
+      }
+      .parked-row .stack {
+        margin: 0;
+      }
       .retry {
         display: flex;
         gap: 10px;
@@ -761,6 +786,48 @@ export class ExecutionDetailView extends LitElement {
     </div>`;
   }
 
+  /**
+   * The `condition()` calls the workflow is parked on.
+   *
+   * This is the answer the panel used to decline to give. A running execution
+   * with nothing dispatched was "either mid-task or unable to make progress",
+   * and those are opposite conclusions — a workflow awaiting a signal is
+   * perfectly healthy and would sit there forever by design.
+   *
+   * A parked condition writes no history event (that is what makes `condition`
+   * free), so this cannot be derived from the record the way pending work is. It
+   * is what the worker reported at the end of the last replay.
+   */
+  private parkedPanel(detail: Detail): TemplateResult | typeof nothing {
+    if (detail.parked.length === 0) return nothing;
+    return html`
+      <div class="parked">
+        <div class="parked-head">
+          waiting for a condition to become true —
+          ${
+            detail.parked.length === 1
+              ? 'nothing will happen until a signal changes what it reads'
+              : `${detail.parked.length} of them, all of which must hold`
+          }
+        </div>
+        ${detail.parked.map(
+          (condition) => html`
+            <div class="parked-row">
+              <span class="mono seq">#${condition.seq}</span>
+              ${
+                condition.site === undefined
+                  ? html`<span class="muted"
+                    >no call site recorded for this one</span
+                  >`
+                  : html`<pre class="stack">${condition.site}</pre>`
+              }
+            </div>
+          `,
+        )}
+      </div>
+    `;
+  }
+
   private pendingPanel(detail: Detail): TemplateResult | typeof nothing {
     if (detail.status !== 'running') return nothing;
     const {activities, timers, children} = detail.pending;
@@ -779,13 +846,24 @@ export class ExecutionDetailView extends LitElement {
             ? this.unservedWarning(detail, 'activity')
             : nothing
         }
-        ${empty ? this.unservedWarning(detail, 'workflow') : nothing}
+        ${
+          // Only when nothing at all is outstanding. A parked condition proves
+          // the execution *has* been replayed, which is the premise this warning
+          // rests on — showing it there would be reporting a worker problem for
+          // a workflow that is simply waiting to be signalled.
+          empty && detail.parked.length === 0
+            ? this.unservedWarning(detail, 'workflow')
+            : nothing
+        }
+        ${this.parkedPanel(detail)}
         ${
           empty
-            ? html`<div class="muted">
-              Nothing dispatched. The execution is either mid-task or unable to
-              make progress.
-            </div>`
+            ? detail.parked.length > 0
+              ? nothing
+              : html`<div class="muted">
+                Nothing dispatched and no condition parked, so the workflow task
+                is in flight — this execution is mid-replay rather than waiting.
+              </div>`
             : html`
               <table class="pending">
                 <tbody>
