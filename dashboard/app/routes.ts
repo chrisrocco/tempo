@@ -5,7 +5,7 @@
  *
  * Separate from `router.ts` — which binds this to the browser — because this
  * half touches no DOM and therefore runs, and is specified, in the suite
- * (`spec/ui/routes.spec.ts`). URL parsing is where the fiddly cases live
+ * (`spec/dashboard/routes.spec.ts`). URL parsing is where the fiddly cases live
  * (encoding, unknown values, empty filters), and those are exactly the cases a
  * browser-driven test would be the most expensive way to cover.
  *

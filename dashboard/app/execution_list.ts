@@ -41,6 +41,7 @@ import {
   surface,
   table,
 } from './theme.js';
+import './start_form.js';
 import './status_badge.js';
 
 /** How many rows a page shows. Well under `MAX_PAGE_SIZE`. */
@@ -268,6 +269,7 @@ export class ExecutionList extends LitElement {
     const executions = page?.executions ?? [];
     return html`
       <h1>Executions</h1>
+      <start-form></start-form>
       ${this.filterBar()}
       <div class="status">
         ${

@@ -12,12 +12,16 @@
  * ## No decorators
  *
  * `static properties` and `customElements.define`, not `@customElement` and
- * `@property`. Decorators would need `experimentalDecorators` and a
- * transformation; without them the served JavaScript is a straight
- * transcription of this file with the types removed, which keeps the
- * on-request transpile trivial and leaves the door open to native type
- * stripping later. Every component here follows the same rule — see
- * `services/ui_server.ts`.
+ * `@property`. Decorators need `experimentalDecorators` and a transformation to
+ * emit; without them every component is a straight transcription of its source
+ * with the types removed.
+ *
+ * That rule was originally load-bearing: the server transpiled each module on
+ * request, and anything needing a real transformation would have broken it. That
+ * server is gone — esbuild bundles the app now, and would handle decorators
+ * without complaint. The rule stays because the output remains readable against
+ * the source and native type stripping stays available, which is a preference
+ * rather than a constraint. Every component here follows it.
  *
  * ## Where the pieces are
  *
@@ -31,14 +35,20 @@
  * | `execution_list.ts`   | the home view: filter bar and paged table       |
  * | `execution_detail.ts` | one execution, and the panels that explain it   |
  * | `queues_view.ts`      | which pools and types are in trouble            |
- * | `history_view.ts`     | how an event reads, and how long it took        |
- * | `history_timeline.ts` | laying those out, and paging them               |
+ * | `history_view.ts`     | how an event reads, its family, how long it took|
+ * | `history_spans.ts`    | those events as intervals on a time axis        |
+ * | `history_export.ts`   | a whole history, across the pages it arrives in |
+ * | `history_timeline.ts` | laying all that out, and paging it              |
  * | `action_bar.ts`       | signal, cancel, terminate                       |
+ * | `start_form.ts`       | starting a workflow                             |
+ * | `start_args.ts`       | what the arguments box accepts                  |
  * | `status_badge.ts`     | the one place `isStuck` becomes a pill          |
  * | `json_view.ts`        | any payload the user's own code produced        |
  *
- * `routes.ts` and `history_view.ts` are deliberately DOM-free, which is what
- * lets the suite cover them (`spec/ui/`) without a browser.
+ * `routes.ts`, `history_view.ts`, `history_spans.ts`, `history_export.ts`, and
+ * `start_args.ts` are deliberately DOM-free, which is what lets the suite cover
+ * them (`spec/dashboard/`) without a browser. Everything with a decision in it
+ * belongs on that side of the line.
  */
 
 import {LitElement, css, html, type TemplateResult} from 'lit';

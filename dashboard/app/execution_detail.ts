@@ -39,6 +39,7 @@ import {
   type WorkerRole,
 } from 'workflow-engine/protocol';
 import {client} from './client.js';
+import {collectHistory} from './history_export.js';
 import {Poller} from './poller.js';
 import {executionsHref} from './routes.js';
 import {
@@ -61,11 +62,14 @@ export class ExecutionDetailView extends LitElement {
   static override properties = {
     workflowId: {attribute: false},
     fromEvent: {state: true},
+    exportError: {state: true},
   };
 
   declare workflowId: string;
   /** Which history page to read; undefined means the most recent. */
   declare fromEvent: number | undefined;
+  /** Why the last export did not produce a complete file, if it did not. */
+  declare exportError: string | undefined;
 
   private readonly poller = new Poller<Detail | undefined>(this, (signal) =>
     client.describeExecution(
@@ -93,6 +97,7 @@ export class ExecutionDetailView extends LitElement {
     super();
     this.workflowId = '';
     this.fromEvent = undefined;
+    this.exportError = undefined;
   }
 
   override willUpdate(): void {
@@ -204,6 +209,10 @@ export class ExecutionDetailView extends LitElement {
         font-size: 12.5px;
         margin-bottom: 10px;
       }
+      .export-error {
+        font-size: 12.5px;
+        margin-bottom: 10px;
+      }
     `,
   ];
 
@@ -271,6 +280,11 @@ export class ExecutionDetailView extends LitElement {
       </div>
 
       <div class="panel">
+        ${
+          this.exportError
+            ? html`<div class="error export-error">${this.exportError}</div>`
+            : nothing
+        }
         <history-timeline
           .history=${detail.history}
           .offset=${detail.historyOffset}
@@ -278,9 +292,61 @@ export class ExecutionDetailView extends LitElement {
           @history-page=${(e: CustomEvent<{fromEvent: number}>) => {
             this.fromEvent = e.detail.fromEvent;
           }}
+          @history-export=${() => void this.exportHistory(detail)}
         ></history-timeline>
       </div>
     `;
+  }
+
+  /**
+   * Read every page of this execution's history and hand it to the browser as a
+   * file.
+   *
+   * The paging loop is `history_export.ts`; what is left here is the part that
+   * needs a document — a blob, an anchor, and a click. The object URL is revoked
+   * immediately after, since the download has already been handed off and the
+   * alternative is a buffer of the whole history held until the tab closes.
+   *
+   * A truncated export is reported through the same `exportError` line as a
+   * failure, because a partial file the reader believes is complete is the
+   * outcome worth interrupting them for.
+   */
+  private async exportHistory(detail: Detail): Promise<void> {
+    this.exportError = undefined;
+    try {
+      const collected = await collectHistory(async (fromEvent) =>
+        client.describeExecution(detail.workflowId, {fromEvent}),
+      );
+
+      const document_ = {
+        workflowId: detail.workflowId,
+        name: detail.name,
+        runId: detail.runId,
+        status: detail.status,
+        taskQueue: detail.taskQueue,
+        createdAt: detail.createdAt,
+        args: detail.args,
+        exportedAt: new Date().toISOString(),
+        events: collected.events,
+      };
+
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(document_, null, 2)], {
+          type: 'application/json',
+        }),
+      );
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      // The id is caller-chosen and may contain anything a path cannot.
+      anchor.download = `${detail.workflowId.replace(/[^\w.-]+/g, '_')}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+
+      if (collected.truncated)
+        this.exportError = `Exported the first ${collected.events.length} events — the history did not end where the server said it would.`;
+    } catch (e) {
+      this.exportError = `export failed — ${e instanceof Error ? e.message : String(e)}`;
+    }
   }
 
   /** The engine cannot replay it — distinct from the workflow having failed. */

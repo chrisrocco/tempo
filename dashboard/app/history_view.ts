@@ -1,13 +1,14 @@
 /**
  * @fileoverview
- * How a history event reads: the mapping from a durable event to the line a
- * person sees, and the pairing that turns two events into a duration.
+ * What a durable history event means to a reader: the line it renders as, the
+ * family it belongs to, and the pairing that turns two events into a duration.
  *
  * Separate from `history_timeline.ts`, which lays these out in a table, because
  * this half is the part with decisions in it and it touches no DOM — so it runs
- * in the suite (`spec/ui/history_view.spec.ts`). The interesting cases are all
- * data cases: a completion whose dispatch is on a different page, an event from
- * before `ts` existed, a duration that should not be rendered in milliseconds.
+ * in the suite (`spec/dashboard/history_view.spec.ts`). The interesting cases
+ * are all data cases: a completion whose dispatch is on a different page, an
+ * event from before `ts` existed, a duration that should not be rendered in
+ * milliseconds.
  *
  * ## Pairing, not just listing
  *
@@ -106,6 +107,56 @@ export function describeEvent(event: HistoryEvent): EventView {
       };
     case 'cancelRequested':
       return {label: 'cancellation requested', tone: 'danger'};
+    default:
+      return assertNever(event);
+  }
+}
+
+/**
+ * The families a reader narrows a history to.
+ *
+ * Five, rather than the ten event types, because the question is never "show me
+ * `activityFailed`" — it is "show me the activities", and a dispatch is only
+ * legible next to its outcome. Splitting them would let a reader filter to the
+ * failures and lose the `activityScheduled` rows that say which activity failed.
+ */
+export type EventCategory =
+  'activity' | 'timer' | 'child' | 'signal' | 'cancellation';
+
+/** Every category, in the order the filter offers them. */
+export const EVENT_CATEGORIES: readonly EventCategory[] = [
+  'activity',
+  'timer',
+  'child',
+  'signal',
+  'cancellation',
+];
+
+/**
+ * Which family an event belongs to.
+ *
+ * `assertNever` again: a new event kind has to be assigned a family here, rather
+ * than silently belonging to none and disappearing whenever a filter is on —
+ * which is the version of this bug nobody would notice, since the row is only
+ * missing when someone is already looking at a subset.
+ */
+export function eventCategory(event: HistoryEvent): EventCategory {
+  switch (event.type) {
+    case 'activityScheduled':
+    case 'activityCompleted':
+    case 'activityFailed':
+      return 'activity';
+    case 'timerStarted':
+    case 'timerFired':
+      return 'timer';
+    case 'childStarted':
+    case 'childCompleted':
+    case 'childFailed':
+      return 'child';
+    case 'signal':
+      return 'signal';
+    case 'cancelRequested':
+      return 'cancellation';
     default:
       return assertNever(event);
   }
