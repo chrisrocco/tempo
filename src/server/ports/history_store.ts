@@ -64,16 +64,40 @@ export interface ExecutionRecord {
   /** Why the most recent workflow task failed; cleared alongside the count. */
   lastTaskFailure?: string;
   /**
-   * Failed attempts so far per activity `seq`, for executions with a retry policy
-   * in flight. Cleared when the activity reaches a terminal event, so this holds
-   * only what is currently being retried rather than growing with history.
+   * What is known about each activity `seq` currently being retried. Cleared
+   * when the activity reaches a terminal event, so this holds only what is in
+   * flight rather than growing with history.
    *
    * Durable for the same reason `taskFailures` is: the queues are in-memory, so a
    * count kept there would reset on a restart and quietly grant a fresh retry
    * budget. Not in history, because one event per failed attempt would bloat it
    * and skew the continue-as-new hint.
    */
-  activityAttempts: Record<number, number>;
+  activityAttempts: Record<number, ActivityRetryState>;
+}
+
+/**
+ * Why an activity is between attempts.
+ *
+ * `attempts` is the count the retry policy is applied to, and the reason this
+ * record exists at all. The other two are here because a count alone says an
+ * activity is failing without saying why or for how much longer, and an operator
+ * reading "attempt 4 of 5" immediately asks both — see `PendingActivityView`,
+ * which is where this reaches them.
+ */
+export interface ActivityRetryState {
+  /** Attempts that have been made and failed. */
+  attempts: number;
+  /** Why the most recent one failed. */
+  lastError?: string;
+  /**
+   * When the next attempt is due, epoch ms.
+   *
+   * Absent between the failure being recorded and the retry being scheduled, and
+   * on the final failure — there is no next attempt to describe. A reader must
+   * treat it as unknown rather than as "now".
+   */
+  nextAttemptAt?: number;
 }
 
 /** Thrown by `appendIfVersion` when the execution has moved on — a lost lease race. */
@@ -132,8 +156,29 @@ export interface HistoryStore {
    * Count one failed attempt of the activity at `seq`, returning the new total so
    * the caller can apply the retry policy. Like `recordTaskFailure`, this must not
    * bump `version` — an attempt is not history.
+   *
+   * `error` is recorded alongside the count and replaces any previous one: what
+   * an operator wants is why it is failing *now*, and keeping every message would
+   * grow without bound for an activity retrying against a policy with no limit.
    */
-  recordActivityAttempt(workflowId: string, seq: number): Promise<number>;
+  recordActivityAttempt(
+    workflowId: string,
+    seq: number,
+    error?: string,
+  ): Promise<number>;
+  /**
+   * Record when the next attempt of `seq` is due.
+   *
+   * Separate from `recordActivityAttempt` because the caller cannot know it at
+   * that point: the delay comes from the retry policy applied to the count that
+   * call returns. Both writes are on the failure path, where a second one costs
+   * nothing worth avoiding.
+   */
+  setActivityNextAttempt(
+    workflowId: string,
+    seq: number,
+    at: number,
+  ): Promise<void>;
   /** Forget an activity's attempts once it reaches a terminal event. */
   clearActivityAttempts(workflowId: string, seq: number): Promise<void>;
   /** Replace the execution carryover with what the last workflow task reported. */

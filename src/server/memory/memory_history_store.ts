@@ -91,12 +91,25 @@ export class MemoryHistoryStore implements HistoryStore {
   async recordActivityAttempt(
     workflowId: string,
     seq: number,
+    error?: string,
   ): Promise<number> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
-    const attempts = (rec.activityAttempts[seq] ?? 0) + 1;
-    rec.activityAttempts[seq] = attempts;
+    const attempts = (rec.activityAttempts[seq]?.attempts ?? 0) + 1;
+    // `nextAttemptAt` is dropped rather than carried: the attempt this failure
+    // belongs to has just run, so any previously scheduled time is in the past
+    // and would read as a retry that is overdue.
+    rec.activityAttempts[seq] = {attempts, lastError: error};
     return attempts;
+  }
+
+  async setActivityNextAttempt(
+    workflowId: string,
+    seq: number,
+    at: number,
+  ): Promise<void> {
+    const state = this.records.get(workflowId)?.activityAttempts[seq];
+    if (state) state.nextAttemptAt = at;
   }
 
   async clearActivityAttempts(workflowId: string, seq: number): Promise<void> {

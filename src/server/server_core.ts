@@ -662,6 +662,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       const attempts = await historyStore.recordActivityAttempt(
         workflowId,
         seq,
+        result.error,
       );
       if (scheduled && shouldRetry(retry, attempts)) {
         const delayMs = backoffMs(retry, attempts);
@@ -674,6 +675,14 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           delayMs,
           error: result.error,
         });
+        // Written before the redispatch is armed, so an operator polling during
+        // the backoff never sees an activity waiting on a retry with no time
+        // attached to it.
+        await historyStore.setActivityNextAttempt(
+          workflowId,
+          seq,
+          Date.now() + delayMs,
+        );
         redispatchAfter(workflowId, scheduled, rec.taskQueue, delayMs);
         return;
       }

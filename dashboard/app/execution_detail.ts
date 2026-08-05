@@ -66,6 +66,7 @@ import {
   isQueueServed,
   isStuck,
   type ExecutionDetail as Detail,
+  type PendingActivityView,
   type QueueWorkers,
   type WorkerRole,
 } from 'workflow-engine/protocol';
@@ -271,6 +272,22 @@ export class ExecutionDetailView extends LitElement {
       .export-error {
         font-size: 12.5px;
         margin-bottom: 10px;
+      }
+      .retry {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .retry-error {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--danger);
+        margin-top: 3px;
+        max-width: 420px;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
       .tabs {
         display: flex;
@@ -576,6 +593,47 @@ export class ExecutionDetailView extends LitElement {
   }
 
   /**
+   * How an activity's retrying is going, or nothing when it is not retrying.
+   *
+   * Silent on the first attempt, which is nearly every row: an activity that has
+   * never failed has nothing to say here, and printing "attempt 1 of 1" against
+   * every healthy dispatch would bury the one row that matters. What is rendered
+   * is the count, why the last attempt failed, and when the next is due —
+   * together the answer to "is this thing making progress", which a bare
+   * activity name could not give.
+   */
+  private retryCell(
+    activity: PendingActivityView,
+    now: number,
+  ): TemplateResult | typeof nothing {
+    if (activity.attempt <= 1) return nothing;
+    const due = activity.nextAttemptAt;
+    return html`
+      <div class="retry">
+        <span class="warn"
+          >attempt ${activity.attempt} of ${activity.maxAttempts}</span
+        >
+        ${
+          due === undefined
+            ? nothing
+            : html`<span class="muted" title=${absoluteTime(due)}>
+              ${
+                due <= now
+                  ? 'retrying now'
+                  : `retries in ${formatDuration(due - now)}`
+              }
+            </span>`
+        }
+      </div>
+      ${
+        activity.lastError === undefined
+          ? nothing
+          : html`<div class="retry-error">${activity.lastError}</div>`
+      }
+    `;
+  }
+
+  /**
    * The warning that turns "waiting" into a diagnosis.
    *
    * Worded as what was observed rather than what it implies. A sequential
@@ -629,7 +687,7 @@ export class ExecutionDetailView extends LitElement {
                         <td class="mono">#${a.seq}</td>
                         <td>activity</td>
                         <td class="mono">${a.name}</td>
-                        <td></td>
+                        <td>${this.retryCell(a, now)}</td>
                       </tr>
                     `,
                   )}

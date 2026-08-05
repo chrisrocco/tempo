@@ -26,6 +26,10 @@ function record(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
     history: [],
     version: 0,
     taskFailures: 0,
+    // Required on the record and always set by both adapters. Spelled out here
+    // because the cast below would otherwise let a fixture omit it, which is
+    // a shape no store ever produces.
+    activityAttempts: {},
     ...overrides,
   } as ExecutionRecord;
 }
@@ -185,6 +189,97 @@ describe('describeExecution — history paging', () => {
       detail.history.some((e) => e.type === 'activityScheduled'),
     ).toBeFalse();
     // …and it is still reported as pending.
-    expect(detail.pending.activities).toEqual([{seq: 0, name: 'slow'}]);
+    expect(detail.pending.activities).toEqual([
+      {seq: 0, name: 'slow', attempt: 1, maxAttempts: 1},
+    ]);
+  });
+});
+
+/**
+ * A retrying activity and a first-try one are both "waiting on: charge" without
+ * these fields, which is the case an operator most often has open. The count
+ * comes from the durable record rather than from history, because a failed
+ * attempt is deliberately not a history event.
+ */
+describe('describeExecution — an activity that is retrying', () => {
+  const scheduled: HistoryEvent = {
+    type: 'activityScheduled',
+    seq: 0,
+    name: 'charge',
+    args: [],
+    options: {retry: {maximumAttempts: 5}},
+  };
+
+  it('reports the first attempt for an activity that has not failed', () => {
+    // The common case: no entry is written until something fails.
+    const detail = describeExecution(record({history: [scheduled]}));
+
+    expect(detail.pending.activities[0]).toEqual({
+      seq: 0,
+      name: 'charge',
+      attempt: 1,
+      maxAttempts: 5,
+    });
+  });
+
+  it('counts the attempt now running, not the attempts already spent', () => {
+    // Two failures means the third attempt is the live one. Off by one here is
+    // the whole reason the wire carries `attempt` rather than the stored count.
+    const detail = describeExecution(
+      record({
+        history: [scheduled],
+        activityAttempts: {0: {attempts: 2}},
+      }),
+    );
+
+    expect(detail.pending.activities[0]?.attempt).toBe(3);
+  });
+
+  it('carries why the last attempt failed and when the next is due', () => {
+    const detail = describeExecution(
+      record({
+        history: [scheduled],
+        activityAttempts: {
+          0: {attempts: 2, lastError: 'connection refused', nextAttemptAt: 900},
+        },
+      }),
+    );
+
+    expect(detail.pending.activities[0]).toEqual({
+      seq: 0,
+      name: 'charge',
+      attempt: 3,
+      maxAttempts: 5,
+      lastError: 'connection refused',
+      nextAttemptAt: 900,
+    });
+  });
+
+  it('reports one permitted attempt for an activity with no retry policy', () => {
+    const noRetry: HistoryEvent = {
+      type: 'activityScheduled',
+      seq: 1,
+      name: 'once',
+      args: [],
+      options: {},
+    };
+    const detail = describeExecution(record({history: [noRetry]}));
+
+    expect(detail.pending.activities[0]?.maxAttempts).toBe(1);
+  });
+
+  it('says nothing about an activity that has already settled', () => {
+    // The record is cleared on a terminal event, and the activity stops being
+    // pending — a stale count outliving either would be worse than none.
+    const detail = describeExecution(
+      record({
+        history: [
+          scheduled,
+          {type: 'activityFailed', seq: 0, error: 'gave up'},
+        ],
+      }),
+    );
+
+    expect(detail.pending.activities).toEqual([]);
   });
 });

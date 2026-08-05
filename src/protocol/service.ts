@@ -171,9 +171,43 @@ export interface DescribeOptions {
  * or genuinely stuck, and that distinction is the first thing an operator wants.
  */
 export interface PendingWorkView {
-  activities: {seq: number; name: string}[];
+  activities: PendingActivityView[];
   timers: {seq: number; fireAt: number}[];
   children: {seq: number; childId: string; detached: boolean}[];
+}
+
+/**
+ * One dispatched activity, and how its retrying is going.
+ *
+ * The retry fields are the reason this is a named type rather than an inline
+ * shape. Without them a dispatched activity is a name, and an activity on its
+ * fourth backoff is indistinguishable from one running for the first time —
+ * both read as "waiting on: charge". That is the case an operator is most often
+ * looking at when they open an execution that is not moving, and answering it
+ * previously meant reading the server's logs.
+ */
+export interface PendingActivityView {
+  seq: number;
+  name: string;
+  /**
+   * Which attempt is running or about to run, counting from 1.
+   *
+   * Deliberately not the stored count of *failed* attempts: every consumer wants
+   * to render "attempt 3 of 5", and making each one add 1 is an off-by-one
+   * waiting to happen. `attempt === 1` means nothing has failed yet.
+   */
+  attempt: number;
+  /** How many the retry policy allows in total. 1 means no retry. */
+  maxAttempts: number;
+  /** Why the previous attempt failed; absent while `attempt` is 1. */
+  lastError?: string;
+  /**
+   * When the next attempt is due, epoch ms.
+   *
+   * Absent when the activity is running rather than waiting out a backoff, so a
+   * reader must treat it as "not between attempts" rather than as "due now".
+   */
+  nextAttemptAt?: number;
 }
 
 /** `tempo describe`: the summary, plus history and what the execution awaits. */
