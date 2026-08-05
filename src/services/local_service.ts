@@ -63,6 +63,7 @@ import {
   describeExecution,
   groupExecutions,
   queryExecutions,
+  type ExecutionParent,
   type HistoryStore,
 } from '../server';
 import type {ActivityWorker, WorkflowWorker} from '../worker';
@@ -103,8 +104,8 @@ export function createLocalService(
     timerService,
     // The core supplies the child's id; it is derived from lineage so it stays
     // stable across a restart (see `server_core.childExecutionId`).
-    launch: (workflowId, name, args, taskQueue) => {
-      launch(name, args, {workflowId, taskQueue});
+    launch: (workflowId, name, args, taskQueue, parent) => {
+      launch(name, args, {workflowId, taskQueue}, parent);
     },
     kickWorkflowWorker,
     kickActivityWorker,
@@ -244,10 +245,16 @@ export function createLocalService(
     else w.reject(failure);
   }
 
+  /**
+   * `parent` is not part of `StartWorkflowOptions` on purpose: a client does not
+   * get to declare itself the child of something. Only the core passes it, when
+   * it is dispatching a `startChild`.
+   */
   function launch(
     name: string,
     args: unknown[],
     opts: StartWorkflowOptions = {},
+    parent?: ExecutionParent,
   ): string {
     // Unlike the remote host this already had a `.catch`, so a duplicate id
     // rejects the caller's `getResult` rather than escaping as an unhandled
@@ -257,7 +264,7 @@ export function createLocalService(
     statusMirror.set(workflowId, 'running');
     ensureWaiter(workflowId);
     void historyStore
-      .create(workflowId, name, args, taskQueue)
+      .create(workflowId, name, args, taskQueue, parent)
       .then(() => {
         workflowTaskQueue.enqueue(workflowId, taskQueue);
         kickWorkflowWorker();
@@ -289,6 +296,20 @@ export function createLocalService(
         statusMirror.set(workflowId, 'terminated');
         rejectWaiter(workflowId, new Error(reason));
       });
+    },
+    reset(workflowId, keep) {
+      if (!statusMirror.has(workflowId))
+        throw new Error(`no execution ${workflowId}`);
+      // Unlike terminate, a reset *does* produce a task, so the drain loop
+      // observes the execution again and settles the waiter the normal way.
+      //
+      // The mirror is put back by hand because the core reopens the record
+      // directly: without this, `getStatus` would keep reporting the outcome of
+      // a run whose history has just been discarded. A `getResult` promise that
+      // already settled stays settled — a caller holding one took delivery of an
+      // answer, and this cannot un-deliver it.
+      statusMirror.set(workflowId, 'running');
+      void core.resetToEvent(workflowId, keep);
     },
     getResult(workflowId) {
       return ensureWaiter(workflowId).promise;

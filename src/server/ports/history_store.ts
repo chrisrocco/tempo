@@ -49,6 +49,8 @@ export interface ExecutionRecord {
    * reported, kept so the next one can start from it.
    */
   carryover: Carryover;
+  /** Absent on an execution a client started directly, which is most of them. */
+  parent?: ExecutionParent;
   /**
    * Consecutive workflow-task failures, reset by the next success. Durable
    * because the queues are not: a counter kept in the queue would reset on
@@ -64,16 +66,57 @@ export interface ExecutionRecord {
   /** Why the most recent workflow task failed; cleared alongside the count. */
   lastTaskFailure?: string;
   /**
-   * Failed attempts so far per activity `seq`, for executions with a retry policy
-   * in flight. Cleared when the activity reaches a terminal event, so this holds
-   * only what is currently being retried rather than growing with history.
+   * What is known about each activity `seq` currently being retried. Cleared
+   * when the activity reaches a terminal event, so this holds only what is in
+   * flight rather than growing with history.
    *
    * Durable for the same reason `taskFailures` is: the queues are in-memory, so a
    * count kept there would reset on a restart and quietly grant a fresh retry
    * budget. Not in history, because one event per failed attempt would bloat it
    * and skew the continue-as-new hint.
    */
-  activityAttempts: Record<number, number>;
+  activityAttempts: Record<number, ActivityRetryState>;
+}
+
+/**
+ * The execution that started this one, on a child's record.
+ *
+ * Recorded on the child rather than derived from the parent because the parent's
+ * `childStarted` event is the only other place it exists, and finding it from a
+ * child would mean scanning every execution's history for one naming this id.
+ * `parentOfChild` in `server_core` holds the same fact in memory, but only for
+ * blocking children and only to route a completion — it is not an answer to
+ * "where did this come from", which is asked of settled and detached children
+ * too.
+ */
+export interface ExecutionParent {
+  workflowId: string;
+  /** The `startChild` seq in the parent, which its history is keyed by. */
+  seq: number;
+}
+
+/**
+ * Why an activity is between attempts.
+ *
+ * `attempts` is the count the retry policy is applied to, and the reason this
+ * record exists at all. The other two are here because a count alone says an
+ * activity is failing without saying why or for how much longer, and an operator
+ * reading "attempt 4 of 5" immediately asks both — see `PendingActivityView`,
+ * which is where this reaches them.
+ */
+export interface ActivityRetryState {
+  /** Attempts that have been made and failed. */
+  attempts: number;
+  /** Why the most recent one failed. */
+  lastError?: string;
+  /**
+   * When the next attempt is due, epoch ms.
+   *
+   * Absent between the failure being recorded and the retry being scheduled, and
+   * on the final failure — there is no next attempt to describe. A reader must
+   * treat it as unknown rather than as "now".
+   */
+  nextAttemptAt?: number;
 }
 
 /** Thrown by `appendIfVersion` when the execution has moved on — a lost lease race. */
@@ -94,6 +137,7 @@ export interface HistoryStore {
     name: string,
     args: unknown[],
     taskQueue?: string,
+    parent?: ExecutionParent,
   ): Promise<void>;
   /** A snapshot of the record, or undefined if unknown. */
   get(workflowId: string): Promise<ExecutionRecord | undefined>;
@@ -132,10 +176,46 @@ export interface HistoryStore {
    * Count one failed attempt of the activity at `seq`, returning the new total so
    * the caller can apply the retry policy. Like `recordTaskFailure`, this must not
    * bump `version` — an attempt is not history.
+   *
+   * `error` is recorded alongside the count and replaces any previous one: what
+   * an operator wants is why it is failing *now*, and keeping every message would
+   * grow without bound for an activity retrying against a policy with no limit.
    */
-  recordActivityAttempt(workflowId: string, seq: number): Promise<number>;
+  recordActivityAttempt(
+    workflowId: string,
+    seq: number,
+    error?: string,
+  ): Promise<number>;
+  /**
+   * Record when the next attempt of `seq` is due.
+   *
+   * Separate from `recordActivityAttempt` because the caller cannot know it at
+   * that point: the delay comes from the retry policy applied to the count that
+   * call returns. Both writes are on the failure path, where a second one costs
+   * nothing worth avoiding.
+   */
+  setActivityNextAttempt(
+    workflowId: string,
+    seq: number,
+    at: number,
+  ): Promise<void>;
   /** Forget an activity's attempts once it reaches a terminal event. */
   clearActivityAttempts(workflowId: string, seq: number): Promise<void>;
+  /**
+   * Drop every event from index `keep` onward, so the execution can be replayed
+   * from a point before something went wrong.
+   *
+   * **Bumps `version`**, unlike every other mutation that is "not history". That
+   * is the point: a workflow task already polled carries the version it replayed
+   * against, and without the bump its `appendIfVersion` would succeed and stack
+   * events built from a history that no longer exists on top of the truncated
+   * one. With it, the in-flight task fails its CAS and is redelivered against
+   * what is actually there.
+   *
+   * Truncation is destructive and there is no undo: the dropped events are gone
+   * from the log, not tombstoned. Callers are expected to have said so.
+   */
+  truncateHistory(workflowId: string, keep: number): Promise<void>;
   /** Replace the execution carryover with what the last workflow task reported. */
   setCarryover(workflowId: string, carryover: Carryover): Promise<void>;
   /** Record the terminal outcome once a workflow task settles the execution. */

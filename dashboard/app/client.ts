@@ -108,4 +108,12 @@ export const client = {
   terminate(workflowId: string, reason: string): Promise<null> {
     return call<null>({method: 'terminate', workflowId, reason});
   },
+
+  /**
+   * Drop every event from `keep` onward and replay from there. Destructive: the
+   * dropped events do not come back.
+   */
+  reset(workflowId: string, keep: number): Promise<null> {
+    return call<null>({method: 'reset', workflowId, keep});
+  },
 };

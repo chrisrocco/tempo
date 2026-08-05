@@ -99,6 +99,9 @@ export function createRemoteService(
     terminate(workflowId, reason) {
       void call({method: 'terminate', workflowId, reason}).catch(() => {});
     },
+    reset(workflowId, keep) {
+      void call({method: 'reset', workflowId, keep}).catch(() => {});
+    },
     getStatus(workflowId): ExecutionStatus {
       return statusCache.get(workflowId) ?? 'running';
     },

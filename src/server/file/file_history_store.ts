@@ -27,7 +27,12 @@ import {
   type ExecutionStatus,
   type HistoryEvent,
 } from '../../protocol';
-import type {ExecutionRecord, HistoryStore} from '../ports/history_store';
+import type {
+  ActivityRetryState,
+  ExecutionParent,
+  ExecutionRecord,
+  HistoryStore,
+} from '../ports/history_store';
 import {VersionConflictError} from '../ports/history_store';
 
 interface PersistedMeta {
@@ -47,10 +52,42 @@ interface PersistedMeta {
   /** Absent in data dirs written before task-failure tracking; reads as 0. */
   taskFailures?: number;
   lastTaskFailure?: string;
-  /** Absent in data dirs written before server-decided retry; reads as empty. */
-  activityAttempts?: Record<number, number>;
+  /**
+   * Absent in data dirs written before server-decided retry; reads as empty.
+   *
+   * A bare `number` in dirs written before the failure and the next attempt time
+   * were carried alongside the count — those read as an attempt count with
+   * neither, which is exactly what was known when they were written.
+   */
+  activityAttempts?: Record<number, number | ActivityRetryState>;
   /** Absent in data dirs written before carryover existed; reads as empty. */
   carryover?: Carryover;
+  /**
+   * Absent both on an execution started directly and in data dirs written before
+   * the parent was recorded. The two are indistinguishable on read, which is
+   * acceptable: the older case degrades to a child with no link back, which is
+   * what it had before.
+   */
+  parent?: ExecutionParent;
+}
+
+/**
+ * Read the retry state back, in either shape it may have been written in.
+ *
+ * A bare number is a dir written when the count was all that was kept. It
+ * restores as that count with no failure message and no next attempt, which is
+ * the truth about it — the alternative, discarding the entry, would hand a
+ * half-exhausted activity a fresh retry budget on the first boot after an
+ * upgrade.
+ */
+function restoreActivityAttempts(
+  stored: Record<number, number | ActivityRetryState> | undefined,
+): Record<number, ActivityRetryState> {
+  const restored: Record<number, ActivityRetryState> = {};
+  for (const [seq, state] of Object.entries(stored ?? {}))
+    restored[Number(seq)] =
+      typeof state === 'number' ? {attempts: state} : state;
+  return restored;
 }
 
 /**
@@ -105,10 +142,12 @@ export class FileHistoryStore implements HistoryStore {
     name: string,
     args: unknown[],
     taskQueue: string = DEFAULT_TASK_QUEUE,
+    parent?: ExecutionParent,
   ): Promise<void> {
     if (this.cache.has(workflowId))
       throw new Error(`execution ${workflowId} already exists`);
     const rec: ExecutionRecord = {
+      ...(parent === undefined ? {} : {parent}),
       workflowId,
       runId: 0,
       name,
@@ -193,13 +232,29 @@ export class FileHistoryStore implements HistoryStore {
   async recordActivityAttempt(
     workflowId: string,
     seq: number,
+    error?: string,
   ): Promise<number> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
-    const attempts = (rec.activityAttempts[seq] ?? 0) + 1;
-    rec.activityAttempts[seq] = attempts;
+    const attempts = (rec.activityAttempts[seq]?.attempts ?? 0) + 1;
+    // `nextAttemptAt` is dropped rather than carried: the attempt this failure
+    // belongs to has just run, so any previously scheduled time is in the past
+    // and would read as a retry that is overdue.
+    rec.activityAttempts[seq] = {attempts, lastError: error};
     await this.enqueue(workflowId, () => this.writeMeta(rec));
     return attempts;
+  }
+
+  async setActivityNextAttempt(
+    workflowId: string,
+    seq: number,
+    at: number,
+  ): Promise<void> {
+    const rec = this.cache.get(workflowId);
+    const state = rec?.activityAttempts[seq];
+    if (!rec || !state) return;
+    state.nextAttemptAt = at;
+    await this.enqueue(workflowId, () => this.writeMeta(rec));
   }
 
   async clearActivityAttempts(workflowId: string, seq: number): Promise<void> {
@@ -229,6 +284,25 @@ export class FileHistoryStore implements HistoryStore {
     if (outcome && 'failureStack' in outcome)
       rec.failureStack = outcome.failureStack;
     await this.enqueue(workflowId, () => this.writeMeta(rec));
+  }
+
+  async truncateHistory(workflowId: string, keep: number): Promise<void> {
+    const rec = this.cache.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.history = rec.history.slice(0, keep);
+    rec.version += 1;
+    // The log is append-only in the normal case; this is the one operation that
+    // rewrites it. Written whole rather than truncated in place, through the
+    // same temp+rename the meta uses, so a crash mid-write leaves the previous
+    // log intact rather than a half-written one.
+    const events = rec.history.map((e) => `${JSON.stringify(e)}\n`).join('');
+    await this.enqueue(workflowId, async () => {
+      const logPath = path.join(this.execDir(workflowId), 'events.jsonl');
+      const tmp = `${logPath}.tmp`;
+      await fs.writeFile(tmp, events);
+      await fs.rename(tmp, logPath);
+      await this.writeMeta(rec);
+    });
   }
 
   async resetForContinueAsNew(
@@ -294,6 +368,7 @@ export class FileHistoryStore implements HistoryStore {
       lastTaskFailure: rec.lastTaskFailure,
       activityAttempts: rec.activityAttempts,
       carryover: rec.carryover,
+      parent: rec.parent,
     };
     const metaPath = path.join(this.execDir(rec.workflowId), 'meta.json');
     const tmp = `${metaPath}.tmp`;
@@ -347,8 +422,9 @@ export class FileHistoryStore implements HistoryStore {
         failureStack: meta.failureStack,
         taskFailures: meta.taskFailures ?? 0,
         lastTaskFailure: meta.lastTaskFailure,
-        activityAttempts: meta.activityAttempts ?? {},
+        activityAttempts: restoreActivityAttempts(meta.activityAttempts),
         carryover: meta.carryover ?? {},
+        ...(meta.parent === undefined ? {} : {parent: meta.parent}),
       });
     }
   }

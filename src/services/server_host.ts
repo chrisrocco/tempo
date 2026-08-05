@@ -40,6 +40,7 @@ import {
   groupExecutions,
   queryExecutions,
   silentLogger,
+  type ExecutionParent,
   type HistoryStore,
   type Logger,
 } from '../server';
@@ -81,6 +82,8 @@ export interface ServerHost {
   ): Promise<void>;
   cancel(workflowId: string): Promise<void>;
   terminate(workflowId: string, reason: string): Promise<void>;
+  /** Truncate an execution's history to `keep` events and replay from there. */
+  reset(workflowId: string, keep: number): void;
   getOutcome(workflowId: string): Promise<WorkflowOutcome>;
   describeExecution(
     workflowId: string,
@@ -145,9 +148,10 @@ export function createServerHost(
     name: string,
     args: unknown[],
     taskQueue: string,
+    parent?: ExecutionParent,
   ): void {
     void historyStore
-      .create(workflowId, name, args, taskQueue)
+      .create(workflowId, name, args, taskQueue, parent)
       .then(() => {
         workflowTaskQueue.enqueue(workflowId, taskQueue);
         log('execution.started', {workflowId, name, taskQueue});
@@ -170,8 +174,9 @@ export function createServerHost(
     name: string,
     args: unknown[],
     taskQueue: string,
+    parent: ExecutionParent,
   ): void {
-    createAndEnqueue(workflowId, name, args, taskQueue);
+    createAndEnqueue(workflowId, name, args, taskQueue, parent);
   }
 
   return {
@@ -193,6 +198,17 @@ export function createServerHost(
     },
     terminate(workflowId, reason) {
       return core.terminate(workflowId, reason);
+    },
+    reset(workflowId, keep) {
+      // Fire-and-forget like the other controls on this seam: the effect is
+      // visible in the execution's own state, which is what a caller reads next.
+      void core.resetToEvent(workflowId, keep).catch((error: unknown) => {
+        log('execution.reset_failed', {
+          workflowId,
+          keep,
+          error: errorMessage(error),
+        });
+      });
     },
     async getOutcome(workflowId) {
       const rec = await historyStore.get(workflowId);

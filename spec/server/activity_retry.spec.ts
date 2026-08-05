@@ -196,7 +196,7 @@ describe('retry decided by the server', () => {
     await wait(60); // times out — one attempt spent
 
     const rec = await historyStore.get('wf');
-    expect(rec!.activityAttempts[0]).toBe(1);
+    expect(rec!.activityAttempts[0]?.attempts).toBe(1);
     expect(await terminalEvents(historyStore)).toEqual([]); // retrying, not failed
   });
 });

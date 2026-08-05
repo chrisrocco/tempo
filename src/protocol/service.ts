@@ -171,14 +171,69 @@ export interface DescribeOptions {
  * or genuinely stuck, and that distinction is the first thing an operator wants.
  */
 export interface PendingWorkView {
-  activities: {seq: number; name: string}[];
+  activities: PendingActivityView[];
   timers: {seq: number; fireAt: number}[];
   children: {seq: number; childId: string; detached: boolean}[];
+}
+
+/**
+ * One dispatched activity, and how its retrying is going.
+ *
+ * The retry fields are the reason this is a named type rather than an inline
+ * shape. Without them a dispatched activity is a name, and an activity on its
+ * fourth backoff is indistinguishable from one running for the first time —
+ * both read as "waiting on: charge". That is the case an operator is most often
+ * looking at when they open an execution that is not moving, and answering it
+ * previously meant reading the server's logs.
+ */
+export interface PendingActivityView {
+  seq: number;
+  name: string;
+  /**
+   * Which attempt is running or about to run, counting from 1.
+   *
+   * Deliberately not the stored count of *failed* attempts: every consumer wants
+   * to render "attempt 3 of 5", and making each one add 1 is an off-by-one
+   * waiting to happen. `attempt === 1` means nothing has failed yet.
+   */
+  attempt: number;
+  /** How many the retry policy allows in total. 1 means no retry. */
+  maxAttempts: number;
+  /** Why the previous attempt failed; absent while `attempt` is 1. */
+  lastError?: string;
+  /**
+   * When the next attempt is due, epoch ms.
+   *
+   * Absent when the activity is running rather than waiting out a backoff, so a
+   * reader must treat it as "not between attempts" rather than as "due now".
+   */
+  nextAttemptAt?: number;
+}
+
+/**
+ * Which execution started this one.
+ *
+ * On the detail rather than the summary: a listing has no column for lineage and
+ * most executions have no parent, so putting it on every row would grow the
+ * common response to answer a question only the detail view asks.
+ */
+export interface ExecutionParentView {
+  workflowId: string;
+  /** The `startChild` seq in the parent, which its history is keyed by. */
+  seq: number;
 }
 
 /** `tempo describe`: the summary, plus history and what the execution awaits. */
 export interface ExecutionDetail extends ExecutionSummary {
   args: unknown[];
+  /**
+   * Absent on an execution a client started directly.
+   *
+   * Also absent on a child created before the parent was recorded — the two are
+   * indistinguishable, and both degrade to the dead end this field exists to
+   * remove rather than to a link that goes nowhere.
+   */
+  parent?: ExecutionParentView;
   /**
    * One page of history — see `DescribeOptions`. `historyLength` on the summary
    * is the total, so `historyOffset + history.length < historyLength` means
@@ -341,6 +396,20 @@ export interface WorkflowService {
    * the thing that throws.
    */
   terminate(workflowId: string, reason: string): void;
+  /**
+   * Drop every event from `keep` onward and replay from there.
+   *
+   * The counterpart to `terminate` for a wedged execution: that one ends it,
+   * this one rewinds it to before whatever the deployed code cannot replay, so
+   * the work is kept. Destructive — the dropped events do not come back — and
+   * the caller is expected to have said so.
+   *
+   * `keep` is an index into the history, so event `keep` is the first one
+   * dropped. Out-of-range values are clamped rather than rejected: a history
+   * that grew between reading it and acting on it is ordinary, and a reset to
+   * "the end" is a no-op rather than an error.
+   */
+  reset(workflowId: string, keep: number): void;
   getResult(workflowId: string): Promise<unknown>;
   getStatus(workflowId: string): ExecutionStatus;
   /** Inspect one execution: status, history, and what it is waiting on. */

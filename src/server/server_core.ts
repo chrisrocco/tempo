@@ -73,7 +73,11 @@ import type {
 } from '../protocol';
 import {completedSeqs, pendingWork} from './pending_work';
 import {createWorkerRegistry} from './worker_registry';
-import type {ExecutionRecord, HistoryStore} from './ports/history_store';
+import type {
+  ExecutionParent,
+  ExecutionRecord,
+  HistoryStore,
+} from './ports/history_store';
 import {silentLogger, type Logger} from './ports/logger';
 import type {TaskQueue} from './ports/task_queue';
 import type {TimerService} from './ports/timer_service';
@@ -149,6 +153,7 @@ export interface ServerCoreDeps {
     name: string,
     args: unknown[],
     taskQueue: string,
+    parent: ExecutionParent,
   ): void;
   /** Nudge the (async, in-proc) workflow worker to drain the workflow-task queue. */
   kickWorkflowWorker(): void;
@@ -204,6 +209,17 @@ export interface ServerCore {
    * settles the record directly and runs no user code.
    */
   terminate(workflowId: string, reason: string): Promise<void>;
+  /**
+   * Truncate an execution's history to `keep` events and re-drive it.
+   *
+   * The other way out of a wedged execution, and the one that keeps the work:
+   * `terminate` ends it, this rewinds it to before whatever the current code
+   * cannot replay. Destructive — the dropped events are gone — and everything
+   * dispatched after `keep` is invalidated first so a late completion cannot
+   * land on the truncated history. See the implementation for why that order is
+   * load-bearing.
+   */
+  resetToEvent(workflowId: string, keep: number): Promise<void>;
   /** Rebuild correlation + re-dispatch pending work from persisted history (crash recovery). */
   resumeFromHistory(records: ExecutionRecord[]): Promise<void>;
   /**
@@ -476,12 +492,16 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           status: existing.status,
         });
       } else {
-        // A child is part of the same application unless told otherwise.
+        // A child is part of the same application unless told otherwise. The
+        // parent goes on at creation for both kinds — a detached child has
+        // nobody waiting on it, but it still came from somewhere, and that is
+        // the question an operator looking at one arrives with.
         launch(
           childId,
           cmd.childName,
           cmd.childArgs,
           cmd.taskQueue ?? taskQueue,
+          {workflowId, seq: cmd.seq},
         );
       }
       recordChild(workflowId, cmd.seq, childId);
@@ -662,6 +682,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       const attempts = await historyStore.recordActivityAttempt(
         workflowId,
         seq,
+        result.error,
       );
       if (scheduled && shouldRetry(retry, attempts)) {
         const delayMs = backoffMs(retry, attempts);
@@ -674,6 +695,14 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           delayMs,
           error: result.error,
         });
+        // Written before the redispatch is armed, so an operator polling during
+        // the backoff never sees an activity waiting on a retry with no time
+        // attached to it.
+        await historyStore.setActivityNextAttempt(
+          workflowId,
+          seq,
+          Date.now() + delayMs,
+        );
         redispatchAfter(workflowId, scheduled, rec.taskQueue, delayMs);
         return;
       }
@@ -741,6 +770,103 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     await notifyParentOfTerminal(workflowId);
     // Any backoff timer still pending is harmless: the wake it produces finds a
     // non-running execution, and `pollWorkflowTask` discards the task.
+  }
+
+  /**
+   * Replay an execution from an earlier point in its own history.
+   *
+   * The escape hatch for the case `terminate` was previously the only answer to:
+   * a workflow edited while it had live executions, whose replay now throws
+   * nondeterminism at some seq. Truncating to before that point and re-driving
+   * lets the *new* code produce the commands from there on.
+   *
+   * ## Why the in-flight work has to be dropped first
+   *
+   * Everything dispatched after `keep` loses its marker, and the completions are
+   * already out with workers. A completion arriving afterwards would find no
+   * terminal event for its seq — the dedup in `reportActivityResult` reads
+   * history, which no longer has it — and be appended as an outcome for a
+   * command the truncated history never issued. Replay then throws on it, which
+   * is the exact failure this is supposed to escape.
+   *
+   * Dropping the lease is what prevents it: `completeActivityTask` returns early
+   * when the token resolves to nothing, so a worker still holding the task acks
+   * into a no-op. The queued-but-unpolled tasks go the same way, and the timers
+   * are cancelled because replay will re-issue them from the truncated point.
+   *
+   * The version bump in `truncateHistory` closes the matching window for
+   * workflow tasks: one already polled fails its CAS instead of appending onto a
+   * history it did not replay.
+   *
+   * ## What it deliberately does not do
+   *
+   * It does not touch children. A `childStarted` dropped by the truncation does
+   * not un-start the child, and replay re-issues `startChild` with the same
+   * derived id — which `applyCommand` correlates to the existing execution
+   * rather than starting a second. That is the same "claim, not demand" rule an
+   * author-chosen child id already follows.
+   *
+   * `carryover` also survives, for the same reason it survives continue-as-new:
+   * it is not history and was never replayed.
+   */
+  async function resetToEvent(workflowId: string, keep: number): Promise<void> {
+    const rec = await historyStore.get(workflowId);
+    if (!rec) return;
+    // Read everything this needs up front. A store may hand back the live record
+    // rather than a copy — the in-memory one does — so any field read after the
+    // mutations below describes the state *after* them, which is how the first
+    // version of this logged "dropped 0 events" every time.
+    const before = {
+      historyLength: rec.history.length,
+      taskFailures: rec.taskFailures,
+      status: rec.status,
+      taskQueue: rec.taskQueue,
+      attemptSeqs: Object.keys(rec.activityAttempts).map(Number),
+      timers: pendingWork(rec.history).timers,
+    };
+    const bounded = Math.max(0, Math.min(keep, before.historyLength));
+
+    // Order matters: leases go before the truncate so that nothing can settle
+    // against the old history in the window between the two.
+    for (const [token, lease] of [...activityLeases]) {
+      if (lease.workflowId !== workflowId) continue;
+      activityLeases.delete(token);
+      clearAttemptTimers(token);
+      activityTaskQueue.complete(token);
+    }
+    for (const timer of before.timers)
+      timerService.cancel(workflowId, timer.seq);
+
+    await historyStore.truncateHistory(workflowId, bounded);
+    // A truncated dispatch's retry budget describes attempts at a command that
+    // no longer exists; leaving it would charge the replayed one for them.
+    for (const seq of before.attemptSeqs)
+      await historyStore.clearActivityAttempts(workflowId, seq);
+    // The failure count is why someone is here. Leaving it would keep the
+    // execution reading as stuck until the next task happened to succeed.
+    await historyStore.clearTaskFailures(workflowId);
+    // A settled execution has to be reopened, or the task enqueued below is
+    // built and immediately discarded — `buildWorkflowTask` only builds for a
+    // running record. Reset means rewind and re-drive whatever the current
+    // status, because "it failed, I fixed the code, run it again from before
+    // the failure" is one of the two reasons anyone reaches for this. The old
+    // outcome goes with it: it describes events that no longer exist.
+    if (before.status !== 'running')
+      await historyStore.setStatus(workflowId, 'running', {
+        result: undefined,
+        failure: undefined,
+        failureStack: undefined,
+      });
+
+    log('execution.reset', {
+      workflowId,
+      keep: bounded,
+      dropped: before.historyLength - bounded,
+      reopenedFrom: before.status === 'running' ? undefined : before.status,
+      taskFailures: before.taskFailures,
+    });
+    workflowTaskQueue.enqueue(workflowId, before.taskQueue);
+    kickWorkflowWorker();
   }
 
   async function resumeFromHistory(records: ExecutionRecord[]): Promise<void> {
@@ -1035,6 +1161,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     appendSignal,
     requestCancel,
     terminate,
+    resetToEvent,
     resumeFromHistory,
     listQueues: workerRegistry.queues,
     stop() {

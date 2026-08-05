@@ -51,6 +51,8 @@ async function dispatch(
       return host.cancel(request.workflowId);
     case 'terminate':
       return host.terminate(request.workflowId, request.reason);
+    case 'reset':
+      return host.reset(request.workflowId, request.keep);
     case 'getOutcome':
       return host.getOutcome(request.workflowId);
     case 'describeExecution':

@@ -29,6 +29,7 @@ import {
 } from '../protocol';
 import {pendingWork} from './pending_work';
 import type {ExecutionRecord} from './ports/history_store';
+import {maxAttempts} from './retry_policy';
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -86,10 +87,28 @@ export function describeExecution(
   return {
     ...summarizeExecution(rec),
     args: rec.args,
+    ...(rec.parent === undefined ? {} : {parent: rec.parent}),
     history: rec.history.slice(offset, offset + limit),
     historyOffset: offset,
     pending: {
-      activities: pending.activities.map((e) => ({seq: e.seq, name: e.name})),
+      activities: pending.activities.map((e) => {
+        // Absent means nothing has failed yet, which is the common case: the
+        // entry is only written once an attempt fails, and cleared the moment
+        // the activity settles.
+        const retry = rec.activityAttempts[e.seq];
+        return {
+          seq: e.seq,
+          name: e.name,
+          attempt: (retry?.attempts ?? 0) + 1,
+          maxAttempts: maxAttempts(e.options.retry),
+          ...(retry?.lastError === undefined
+            ? {}
+            : {lastError: retry.lastError}),
+          ...(retry?.nextAttemptAt === undefined
+            ? {}
+            : {nextAttemptAt: retry.nextAttemptAt}),
+        };
+      }),
       timers: pending.timers.map((e) => ({seq: e.seq, fireAt: e.fireAt})),
       children: pending.children.map((e) => ({
         seq: e.seq,

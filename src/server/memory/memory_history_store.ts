@@ -13,7 +13,11 @@ import {
   type ExecutionStatus,
   type HistoryEvent,
 } from '../../protocol';
-import type {ExecutionRecord, HistoryStore} from '../ports/history_store';
+import type {
+  ExecutionParent,
+  ExecutionRecord,
+  HistoryStore,
+} from '../ports/history_store';
 import {VersionConflictError} from '../ports/history_store';
 
 export class MemoryHistoryStore implements HistoryStore {
@@ -24,10 +28,12 @@ export class MemoryHistoryStore implements HistoryStore {
     name: string,
     args: unknown[],
     taskQueue: string = DEFAULT_TASK_QUEUE,
+    parent?: ExecutionParent,
   ): Promise<void> {
     if (this.records.has(workflowId))
       throw new Error(`execution ${workflowId} already exists`);
     this.records.set(workflowId, {
+      ...(parent === undefined ? {} : {parent}),
       workflowId,
       runId: 0,
       name,
@@ -91,12 +97,25 @@ export class MemoryHistoryStore implements HistoryStore {
   async recordActivityAttempt(
     workflowId: string,
     seq: number,
+    error?: string,
   ): Promise<number> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
-    const attempts = (rec.activityAttempts[seq] ?? 0) + 1;
-    rec.activityAttempts[seq] = attempts;
+    const attempts = (rec.activityAttempts[seq]?.attempts ?? 0) + 1;
+    // `nextAttemptAt` is dropped rather than carried: the attempt this failure
+    // belongs to has just run, so any previously scheduled time is in the past
+    // and would read as a retry that is overdue.
+    rec.activityAttempts[seq] = {attempts, lastError: error};
     return attempts;
+  }
+
+  async setActivityNextAttempt(
+    workflowId: string,
+    seq: number,
+    at: number,
+  ): Promise<void> {
+    const state = this.records.get(workflowId)?.activityAttempts[seq];
+    if (state) state.nextAttemptAt = at;
   }
 
   async clearActivityAttempts(workflowId: string, seq: number): Promise<void> {
@@ -123,6 +142,13 @@ export class MemoryHistoryStore implements HistoryStore {
     if (outcome && 'failure' in outcome) rec.failure = outcome.failure;
     if (outcome && 'failureStack' in outcome)
       rec.failureStack = outcome.failureStack;
+  }
+
+  async truncateHistory(workflowId: string, keep: number): Promise<void> {
+    const rec = this.records.get(workflowId);
+    if (!rec) throw new Error(`no execution ${workflowId}`);
+    rec.history = rec.history.slice(0, keep);
+    rec.version += 1;
   }
 
   async resetForContinueAsNew(

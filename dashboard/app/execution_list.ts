@@ -23,10 +23,28 @@
  *
  * Paging state resets whenever the filter changes, because a cursor from one
  * filter means nothing under another.
+ *
+ * ## Selection is per page, and stays out of the URL
+ *
+ * A batch acts on rows that are on screen, never on "everything matching this
+ * filter". The page is capped at fifty, which bounds the blast radius of an
+ * irreversible action to something the operator can see — and friction
+ * proportional to that radius is the right trade here. Someone who means to
+ * terminate two hundred can page, and will have looked at them.
+ *
+ * The selection clears whenever the filter or the page changes, so it always
+ * refers to rows that are actually rendered. And unlike the filter it is
+ * deliberately *not* a route: a link that arrives with rows pre-selected for
+ * termination is a hazard, not a convenience.
+ *
+ * Only running executions can be selected. Signalling or cancelling a settled
+ * execution is a no-op the operator would be entitled to read as success, which
+ * is the same reason `action_bar.ts` disables its buttons.
  */
 
 import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
 import type {ExecutionPage, ExecutionSummary} from 'workflow-engine/protocol';
+import {failuresOf, runBatch, type BatchOutcome} from './batch.js';
 import {client} from './client.js';
 import {Poller} from './poller.js';
 import {navigate} from './router.js';
@@ -41,6 +59,7 @@ import {
   surface,
   table,
 } from './theme.js';
+import './counts_strip.js';
 import './start_form.js';
 import './status_badge.js';
 
@@ -51,11 +70,24 @@ export class ExecutionList extends LitElement {
   static override properties = {
     filter: {attribute: false},
     cursors: {state: true},
+    selected: {state: true},
+    batching: {state: true},
+    batchNote: {state: true},
+    batchFailures: {state: true},
+    terminateReason: {state: true},
   };
 
   declare filter: RouteFilter;
   /** The cursors of the pages behind this one; empty means the first page. */
   declare cursors: string[];
+  /** Workflow ids ticked on the current page. Never survives a page change. */
+  declare selected: ReadonlySet<string>;
+  declare batching: boolean;
+  /** Progress or result of the last batch, as one line. */
+  declare batchNote: string | undefined;
+  /** The executions a batch could not act on, which is the part worth keeping. */
+  declare batchFailures: BatchOutcome[];
+  declare terminateReason: string;
 
   private readonly poller = new Poller<ExecutionPage>(this, (signal) =>
     client.listExecutions(
@@ -71,6 +103,18 @@ export class ExecutionList extends LitElement {
     super();
     this.filter = {};
     this.cursors = [];
+    this.selected = new Set();
+    this.batching = false;
+    this.batchNote = undefined;
+    this.batchFailures = [];
+    this.terminateReason = '';
+  }
+
+  /** Forget a selection that no longer refers to what is on screen. */
+  private clearSelection(): void {
+    this.selected = new Set();
+    this.batchNote = undefined;
+    this.batchFailures = [];
   }
 
   /**
@@ -100,6 +144,7 @@ export class ExecutionList extends LitElement {
       if (v === '' || v === false || v === undefined)
         delete next[k as keyof RouteFilter];
     this.cursors = [];
+    this.clearSelection();
     navigate(executionsHref(next));
   }
 
@@ -169,6 +214,41 @@ export class ExecutionList extends LitElement {
         min-height: 18px;
         margin: 0 0 10px;
         font-size: 12.5px;
+      }
+      .pick {
+        width: 26px;
+      }
+      .pick input {
+        accent-color: var(--accent);
+      }
+      .batch {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin: 0 0 12px;
+        font-size: 12.5px;
+      }
+      .batch .count {
+        color: var(--text);
+        font-weight: 600;
+      }
+      /* Not .reason — that is the failure cell in the table, and an input would
+         inherit its muted 12px treatment. */
+      .batch .reason-input {
+        width: 220px;
+      }
+      .batch .note {
+        color: var(--muted);
+      }
+      .failures {
+        margin: 0 0 14px;
+        padding-left: 18px;
+        font-size: 12px;
+        color: var(--danger);
+      }
+      .failures .mono {
+        font-family: var(--mono);
       }
     `,
   ];
@@ -244,9 +324,36 @@ export class ExecutionList extends LitElement {
     `;
   }
 
+  /**
+   * The tick box, on running executions only.
+   *
+   * Settled rows render an empty cell rather than a disabled control: there is
+   * nothing to explain and a row of greyed boxes reads as broken. The column
+   * header's select-all covers "every running execution on this page", which is
+   * the same set.
+   */
+  private selectBox(
+    execution: ExecutionSummary,
+  ): TemplateResult | typeof nothing {
+    if (execution.status !== 'running') return nothing;
+    return html`<input
+      type="checkbox"
+      aria-label="select ${execution.workflowId}"
+      .checked=${this.selected.has(execution.workflowId)}
+      @change=${(e: Event) => {
+        const next = new Set(this.selected);
+        if ((e.target as HTMLInputElement).checked)
+          next.add(execution.workflowId);
+        else next.delete(execution.workflowId);
+        this.selected = next;
+      }}
+    />`;
+  }
+
   private row(execution: ExecutionSummary): TemplateResult {
     return html`
       <tr>
+        <td class="pick">${this.selectBox(execution)}</td>
         <td class="mono">
           <a href=${executionHref(execution.workflowId)}
             >${execution.workflowId}</a
@@ -269,6 +376,7 @@ export class ExecutionList extends LitElement {
     const executions = page?.executions ?? [];
     return html`
       <h1>Executions</h1>
+      <counts-strip></counts-strip>
       <start-form></start-form>
       ${this.filterBar()}
       <div class="status">
@@ -292,9 +400,11 @@ export class ExecutionList extends LitElement {
               }
             </div>`
             : html`
+              ${this.batchBar(executions)}
               <table>
                 <thead>
                   <tr>
+                    <th class="pick">${this.selectAllBox(executions)}</th>
                     <th>Workflow ID</th>
                     <th>Name</th>
                     <th>Status</th>
@@ -314,6 +424,127 @@ export class ExecutionList extends LitElement {
     `;
   }
 
+  /** Every running execution on this page — the set select-all covers. */
+  private selectableOf(executions: ExecutionSummary[]): string[] {
+    return executions
+      .filter((e) => e.status === 'running')
+      .map((e) => e.workflowId);
+  }
+
+  private selectAllBox(
+    executions: ExecutionSummary[],
+  ): TemplateResult | typeof nothing {
+    const selectable = this.selectableOf(executions);
+    if (selectable.length === 0) return nothing;
+    const all = selectable.every((id) => this.selected.has(id));
+    return html`<input
+      type="checkbox"
+      aria-label="select every running execution on this page"
+      .checked=${all}
+      @change=${() => {
+        this.selected = all ? new Set() : new Set(selectable);
+      }}
+    />`;
+  }
+
+  /**
+   * The bar that appears once something is ticked.
+   *
+   * Cancel goes straight through; terminate takes a reason first, the same gate
+   * `action_bar.ts` puts on a single one — except the count is in the button, so
+   * the thing being confirmed is *how many* as much as what.
+   */
+  private batchBar(
+    executions: ExecutionSummary[],
+  ): TemplateResult | typeof nothing {
+    const ids = this.selectableOf(executions).filter((id) =>
+      this.selected.has(id),
+    );
+    if (ids.length === 0 && this.batchNote === undefined) return nothing;
+    return html`
+      <div class="batch">
+        ${
+          ids.length === 0
+            ? nothing
+            : html`
+              <span class="count">${ids.length} selected</span>
+              <button
+                ?disabled=${this.batching}
+                @click=${() =>
+                  void this.runOver(ids, 'cancel', (id) => client.cancel(id))}
+              >
+                cancel
+              </button>
+              <input
+                class="reason-input"
+                placeholder="reason, to terminate"
+                .value=${this.terminateReason}
+                @input=${(e: Event) => {
+                  this.terminateReason = (e.target as HTMLInputElement).value;
+                }}
+              />
+              <button
+                class="danger"
+                ?disabled=${this.batching || this.terminateReason.trim() === ''}
+                @click=${() =>
+                  void this.runOver(ids, 'terminate', (id) =>
+                    client.terminate(id, this.terminateReason.trim()),
+                  )}
+              >
+                terminate ${ids.length}
+              </button>
+            `
+        }
+        ${
+          this.batchNote === undefined
+            ? nothing
+            : html`<span class="note">${this.batchNote}</span>`
+        }
+      </div>
+      ${
+        this.batchFailures.length === 0
+          ? nothing
+          : html`<ul class="failures">
+            ${this.batchFailures.map(
+              (f) => html`<li><span class="mono">${f.workflowId}</span> —
+                ${f.error}</li>`,
+            )}
+          </ul>`
+      }
+    `;
+  }
+
+  /**
+   * Run one action across the selection, then re-read the page.
+   *
+   * The failures survive the refresh and the successes do not, which is the
+   * asymmetry that matters: the rows that worked are visible in the listing
+   * underneath, and the ones that did not are the only thing the operator has to
+   * carry forward.
+   */
+  private async runOver(
+    ids: string[],
+    verb: string,
+    action: (workflowId: string) => Promise<unknown>,
+  ): Promise<void> {
+    this.batching = true;
+    this.batchFailures = [];
+    this.batchNote = `${verb}: 0 of ${ids.length}`;
+    const outcomes = await runBatch(ids, action, (progress) => {
+      this.batchNote = `${verb}: ${progress.done} of ${progress.total}`;
+    });
+    const failures = failuresOf(outcomes);
+    this.batchFailures = failures;
+    this.batchNote =
+      failures.length === 0
+        ? `${verb}: all ${outcomes.length} done`
+        : `${verb}: ${outcomes.length - failures.length} of ${outcomes.length} done, ${failures.length} could not be reached`;
+    this.selected = new Set();
+    this.terminateReason = '';
+    this.batching = false;
+    this.poller.refresh();
+  }
+
   private paging(
     page: ExecutionPage | undefined,
   ): TemplateResult | typeof nothing {
@@ -327,6 +558,7 @@ export class ExecutionList extends LitElement {
           ?disabled=${!hasPrevious}
           @click=${() => {
             this.cursors = this.cursors.slice(0, -1);
+            this.clearSelection();
           }}
         >
           ← previous
@@ -335,6 +567,7 @@ export class ExecutionList extends LitElement {
           ?disabled=${!hasNext}
           @click=${() => {
             this.cursors = [...this.cursors, page.nextCursor!];
+            this.clearSelection();
           }}
         >
           next →
