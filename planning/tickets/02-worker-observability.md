@@ -71,6 +71,34 @@ returning server liveness plus whatever is already cheap to read (uptime, durabl
 vs. in-memory, data dir). Lets `tempo status` report the server honestly instead
 of abusing `getOutcome`.
 
+> **Tier 2 landed.** `{method: 'health'}` on the RPC surface, `ServerHost.health()`,
+> and `RemoteService.health()` returning
+> [`ServerHealth`](../../src/protocol/service.ts) — `uptimeMs`, `durable`, and an
+> optional `dataLocation`.
+>
+> Three decisions taken while implementing:
+>
+> - **`durable` is read off the `HistoryStore`, not passed in.** The port gained
+>   `durable` and `location`, so each adapter answers for itself. The
+>   alternative — `bin/server-main` telling the host what it configured — is a
+>   second source of truth that can disagree with the store actually in use, and
+>   a probe reporting durability it does not have is worse than one reporting
+>   nothing.
+> - **No `ok` field.** Liveness is carried by the reply arriving; a boolean that
+>   is `true` in every receivable response invites branching on nothing. A spec
+>   pins the key set so one cannot be added back casually.
+> - **`health()` is synchronous on the host, and nothing on `ServerHealth` may
+>   require a store scan.** A probe that walks every execution falls over on
+>   exactly the server that most needs probing. Execution counts stay
+>   `groupExecutions`' job.
+>
+> **`health` has no caller in the repo yet** — `tempo status` does not exist, and
+> `assertReachable` in [`cli/client.ts`](../../src/cli/client.ts) was left alone
+> on purpose: it is deliberately body-agnostic, and switching it to `health`
+> would make an older server that does not know the method report as
+> unreachable. T3 is the tier that gives `tempo status` something to say about
+> workers.
+
 **Tier 3 — worker identity and heartbeat.** Give workers an identity (name, role,
 pid) that rides along with polls or a dedicated register call; have the server
 track last-seen per worker. This is what `tempo status` needs to report connected
@@ -83,7 +111,7 @@ stats. Largest change: touches `protocol`, `server_host`, and `worker_loops`.
       and backs off; verified by pointing one at a closed port.
 - [x] **T1:** error-path backoff is exponential and capped; idle polling cadence
       is unchanged.
-- [ ] **T2:** `health` exists on the RPC surface and `RemoteService` exposes it.
+- [x] **T2:** `health` exists on the RPC surface and `RemoteService` exposes it.
 - [ ] **T3:** the server can enumerate live workers by role with a last-seen
       timestamp.
 - [ ] `npm run typecheck` clean; `npm test` green.
@@ -91,6 +119,8 @@ stats. Largest change: touches `protocol`, `server_host`, and `worker_loops`.
 ## Note for the deployment API
 
 Until Tier 3 lands, `tempo status` can only report **systemd process state** per
-replica plus a server ping — not whether workers are actually working. The
-documented CLI surface in [`src/cli/cli.ts`](../../src/cli/cli.ts) should not
-promise more than that.
+replica plus what the server says about itself — which since T2 is a real
+`health` probe (uptime, durable vs. in-memory, data dir) rather than a ping
+inferred from an unrelated call. Still not whether workers are actually working:
+that is exactly what T3 adds. The documented CLI surface in
+[`src/cli/cli.ts`](../../src/cli/cli.ts) should not promise more than that.

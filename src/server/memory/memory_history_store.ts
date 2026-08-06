@@ -22,6 +22,9 @@ import type {
 import {VersionConflictError} from '../ports/history_store';
 
 export class MemoryHistoryStore implements HistoryStore {
+  /** Everything here dies with the process; `location` stays absent. */
+  readonly durable = false;
+
   private readonly records = new Map<string, ExecutionRecord>();
 
   async create(

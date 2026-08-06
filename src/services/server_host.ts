@@ -23,6 +23,7 @@ import type {
   ExecutionPage,
   LeasedActivityTask,
   QueueWorkers,
+  ServerHealth,
   StartResult,
   StartWorkflowOptions,
   TaskToken,
@@ -99,6 +100,15 @@ export interface ServerHost {
     options?: DescribeOptions,
   ): Promise<ExecutionDetail | undefined>;
   listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
+  /**
+   * Liveness and what this server is, for a status command or a supervisor.
+   *
+   * Synchronous, and that is a claim rather than an oversight: everything it
+   * reports is already in memory, so a probe cannot be made to hang by the same
+   * store trouble it exists to reveal. Anything that would need to be awaited
+   * does not belong on it — see `ServerHealth`.
+   */
+  health(): ServerHealth;
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
   /** Every execution counted by status, grouped by task queue and by name. */
@@ -138,6 +148,9 @@ export function createServerHost(
   const timerService = new MemoryTimerService();
   const log = options.log ?? silentLogger;
   let counter = 0;
+  // Read once, at construction, so uptime measures this host rather than the
+  // moment someone happened to ask about it.
+  const startedAt = Date.now();
 
   const core = createServerCore({
     historyStore,
@@ -284,6 +297,17 @@ export function createServerHost(
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
+    },
+    health() {
+      // Durability is read off the store rather than tracked here: the store is
+      // the thing that either survives a restart or does not.
+      return {
+        uptimeMs: Date.now() - startedAt,
+        durable: historyStore.durable,
+        ...(historyStore.location === undefined
+          ? {}
+          : {dataLocation: historyStore.location}),
+      };
     },
     async listQueues() {
       return core.listQueues();

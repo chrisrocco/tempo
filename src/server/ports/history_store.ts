@@ -149,6 +149,25 @@ export class VersionConflictError extends Error {
 }
 
 export interface HistoryStore {
+  /**
+   * Does state written here survive the process?
+   *
+   * On the port rather than inferred by the caller, because the alternative is
+   * an `instanceof FileHistoryStore` somewhere in `services/` — which would put
+   * a concrete adapter on the wrong side of this seam to answer a question the
+   * adapter already knows. It is also the honest source: a server told
+   * separately that it is durable can be told wrong, and a health probe that
+   * reports durability it does not have is worse than one that reports nothing.
+   */
+  readonly durable: boolean;
+  /**
+   * Where this store keeps its state, for an operator reading a health probe.
+   *
+   * Absent when there is nowhere to point at, which is the in-memory case. Not
+   * necessarily a path — a future SQL adapter would put a redacted DSN here —
+   * so it is for a human to read and never for a caller to parse.
+   */
+  readonly location?: string;
   /** Register a fresh execution. Rejects if the id already exists. */
   create(
     workflowId: string,

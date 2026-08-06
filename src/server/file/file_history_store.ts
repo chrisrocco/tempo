@@ -119,11 +119,19 @@ function encodeName(id: string): string {
 }
 
 export class FileHistoryStore implements HistoryStore {
+  /** Written through to the data dir, and reloaded by `open` on the next boot. */
+  readonly durable = true;
+
   private readonly cache = new Map<string, ExecutionRecord>();
   private readonly writeChains = new Map<string, Promise<void>>();
   private closed = false;
 
   private constructor(private readonly dir: string) {}
+
+  /** The data dir this store holds the single-writer lock on. */
+  get location(): string {
+    return this.dir;
+  }
 
   /** Open (or create) a data dir: acquire the single-writer lock, then load state. */
   static async open(dir: string): Promise<FileHistoryStore> {

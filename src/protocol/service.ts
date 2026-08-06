@@ -166,6 +166,39 @@ export interface ExecutionFilter {
 }
 
 /**
+ * What a server says about itself when asked.
+ *
+ * **There is no `ok` field, deliberately.** Liveness is carried by the response
+ * arriving at all — a boolean that is `true` in every reply it is possible to
+ * receive tells a caller nothing, and invites one to branch on it as though it
+ * did. A server too sick to answer does not answer, and that is the signal.
+ *
+ * Everything here is already in memory. Nothing on this type may require a
+ * store scan: the caller is a status command or a supervisor probe, and a
+ * health check that walks every execution is a health check that falls over on
+ * exactly the server that most needs probing. Execution counts are what
+ * `groupExecutions` is for.
+ */
+export interface ServerHealth {
+  /**
+   * How long this server has been up, in milliseconds.
+   *
+   * A duration rather than a `startedAt` instant because it is computed on the
+   * server, so it survives the two ends disagreeing about what time it is. A
+   * timestamp would silently become an inaccurate uptime the moment a client's
+   * clock drifted from the server's.
+   */
+  uptimeMs: number;
+  /** Whether state survives a restart — `false` is the in-memory default. */
+  durable: boolean;
+  /**
+   * Where durable state lives, for a human reading a status line. Absent when
+   * in-memory. Never parse it — see `HistoryStore.location`.
+   */
+  dataLocation?: string;
+}
+
+/**
  * One page of a listing, newest first.
  *
  * The cursor is opaque on purpose: it currently encodes the sort key of the last
