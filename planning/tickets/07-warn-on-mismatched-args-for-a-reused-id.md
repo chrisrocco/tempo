@@ -3,6 +3,27 @@
 **Type:** gap (operability) · **Follows:** PR #31, where this was deferred on
 purpose
 
+> **Status: closed, won't do for now.** Decided by the owner: this has not bitten
+> anyone, and it will be reopened if it does.
+>
+> Nothing is broken by closing it. The mismatch is already recorded —
+> `execution.start_reused` carries `sameRequest` — so the information exists for
+> anyone who goes looking. What the ticket proposed was making it _findable
+> without suspecting it first_, which is a real improvement and not an urgent
+> one.
+>
+> The cost of guessing wrong here is what makes waiting the cheap option. A
+> warning needs a definition of "different arguments", and the obvious one is
+> wrong twice over: `JSON.stringify` comparison is key-order sensitive, and a
+> deploy that adds a field to an argument object makes every reused id mismatch
+> at once. Both are recorded below. Building it against a real incident means
+> the definition gets shaped by a case that actually happened, rather than by a
+> guess about which mismatches matter.
+>
+> **If this is reopened, read the two numbered points below first** — they are
+> the reason the naive implementation is misleading rather than merely
+> incomplete.
+
 ## Problem
 
 A caller-chosen `workflowId` is a claim on a name, so starting twice under one id
