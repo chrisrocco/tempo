@@ -3,6 +3,46 @@
 **Type:** gap (protocol + storage) · **Relates to:** the retry state landed in
 PR #25
 
+> **Status: landed, narrowed deliberately.** `ExecutionGroups.retryingActivities`
+> groups what is **between attempts right now** by activity name, rendered as a
+> third table on the queues view. `activity.settled` now carries the activity
+> name, so the log stream can be grouped by activity without a join.
+>
+> **The derive-vs-store decision below is a false choice, and that is the main
+> finding.** It is not a cost tradeoff — it is a capability one. `activityFailed`
+> is written only once the retry budget is spent, and `activityAttempts` is
+> cleared the moment an activity settles. So an activity that fails four times
+> and succeeds on the fifth leaves a history containing `activityScheduled` and
+> `activityCompleted` — identical to one that succeeded immediately.
+> **Flakiness is not derivable from history at any cost.** "Derive from history"
+> would have answered a narrower question than the ticket title implies, and a
+> reader would reasonably have assumed otherwise.
+>
+> Three decisions:
+>
+> - **Live, not cumulative.** Report what the engine genuinely knows rather than
+>   a historical number that is silently blind to every activity that recovered.
+>   The heading says "right now" for that reason.
+> - **Its own type on the existing call.** `ActivityRetryGroup` borrows none of
+>   `ExecutionGroup`'s statuses, which mean nothing for an attempt waiting to run
+>   again — but it rides on `groupExecutions` rather than a new RPC, because it
+>   answers the same question from the same scan, which is the argument
+>   `ExecutionGroups` was already built on.
+> - **`ActivityRetryState` gained `name`.** A copy of something history holds,
+>   which is normally wrong; it earns its place by keeping the grouping
+>   O(executions) instead of O(total events). Without it, resolving a `seq` to a
+>   name would mean running `pendingWork` over every execution's full history on
+>   a call the dashboard polls — and that cost would grow forever, since settled
+>   executions are never deleted (see #33).
+>
+> **Cumulative failure rates are out of scope, on purpose.** Both
+> `activity.settled` and `activity.retry_scheduled` now carry the activity name,
+> so the aggregate belongs to a metrics backend consuming the log stream — which
+> is where Temporal puts it too (`temporal_activity_type`, aggregated in
+> Prometheus; their Web UI has no group-by-activity view). Doing it in the store
+> would need a durable counter that outlives settling, which is the inverse of
+> the rule keeping `activityAttempts` bounded.
+
 ## Problem
 
 Activity is the one concept the engine has no aggregate view of. It exists only

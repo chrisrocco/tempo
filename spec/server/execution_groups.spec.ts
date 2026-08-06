@@ -33,6 +33,7 @@ function record(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
     version: 1,
     status: 'running',
     taskFailures: 0,
+    activityAttempts: {},
     ...over,
   } as ExecutionRecord;
 }
@@ -101,7 +102,11 @@ describe('execution groups — counting', () => {
   });
 
   it('reports nothing for an empty server rather than an empty group', () => {
-    expect(groupExecutions([])).toEqual({byTaskQueue: [], byName: []});
+    expect(groupExecutions([])).toEqual({
+      byTaskQueue: [],
+      byName: [],
+      retryingActivities: [],
+    });
   });
 });
 
@@ -136,5 +141,145 @@ describe('execution groups — ordering', () => {
     ]);
 
     expect(byTaskQueue.map((g) => g.key)).toEqual(['alpha', 'mango', 'zebra']);
+  });
+});
+
+/**
+ * What is between retry attempts, grouped by activity name.
+ *
+ * The property worth pinning is what this deliberately does *not* count. It
+ * reads `activityAttempts`, which the engine clears the moment an activity
+ * settles — so a flaky activity that eventually succeeds vanishes from here
+ * entirely, and nothing in history would have let it be counted either. A
+ * reader who assumes these are cumulative failure totals is reading the wrong
+ * number, which is why `ActivityRetryGroup` says so and why the dashboard
+ * heading says "right now".
+ */
+describe('execution groups — activities retrying now', () => {
+  function retrying(
+    attempts: Record<
+      number,
+      {
+        name?: string;
+        attempts: number;
+        lastError?: string;
+        nextAttemptAt?: number;
+      }
+    >,
+  ): ExecutionRecord {
+    return record({activityAttempts: attempts} as Partial<ExecutionRecord>);
+  }
+
+  it('reports nothing when no activity is between attempts', () => {
+    expect(groupExecutions([record()]).retryingActivities).toEqual([]);
+  });
+
+  it('groups retries by activity name across executions', () => {
+    const groups = groupExecutions([
+      retrying({0: {name: 'charge', attempts: 2}}),
+      retrying({0: {name: 'charge', attempts: 3}}),
+      retrying({0: {name: 'notify', attempts: 1}}),
+    ]).retryingActivities;
+
+    expect(groups.map((g) => [g.name, g.retrying, g.attempts])).toEqual([
+      ['charge', 2, 5],
+      ['notify', 1, 1],
+    ]);
+  });
+
+  it('counts several retrying activities within one execution', () => {
+    const groups = groupExecutions([
+      retrying({
+        0: {name: 'charge', attempts: 1},
+        1: {name: 'charge', attempts: 1},
+      }),
+    ]).retryingActivities;
+
+    expect(groups).toEqual([{name: 'charge', retrying: 2, attempts: 2}]);
+  });
+
+  /**
+   * Attempts, not instances. One activity nine attempts deep has burned more
+   * work — and is closer to exhausting its budget — than five that have each
+   * failed once, so it leads despite fewer of them retrying.
+   */
+  it('orders by attempts burned rather than by how many are retrying', () => {
+    const several = Array.from({length: 5}, () =>
+      retrying({0: {name: 'notify', attempts: 1}}),
+    );
+    const groups = groupExecutions([
+      ...several,
+      retrying({0: {name: 'charge', attempts: 9}}),
+    ]).retryingActivities;
+
+    expect(groups.map((g) => [g.name, g.retrying, g.attempts])).toEqual([
+      ['charge', 1, 9],
+      ['notify', 5, 5],
+    ]);
+  });
+
+  /**
+   * The tie the ordering comment must not claim to break: nine activities on
+   * their first attempt and one on its ninth have burned the same work, so
+   * `attempts` cannot separate them and `retrying` decides.
+   */
+  it('falls back to how many are retrying when the burden is equal', () => {
+    const many = Array.from({length: 9}, () =>
+      retrying({0: {name: 'notify', attempts: 1}}),
+    );
+    const groups = groupExecutions([
+      ...many,
+      retrying({0: {name: 'charge', attempts: 9}}),
+    ]).retryingActivities;
+
+    expect(groups.map((g) => g.name)).toEqual(['notify', 'charge']);
+  });
+
+  it('orders ties by name, so two polls cannot reshuffle the rows', () => {
+    const groups = groupExecutions([
+      retrying({0: {name: 'zeta', attempts: 1}}),
+      retrying({0: {name: 'alpha', attempts: 1}}),
+    ]).retryingActivities;
+
+    expect(groups.map((g) => g.name)).toEqual(['alpha', 'zeta']);
+  });
+
+  it('reports the soonest next attempt among the group, not the last seen', () => {
+    const groups = groupExecutions([
+      retrying({0: {name: 'charge', attempts: 1, nextAttemptAt: 5_000}}),
+      retrying({0: {name: 'charge', attempts: 1, nextAttemptAt: 2_000}}),
+      retrying({0: {name: 'charge', attempts: 1, nextAttemptAt: 9_000}}),
+    ]).retryingActivities;
+
+    expect(groups[0]!.nextAttemptAt).toBe(2_000);
+  });
+
+  it('leaves the next attempt unknown when none has been scheduled', () => {
+    const groups = groupExecutions([
+      retrying({0: {name: 'charge', attempts: 1}}),
+    ]).retryingActivities;
+
+    expect(groups[0]!.nextAttemptAt).toBeUndefined();
+  });
+
+  it('carries a failure message so a reader need not open an execution', () => {
+    const groups = groupExecutions([
+      retrying({
+        0: {name: 'charge', attempts: 1, lastError: 'gateway declined'},
+      }),
+    ]).retryingActivities;
+
+    expect(groups[0]!.lastError).toBe('gateway declined');
+  });
+
+  /**
+   * An attempt recorded against a seq with no scheduling event is a bug, not a
+   * category. A row named "unknown" in the one view meant to be scanned for
+   * real trouble is worse than no row.
+   */
+  it('skips an attempt whose activity cannot be named', () => {
+    expect(
+      groupExecutions([retrying({0: {attempts: 4}})]).retryingActivities,
+    ).toEqual([]);
   });
 });

@@ -102,14 +102,23 @@ export class MemoryHistoryStore implements HistoryStore {
     workflowId: string,
     seq: number,
     error?: string,
+    name?: string,
   ): Promise<number> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
-    const attempts = (rec.activityAttempts[seq]?.attempts ?? 0) + 1;
+    const previous = rec.activityAttempts[seq];
+    const attempts = (previous?.attempts ?? 0) + 1;
     // `nextAttemptAt` is dropped rather than carried: the attempt this failure
     // belongs to has just run, so any previously scheduled time is in the past
-    // and would read as a retry that is overdue.
-    rec.activityAttempts[seq] = {attempts, lastError: error};
+    // and would read as a retry that is overdue. The name is kept, because it
+    // describes the activity rather than the attempt.
+    rec.activityAttempts[seq] = {
+      attempts,
+      lastError: error,
+      ...((name ?? previous?.name) === undefined
+        ? {}
+        : {name: name ?? previous?.name}),
+    };
     return attempts;
   }
 

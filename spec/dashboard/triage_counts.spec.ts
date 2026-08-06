@@ -32,7 +32,7 @@ function group(
 }
 
 function groups(byTaskQueue: ExecutionGroup[]): ExecutionGroups {
-  return {byTaskQueue, byName: []};
+  return {byTaskQueue, byName: [], retryingActivities: []};
 }
 
 describe('dashboard triage counts — totals', () => {

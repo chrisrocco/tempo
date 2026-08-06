@@ -125,6 +125,25 @@ export interface ExecutionParent {
 export interface ActivityRetryState {
   /** Attempts that have been made and failed. */
   attempts: number;
+  /**
+   * Which activity this is — the `name` from its `activityScheduled` event.
+   *
+   * A copy of something history already holds, which is normally the wrong
+   * trade. It earns its place by changing the cost of one specific question:
+   * `groupExecutions` reports retries grouped by activity name, and without
+   * this it would have to run `pendingWork` over every execution's full history
+   * to turn a `seq` into a name — turning an O(executions) scan into an
+   * O(total events) one, on the call a dashboard polls.
+   *
+   * It cannot drift: `activityScheduled` is immutable, this is written from it,
+   * and both are discarded together when the activity settles.
+   *
+   * Optional because it is only as certain as the lookup that produced it. An
+   * attempt recorded for a `seq` with no scheduling event in history is a bug
+   * rather than a shape to support, but it should not cost a name that is
+   * merely a diagnostic.
+   */
+  name?: string;
   /** Why the most recent one failed. */
   lastError?: string;
   /**
@@ -217,11 +236,17 @@ export interface HistoryStore {
    * `error` is recorded alongside the count and replaces any previous one: what
    * an operator wants is why it is failing *now*, and keeping every message would
    * grow without bound for an activity retrying against a policy with no limit.
+   *
+   * `name` is recorded once and kept — see `ActivityRetryState.name`. It trails
+   * `error` because it is the later addition and the parameter it would
+   * otherwise displace is written at every call site; a caller that knows
+   * neither passes neither.
    */
   recordActivityAttempt(
     workflowId: string,
     seq: number,
     error?: string,
+    name?: string,
   ): Promise<number>;
   /**
    * Record when the next attempt of `seq` is due.

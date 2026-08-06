@@ -25,6 +25,20 @@
  * `email`" is where the question starts, not where it ends, and the filter is
  * already expressible as a URL (see `routes.ts`) — so the count and the list of
  * what it counted are one click apart.
+ *
+ * The retry table is the exception: there is no execution filter for "running
+ * an activity called `charge`", so its rows are not links. Inventing one would
+ * mean an `ExecutionFilter` field the server would have to derive from history
+ * on every poll, which is the cost `ActivityRetryGroup` exists to avoid.
+ *
+ * ## The third table is a live view, and says so
+ *
+ * "Activities retrying right now" is worded that way because the natural
+ * reading of an activity table is cumulative, and this one is not: it counts
+ * what is between attempts at this instant, and an activity that recovers
+ * leaves it. `ActivityRetryGroup` explains why the cumulative version is not
+ * derivable at all rather than merely absent — history records an activity's
+ * final outcome, never its attempts.
  */
 
 import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
@@ -39,7 +53,8 @@ import {
 import {client} from './client.js';
 import {Poller} from './poller.js';
 import {executionsHref} from './routes.js';
-import {badge, heading, panel, surface, table} from './theme.js';
+import {formatDuration} from './history_view.js';
+import {absoluteTime, badge, heading, panel, surface, table} from './theme.js';
 
 export class QueuesView extends LitElement {
   private readonly groups = new Poller<ExecutionGroups>(this, (signal) =>
@@ -81,6 +96,18 @@ export class QueuesView extends LitElement {
       .roles {
         display: flex;
         gap: 6px;
+      }
+      /* Matches the listing's treatment of the same two kinds of cell, so a
+         failure message reads the same wherever it is shown. */
+      .when {
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .reason {
+        color: var(--muted);
+        font-size: 12px;
+        max-width: 380px;
       }
       .live {
         background: var(--ok-bg);
@@ -153,7 +180,66 @@ export class QueuesView extends LitElement {
             : nothing
         }
       </div>
-      ${this.queueTable()} ${this.nameTable()}
+      ${this.queueTable()} ${this.nameTable()} ${this.retryTable()}
+    `;
+  }
+
+  /**
+   * What is between retry attempts, by activity.
+   *
+   * Absent rather than empty when nothing is retrying — unlike the two tables
+   * above, whose emptiness is a fact worth stating ("no queues"), an empty
+   * retry table says only that things are fine, and a permanent empty panel on
+   * a healthy server trains the eye to skip the place trouble will appear.
+   *
+   * The heading says "right now" because this is a live view and the reader's
+   * default assumption would be cumulative — see `ActivityRetryGroup`, which
+   * explains why the historical version is not derivable at all.
+   */
+  private retryTable(): TemplateResult | typeof nothing {
+    const groups = this.groups.value;
+    if (groups === undefined || groups.retryingActivities.length === 0)
+      return nothing;
+    // `nextAttemptAt` is in the *future*, which `relativeTime` cannot express —
+    // it clamps at zero and renders a pending retry as "0s ago". Same countdown
+    // idiom the detail view's retry panel uses, for the same field.
+    const now = Date.now();
+    return html`
+      <div class="panel">
+        <h2>Activities retrying right now</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Activity</th>
+              <th class="num">Retrying</th>
+              <th class="num">Attempts</th>
+              <th>Next attempt</th>
+              <th>Last error</th>
+            </tr>
+          </thead>
+          <tbody class="rows">
+            ${groups.retryingActivities.map(
+              (g) => html`
+                <tr>
+                  <td>${g.name}</td>
+                  <td class="num">${this.count(g.retrying, 'wedged')}</td>
+                  <td class="num">${this.count(g.attempts, 'wedged')}</td>
+                  <td class="when" title=${absoluteTime(g.nextAttemptAt)}>
+                    ${
+                      g.nextAttemptAt === undefined
+                        ? '—'
+                        : g.nextAttemptAt <= now
+                          ? 'now'
+                          : `in ${formatDuration(g.nextAttemptAt - now)}`
+                    }
+                  </td>
+                  <td class="reason">${g.lastError ?? ''}</td>
+                </tr>
+              `,
+            )}
+          </tbody>
+        </table>
+      </div>
     `;
   }
 

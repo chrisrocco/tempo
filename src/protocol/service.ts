@@ -383,15 +383,65 @@ export interface ExecutionGroup {
 }
 
 /**
- * The two groupings worth having, from one scan.
+ * Activities of one name that are **between attempts right now**.
  *
- * Both together rather than one call each, because they answer one question —
- * where is the trouble — and the caller is a dashboard that would otherwise
- * make two requests every couple of seconds to scan the same set twice.
+ * Deliberately a live view rather than a historical one, and it is worth being
+ * precise about why, because the obvious reading of "which activity is failing"
+ * is the one this does not answer.
+ *
+ * History records an activity's *final* outcome: `activityFailed` is written
+ * once the retry budget is spent, and the per-attempt state is discarded the
+ * moment the activity settles. So an activity that fails four times and
+ * succeeds on the fifth leaves a history containing `activityScheduled` and
+ * `activityCompleted` — identical to one that succeeded immediately. **Flakiness
+ * is not derivable from history at all**, at any cost; counting it over time
+ * would need a durable counter that outlives settling, which is the opposite of
+ * the rule that keeps `activityAttempts` bounded.
+ *
+ * Rather than answer a narrower question and let a reader assume the wider one,
+ * this reports what the engine genuinely knows: what is burning retries at this
+ * moment. That is also the cheap thing — the counts come from state the scan
+ * already loads. For failure rates over time, `activity.settled` and
+ * `activity.retry_scheduled` carry the activity name into the log stream, which
+ * is where an aggregate over history belongs.
+ *
+ * Its own type rather than an `ExecutionGroup`, because none of that type's
+ * statuses (`running` / `completed` / `terminated` / `stuck`) mean anything for
+ * an attempt that has already failed and is waiting to run again.
+ */
+export interface ActivityRetryGroup {
+  /** The activity's registered name. */
+  name: string;
+  /** How many activities of this name are between attempts right now. */
+  retrying: number;
+  /** Failed attempts summed across them — the size of the retry burden. */
+  attempts: number;
+  /** The most recent failure among them, so a reader need not open one. */
+  lastError?: string;
+  /**
+   * The soonest attempt due among them, epoch ms. Absent when none of them has
+   * been scheduled yet — see `ActivityRetryState.nextAttemptAt`, which a reader
+   * must treat as unknown rather than as "now".
+   */
+  nextAttemptAt?: number;
+}
+
+/**
+ * The groupings worth having, from one scan.
+ *
+ * Together rather than one call each, because they answer one question — where
+ * is the trouble — and the caller is a dashboard that would otherwise make
+ * three requests every couple of seconds to scan the same set three times.
+ *
+ * `retryingActivities` joined the other two for exactly that reason, and is the
+ * one grouping that is not about executions: an execution stuck behind a
+ * retrying activity is `running` and healthy-looking in both of the others.
  */
 export interface ExecutionGroups {
   byTaskQueue: ExecutionGroup[];
   byName: ExecutionGroup[];
+  /** What is between attempts now, by activity. See `ActivityRetryGroup`. */
+  retryingActivities: ActivityRetryGroup[];
 }
 
 // ── worker liveness ──────────────────────────────────────────────────────
