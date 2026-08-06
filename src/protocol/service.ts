@@ -86,7 +86,16 @@ export interface StartResult {
 /** One line of `tempo list`: enough to identify an execution and its state. */
 export interface ExecutionSummary {
   workflowId: string;
-  /** Increments on each continue-as-new; the workflowId is stable across runs. */
+  /**
+   * How many times this execution has continued-as-new; the workflowId is
+   * stable across runs.
+   *
+   * **A count, not an address.** Unlike Temporal's RunId this does not identify
+   * a fetchable run: rollover overwrites one record in place, so `runId: 5`
+   * means five rollovers happened, not that runs 0–4 can be read. There is no
+   * request that returns an earlier run, by design — see
+   * `resetForContinueAsNew`.
+   */
   runId: number;
   name: string;
   status: ExecutionStatus;

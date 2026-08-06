@@ -67,10 +67,15 @@ export type RouteFilter = Pick<
  * visible whichever tab is selected, so this never decides whether a reader can
  * see what went wrong. See `execution_detail.ts`.
  *
- * `relationships` is the third of these and arrives with the parent-and-run-chain
- * work; until then there is nothing to put in it, and an empty tab is worse than
- * an absent one. A URL naming it already degrades to the default rather than
- * rendering blank, which is what makes adding it later a pure addition.
+ * There is no `relationships` tab, and the run-chain half of what it was for is
+ * not coming: rollover overwrites one record, so there is no earlier run to
+ * navigate to (ticket 05, and `resetForContinueAsNew` owns the reasoning). The
+ * parent half shipped instead as a link on the detail view, which is where a
+ * single relationship belongs — a tab for one line would be a section pretending
+ * to be a section.
+ *
+ * A URL naming an unknown tab still degrades to the default rather than
+ * rendering blank, so adding one later stays a pure addition.
  */
 export type DetailTab = 'history' | 'state';
 

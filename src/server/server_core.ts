@@ -44,10 +44,17 @@
  * ## `continueAsNew` is a terminal disposition here, not in the core
  *
  * When a command batch contains `continueAsNew`, this is where it becomes real:
- * close the current run, then start a **new run** of the same workflow — same
- * workflowId, new runId, fresh empty history seeded with the carried args — and
- * enqueue a workflow task for it, atomically. Two behaviors live specifically
- * here:
+ * roll the execution over into a fresh run — same workflowId, bumped runId,
+ * history emptied and reseeded with the carried args — and enqueue a workflow
+ * task for it, atomically.
+ *
+ * "New run" is a description of the *state*, not of a second record. There is
+ * one `ExecutionRecord` per workflowId and the rollover overwrites it, so the
+ * previous run's events are gone the moment this happens and cannot be read
+ * back. That is a decision (ticket 05) and `resetForContinueAsNew` in
+ * `ports/history_store.ts` owns the reasoning.
+ *
+ * Two behaviors live specifically here:
  *
  * - **Children survive.** Continue-as-new is not a real close, so parent-close
  *   policy must not fire — child workflows carry into the new run. Teardown must

@@ -3,15 +3,36 @@
 **Type:** decision (storage + retention) · **Blocks:** run-chain navigation in the
 dashboard · **Tracked in:** [#33](https://github.com/chrisrocco/tempo/issues/33)
 
-> **Status: open, parked.** Not urgent — nothing is broken today. #33 carries the
-> Temporal comparison and the costed shape of each option; this file is the
-> original statement of the problem.
+> **Status: decided — option A, leave it.** A previous run stays unrecoverable
+> after rollover. One `workflowId` is one record, `runId` is a counter on it, and
+> nothing retains the runs it counts.
 >
-> Two things established since this was written, both in #33: our `runId` is a
-> monotonic counter, so chain navigation is arithmetic and needs none of
-> Temporal's pointer fields; and the framing below is slightly off — retaining
-> runs does not undo continue-as-new, which bounds _per-run history_, not total
-> stored bytes. Those are separate problems.
+> The reasoning lives with the code it constrains:
+> [`resetForContinueAsNew`](../../src/server/ports/history_store.ts) owns it,
+> since that is the operation that destroys the events; `server_core.ts`,
+> `ExecutionSummary.runId`, and `ExecutionRecord.runId` point at it. The wording
+> that implied runs were separate records is gone from all four.
+>
+> **Why not B**, which is Temporal's model and was the tempting one: retaining
+> runs means owning a second problem — total stored bytes — that continue-as-new
+> never addressed and that Temporal reclaims with a time-based retention sweep.
+> The workflows that roll over most are exactly the ones that cost the most to
+> keep. Nothing has yet needed to read a past run, and the cost of changing
+> course later is a storage migration rather than a design corner, so the option
+> stays open at a price worth paying then rather than now.
+>
+> **What this closes off.** Run-chain navigation in the dashboard is not
+> deferred, it is cancelled — there is nothing to navigate to. The
+> `relationships` tab that was reserved for it in `routes.ts` is gone with it;
+> the parent half of that work shipped as an inline link instead. Reset also
+> stays destructive, since making it non-destructive was a side effect of B.
+>
+> Two things established while deciding, both in #33: our `runId` is a monotonic
+> counter, so chain navigation would have been arithmetic and needed none of
+> Temporal's pointer fields; and the framing below is off — retaining runs would
+> not have undone continue-as-new, which bounds _per-run history_, not total
+> stored bytes. Those are separate problems, and only the second one is the
+> reason for this decision.
 
 ## Problem
 

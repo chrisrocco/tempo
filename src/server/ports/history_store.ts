@@ -18,7 +18,11 @@ import type {
 /** One execution's durable state: its identity, history, and terminal outcome. */
 export interface ExecutionRecord {
   workflowId: string;
-  /** Increments on each continue-as-new; the workflowId stays stable across runs. */
+  /**
+   * How many times this execution has continued-as-new; the workflowId stays
+   * stable across runs. A counter on the surviving record, never part of a key
+   * — see `resetForContinueAsNew` for why there is only ever one record.
+   */
   runId: number;
   name: string;
   args: unknown[];
@@ -299,9 +303,27 @@ export interface HistoryStore {
     outcome?: {result?: unknown; failure?: unknown; failureStack?: string},
   ): Promise<void>;
   /**
-   * Continue-as-new: close the current run and begin a fresh one on the SAME
-   * workflowId — empty history seeded with `args`, bumped runId, version reset,
-   * status stays 'running'. Not a real close, so the result waiter is untouched.
+   * Continue-as-new: begin a fresh run on the SAME record — history emptied and
+   * reseeded with `args`, bumped runId, version reset, status stays 'running'.
+   * Not a real close, so the result waiter is untouched.
+   *
+   * **The previous run's events are destroyed, and there is no way to read them
+   * afterwards.** One `workflowId` is one record; `runId` is a counter on the
+   * surviving record rather than part of a key, so an execution that has rolled
+   * over five times still has exactly one history — the current one. Nothing
+   * anywhere retains the other four.
+   *
+   * Decided rather than overlooked (ticket 05). Retaining runs is what Temporal
+   * does, and it would make run-chain navigation buildable, but it means owning
+   * a second problem: total stored bytes, which continue-as-new never addressed
+   * and which Temporal reclaims with a time-based retention sweep. The workflows
+   * that roll over most are the ones that would cost the most to keep, and
+   * nothing has yet needed to read a past run — so this stays one id, one
+   * record, and the cost of changing course is a storage migration rather than a
+   * design corner.
+   *
+   * The consequence a caller must know: **`runId` on a summary is a count, not
+   * an address.** Seeing `runId: 5` does not mean runs 0–4 can be fetched.
    */
   resetForContinueAsNew(workflowId: string, args: unknown[]): Promise<void>;
 }
