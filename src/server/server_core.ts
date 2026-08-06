@@ -707,16 +707,21 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // server's: it holds the durable attempt count, so the budget survives a
     // worker dying mid-backoff and a server restart, neither of which a
     // worker-side loop can survive.
+    // Hoisted out of the failure branch: the dispatch event is now the source of
+    // the activity's name for `activity.settled` too, which is emitted on both
+    // outcomes. Without a name there, grouping a log stream by activity needs a
+    // join back to `activity.scheduled` — see `ActivityRetryGroup`.
+    const scheduled = rec.history.find(
+      (e): e is ActivityScheduledEvent =>
+        e.type === 'activityScheduled' && e.seq === seq,
+    );
     if (!result.ok) {
-      const scheduled = rec.history.find(
-        (e): e is ActivityScheduledEvent =>
-          e.type === 'activityScheduled' && e.seq === seq,
-      );
       const retry = scheduled?.options.retry;
       const attempts = await historyStore.recordActivityAttempt(
         workflowId,
         seq,
         result.error,
+        scheduled?.name,
       );
       if (scheduled && shouldRetry(retry, attempts)) {
         const delayMs = backoffMs(retry, attempts);
@@ -756,6 +761,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     log('activity.settled', {
       workflowId,
       seq,
+      name: scheduled?.name,
       ok: result.ok,
       ...(result.ok ? {} : {error: result.error}),
     });
