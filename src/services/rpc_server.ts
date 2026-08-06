@@ -70,13 +70,19 @@ async function dispatch(
     case 'health':
       return host.health();
     case 'pollWorkflowTask':
-      return (await host.pollWorkflowTask(request.taskQueue)) ?? null;
+      return (
+        (await host.pollWorkflowTask(request.taskQueue, request.identity)) ??
+        null
+      );
     case 'completeWorkflowTask':
       return host.completeWorkflowTask(request.token, request.result);
     case 'failWorkflowTask':
       return host.failWorkflowTask(request.token, request.reason);
     case 'pollActivityTask':
-      return (await host.pollActivityTask(request.taskQueue)) ?? null;
+      return (
+        (await host.pollActivityTask(request.taskQueue, request.identity)) ??
+        null
+      );
     case 'completeActivityTask':
       return host.completeActivityTask(request.token, request.result);
     case 'heartbeatActivityTask':

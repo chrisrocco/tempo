@@ -170,11 +170,13 @@ export function createRemoteService(
     },
     async pollWorkflowTask(
       taskQueue?: string,
+      identity?: string,
     ): Promise<WorkflowTask | undefined> {
       return (
         ((await call({
           method: 'pollWorkflowTask',
           taskQueue,
+          identity,
         })) as WorkflowTask | null) ?? undefined
       );
     },
@@ -210,11 +212,13 @@ export function createRemoteService(
     },
     async pollActivityTask(
       taskQueue?: string,
+      identity?: string,
     ): Promise<LeasedActivityTask | undefined> {
       return (
         ((await call({
           method: 'pollActivityTask',
           taskQueue,
+          identity,
         })) as LeasedActivityTask | null) ?? undefined
       );
     },

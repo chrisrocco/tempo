@@ -52,7 +52,9 @@ export type RpcRequest =
   // Liveness plus what is already in memory. Reaching a server is what the
   // reply proves; see `ServerHealth` for why there is no `ok` field in it.
   | {method: 'health'}
-  | {method: 'pollWorkflowTask'; taskQueue?: string}
+  // `identity` names the polling worker; see `WorkerInfo`. Absent from a client
+  // that does not identify itself, which still gets tasks.
+  | {method: 'pollWorkflowTask'; taskQueue?: string; identity?: string}
   | {
       method: 'completeWorkflowTask';
       token: TaskToken;
@@ -60,7 +62,7 @@ export type RpcRequest =
     }
   | {method: 'failWorkflowTask'; token: TaskToken; reason: string}
   | {method: 'heartbeatActivityTask'; token: TaskToken}
-  | {method: 'pollActivityTask'; taskQueue?: string}
+  | {method: 'pollActivityTask'; taskQueue?: string; identity?: string}
   | {
       method: 'completeActivityTask';
       token: TaskToken;

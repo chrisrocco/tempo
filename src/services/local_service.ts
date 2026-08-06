@@ -337,8 +337,11 @@ export function createLocalService(
       return core.listQueues();
     },
     // ── worker-facing seam (for out-of-process workers; unused by the in-proc loops) ──
-    pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined> {
-      return core.pollWorkflowTask(taskQueue);
+    pollWorkflowTask(
+      taskQueue?: string,
+      identity?: string,
+    ): Promise<WorkflowTask | undefined> {
+      return core.pollWorkflowTask(taskQueue, identity);
     },
     completeWorkflowTask(
       token: TaskToken,
@@ -351,8 +354,9 @@ export function createLocalService(
     },
     pollActivityTask(
       taskQueue?: string,
+      identity?: string,
     ): Promise<LeasedActivityTask | undefined> {
-      return core.pollActivityTask(taskQueue);
+      return core.pollActivityTask(taskQueue, identity);
     },
     completeActivityTask(
       token: TaskToken,

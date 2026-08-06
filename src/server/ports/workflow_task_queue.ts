@@ -42,7 +42,15 @@ export interface WorkflowTaskQueue {
    * the name matches any pool — how the in-process runtime serves everything
    * with one set of loops.
    */
-  poll(taskQueue?: string): {token: TaskToken; workflowId: string} | undefined;
+  poll(
+    taskQueue?: string,
+    identity?: string,
+  ): {token: TaskToken; workflowId: string} | undefined;
+  /**
+   * The worker identities holding a live lease right now — the evidence that a
+   * silent worker is mid-task rather than gone. See `LeaseTable.holders`.
+   */
+  leaseHolders(): Set<string>;
   /** Ack a leased task; if a wake arrived while it was in-flight, re-enqueue it. */
   complete(token: TaskToken): void;
 }

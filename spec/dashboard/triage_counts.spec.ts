@@ -95,7 +95,7 @@ describe('dashboard triage counts — queues nothing is serving', () => {
   it('does not count a queue that is being polled', () => {
     const counts = triageCounts(
       groups([group('email', {running: 2})]),
-      [{taskQueue: 'email', workflowPolledAt: NOW - 100}],
+      [{taskQueue: 'email', workflowPolledAt: NOW - 100, workers: []}],
       NOW,
     );
 
@@ -105,7 +105,7 @@ describe('dashboard triage counts — queues nothing is serving', () => {
   it('treats a worker polling every queue as serving this one', () => {
     const counts = triageCounts(
       groups([group('email', {running: 2})]),
-      [{taskQueue: ANY_TASK_QUEUE, workflowPolledAt: NOW - 100}],
+      [{taskQueue: ANY_TASK_QUEUE, workflowPolledAt: NOW - 100, workers: []}],
       NOW,
     );
 
@@ -118,7 +118,7 @@ describe('dashboard triage counts — queues nothing is serving', () => {
     // worker, which still leaves it able to reach its next dispatch.
     const counts = triageCounts(
       groups([group('email', {running: 2})]),
-      [{taskQueue: 'email', activityPolledAt: NOW - 100}],
+      [{taskQueue: 'email', activityPolledAt: NOW - 100, workers: []}],
       NOW,
     );
 

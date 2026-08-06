@@ -37,7 +37,7 @@ export class MemoryTaskQueue implements TaskQueue {
    * they were; it costs O(depth) per poll, which is the in-memory adapter's
    * business and not a property of the port.
    */
-  poll(taskQueue?: string): LeasedActivityTask | undefined {
+  poll(taskQueue?: string, identity?: string): LeasedActivityTask | undefined {
     for (const entry of this.leases.reclaimExpired()) this.queue.unshift(entry); // redeliver
     const index =
       taskQueue === undefined
@@ -45,7 +45,14 @@ export class MemoryTaskQueue implements TaskQueue {
         : this.queue.findIndex((e) => e.taskQueue === taskQueue);
     if (index < 0 || this.queue.length === 0) return undefined;
     const [entry] = this.queue.splice(index, 1);
-    return {...entry.task, token: this.leases.lease(entry, this.leaseMs)};
+    return {
+      ...entry.task,
+      token: this.leases.lease(entry, this.leaseMs, identity),
+    };
+  }
+
+  leaseHolders(): Set<string> {
+    return this.leases.holders();
   }
 
   complete(token: TaskToken): void {

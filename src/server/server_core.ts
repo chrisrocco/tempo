@@ -244,7 +244,14 @@ export interface ServerCore {
    */
   stop(): void;
   // ── worker-facing seam (for out-of-process workers; see WorkflowService) ──
-  pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
+  /**
+   * Claim the next workflow task. `identity` names the worker asking, so the
+   * server can count the fleet and explain a quiet queue; see `WorkerInfo`.
+   */
+  pollWorkflowTask(
+    taskQueue?: string,
+    identity?: string,
+  ): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
     result: WorkflowTaskResult,
@@ -257,7 +264,11 @@ export interface ServerCore {
    * (see planning/sprints/05-phase-6-scope.md).
    */
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
-  pollActivityTask(taskQueue?: string): Promise<LeasedActivityTask | undefined>;
+  /** Claim the next activity task; `identity` names the worker (see above). */
+  pollActivityTask(
+    taskQueue?: string,
+    identity?: string,
+  ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /**
    * The attempt behind `token` is still alive: renew its lease and reset its
@@ -972,16 +983,41 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    * entry in the queue. A polling worker only paid a wasted idle interval for it,
    * which is why this went unnoticed while the seam had no in-process caller.
    */
+  /**
+   * The fleet, with each worker's poll record joined to what it is holding.
+   *
+   * The join is here rather than in `worker_registry` because the two halves
+   * live in different places and neither should learn about the other: the
+   * registry watches polls and the lease tables watch claims. This is the only
+   * component that holds both, which makes it the only one that can say a
+   * silent worker is mid-task rather than gone — the distinction the whole
+   * identity-on-poll change exists to make. See `WorkerInfo.busy`.
+   */
+  function listQueues(): QueueWorkers[] {
+    const holders = {
+      workflow: workflowTaskQueue.leaseHolders(),
+      activity: activityTaskQueue.leaseHolders(),
+    };
+    return workerRegistry.queues().map((queue) => ({
+      ...queue,
+      workers: queue.workers.map((worker) => ({
+        ...worker,
+        busy: holders[worker.role].has(worker.identity),
+      })),
+    }));
+  }
+
   async function pollWorkflowTask(
     taskQueue?: string,
+    identity?: string,
   ): Promise<WorkflowTask | undefined> {
     // Before the queue is consulted, so an idle poll counts. A worker waiting
     // on an empty queue is the strongest evidence of liveness there is, and
     // recording only polls that found work would report a healthy idle fleet as
     // absent — the exact inversion of what this is for.
-    workerRegistry.recordPoll('workflow', taskQueue);
+    workerRegistry.recordPoll('workflow', taskQueue, identity);
     while (true) {
-      const leased = workflowTaskQueue.poll(taskQueue);
+      const leased = workflowTaskQueue.poll(taskQueue, identity);
       if (!leased) return undefined;
       const rec = await historyStore.get(leased.workflowId);
       if (!rec || rec.status !== 'running') {
@@ -1136,11 +1172,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
 
   async function pollActivityTask(
     taskQueue?: string,
+    identity?: string,
   ): Promise<LeasedActivityTask | undefined> {
     // See the note in `pollWorkflowTask`: recorded before the queue is
     // consulted, so an idle poll still counts as liveness.
-    workerRegistry.recordPoll('activity', taskQueue);
-    const task = activityTaskQueue.poll(taskQueue);
+    workerRegistry.recordPoll('activity', taskQueue, identity);
+    const task = activityTaskQueue.poll(taskQueue, identity);
     if (!task) return undefined;
     activityLeases.set(task.token, {
       workflowId: task.workflowId,
@@ -1203,7 +1240,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     terminate,
     resetToEvent,
     resumeFromHistory,
-    listQueues: workerRegistry.queues,
+    listQueues,
     stop() {
       for (const handle of progressTimers) clearTimeout(handle);
       progressTimers.clear();

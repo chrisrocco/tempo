@@ -11,16 +11,51 @@
  */
 
 export class LeaseTable<T> {
-  private readonly leases = new Map<string, {item: T; deadline: number}>();
+  private readonly leases = new Map<
+    string,
+    {item: T; deadline: number; holder?: string}
+  >();
   private counter = 0;
 
   constructor(private readonly prefix: string) {}
 
-  /** Lease an item for `timeoutMs`, returning its token. */
-  lease(item: T, timeoutMs: number): string {
+  /**
+   * Lease an item for `timeoutMs`, returning its token.
+   *
+   * `holder` is the identity of the worker taking it, and is what turns this
+   * table into an answer to "is that worker busy or gone?" — see `holders`.
+   * Optional because a caller that does not identify itself still gets a lease;
+   * the lease is what protects the task, and the identity only explains it.
+   */
+  lease(item: T, timeoutMs: number, holder?: string): string {
     const token = `${this.prefix}-${++this.counter}`;
-    this.leases.set(token, {item, deadline: Date.now() + timeoutMs});
+    this.leases.set(token, {
+      item,
+      deadline: Date.now() + timeoutMs,
+      ...(holder === undefined ? {} : {holder}),
+    });
     return token;
+  }
+
+  /**
+   * The identities currently holding a live lease.
+   *
+   * The point of recording the holder at all. A worker running one activity
+   * stops polling for as long as it takes — the loop is sequential — so elapsed
+   * silence cannot distinguish it from a worker that died. Holding a lease is
+   * the positive evidence that closes that gap: silent *and* holding something
+   * is busy, silent and holding nothing is gone.
+   *
+   * Filters by deadline rather than trusting the map, because expired leases are
+   * only swept on the next poll: on an idle queue nothing polls, so a dead
+   * worker's lease would otherwise keep vouching for it indefinitely.
+   */
+  holders(now = Date.now()): Set<string> {
+    const held = new Set<string>();
+    for (const lease of this.leases.values())
+      if (lease.holder !== undefined && lease.deadline > now)
+        held.add(lease.holder);
+    return held;
   }
 
   /**

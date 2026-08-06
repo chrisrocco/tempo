@@ -113,13 +113,19 @@ export interface ServerHost {
   listQueues(): Promise<QueueWorkers[]>;
   /** Every execution counted by status, grouped by task queue and by name. */
   groupExecutions(): Promise<ExecutionGroups>;
-  pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
+  pollWorkflowTask(
+    taskQueue?: string,
+    identity?: string,
+  ): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
     result: WorkflowTaskResult,
   ): Promise<void>;
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
-  pollActivityTask(taskQueue?: string): Promise<LeasedActivityTask | undefined>;
+  pollActivityTask(
+    taskQueue?: string,
+    identity?: string,
+  ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   heartbeatActivityTask(token: TaskToken): Promise<void>;
   /** Re-drive persisted executions after a restart. */
@@ -315,8 +321,8 @@ export function createServerHost(
     async groupExecutions() {
       return groupExecutions(await historyStore.list());
     },
-    pollWorkflowTask(taskQueue) {
-      return core.pollWorkflowTask(taskQueue);
+    pollWorkflowTask(taskQueue, identity) {
+      return core.pollWorkflowTask(taskQueue, identity);
     },
     completeWorkflowTask(token, result) {
       return core.completeWorkflowTask(token, result);
@@ -324,8 +330,8 @@ export function createServerHost(
     failWorkflowTask(token, reason) {
       return core.failWorkflowTask(token, reason);
     },
-    pollActivityTask(taskQueue) {
-      return core.pollActivityTask(taskQueue);
+    pollActivityTask(taskQueue, identity) {
+      return core.pollActivityTask(taskQueue, identity);
     },
     completeActivityTask(token, result) {
       return core.completeActivityTask(token, result);

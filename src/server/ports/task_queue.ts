@@ -31,7 +31,15 @@ export interface TaskQueue {
    * pool has nothing waiting. Omitting the name matches **any** pool, which is
    * how the in-process runtime serves every execution with one set of loops.
    */
-  poll(taskQueue?: string): LeasedActivityTask | undefined;
+  poll(taskQueue?: string, identity?: string): LeasedActivityTask | undefined;
+  /**
+   * The worker identities holding a live lease right now.
+   *
+   * Exposed on the port because it is the only evidence that separates a worker
+   * busy inside a long activity from one that has gone away — both stop polling.
+   * See `LeaseTable.holders`.
+   */
+  leaseHolders(): Set<string>;
   /** Ack a leased task. A token whose lease already expired is a no-op (redelivered). */
   complete(token: TaskToken): void;
   /**

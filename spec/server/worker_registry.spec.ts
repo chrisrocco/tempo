@@ -31,7 +31,7 @@ describe('worker registry — recording polls', () => {
     registry.recordPoll('workflow', 'email');
 
     expect(registry.queues()).toEqual([
-      {taskQueue: 'email', workflowPolledAt: 1_000},
+      {taskQueue: 'email', workflowPolledAt: 1_000, workers: []},
     ]);
   });
 
@@ -44,7 +44,12 @@ describe('worker registry — recording polls', () => {
     registry.recordPoll('activity', 'email');
 
     expect(registry.queues()).toEqual([
-      {taskQueue: 'email', workflowPolledAt: 1_000, activityPolledAt: 2_000},
+      {
+        taskQueue: 'email',
+        workflowPolledAt: 1_000,
+        activityPolledAt: 2_000,
+        workers: [],
+      },
     ]);
   });
 
@@ -82,7 +87,12 @@ describe('worker registry — recording polls', () => {
 
 describe('worker registry — reading liveness', () => {
   const at = (ms: number): QueueWorkers[] => [
-    {taskQueue: 'email', workflowPolledAt: ms, activityPolledAt: ms},
+    {
+      taskQueue: 'email',
+      workflowPolledAt: ms,
+      activityPolledAt: ms,
+      workers: [],
+    },
   ];
 
   it('reports a queue polled just now as served', () => {
@@ -107,7 +117,7 @@ describe('worker registry — reading liveness', () => {
 
   it('does not let one role vouch for the other', () => {
     const queues: QueueWorkers[] = [
-      {taskQueue: 'email', workflowPolledAt: 1_000},
+      {taskQueue: 'email', workflowPolledAt: 1_000, workers: []},
     ];
 
     expect(isQueueServed(queues, 'email', 'workflow', 1_000)).toBeTrue();
@@ -121,7 +131,7 @@ describe('worker registry — reading liveness', () => {
   it('treats a worker polling every queue as serving this one', () => {
     // The in-process runtime, which polls with no queue at all.
     const queues: QueueWorkers[] = [
-      {taskQueue: ANY_TASK_QUEUE, workflowPolledAt: 1_000},
+      {taskQueue: ANY_TASK_QUEUE, workflowPolledAt: 1_000, workers: []},
     ];
 
     expect(isQueueServed(queues, 'anything', 'workflow', 1_000)).toBeTrue();
@@ -129,7 +139,7 @@ describe('worker registry — reading liveness', () => {
 
   it('lets a stale wildcard poll go stale like any other', () => {
     const queues: QueueWorkers[] = [
-      {taskQueue: ANY_TASK_QUEUE, workflowPolledAt: 1_000},
+      {taskQueue: ANY_TASK_QUEUE, workflowPolledAt: 1_000, workers: []},
     ];
     const now = 1_000 + QUEUE_STALE_MS + 1;
 

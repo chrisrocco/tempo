@@ -483,12 +483,61 @@ export const QUEUE_STALE_MS = 10_000;
  * this exists to answer, and claiming more would mean inventing an identity the
  * protocol does not have.
  */
+/**
+ * One worker process, in one role, as the server has observed it.
+ *
+ * A worker is only ever known by having asked for work — there is no
+ * registration, so a process that crashes before its first poll is
+ * indistinguishable from one that was never deployed. Answering *that* needs
+ * process state from the deployment tier, not this.
+ *
+ * A process running both loops appears **twice**, once per role, under one
+ * identity. That is deliberate: the roles poll independently and fail
+ * independently, and a worker whose activity loop is wedged while its workflow
+ * loop is healthy is a real and confusing state that one merged row would hide.
+ */
+export interface WorkerInfo {
+  /**
+   * What the worker calls itself. `${pid}@${hostname}` by default, matching the
+   * convention Temporal uses, so the string is something an operator can act on
+   * — find the process, read its logs — rather than an opaque handle.
+   *
+   * Chosen by the worker and never verified. Two processes that claim the same
+   * identity are counted once, which is a misconfiguration this cannot detect
+   * and does not try to.
+   */
+  identity: string;
+  role: WorkerRole;
+  /** The pool it polls; `ANY_TASK_QUEUE` when it polls every one. */
+  taskQueue: string;
+  /** Epoch ms of its most recent poll. */
+  lastPolledAt: number;
+  /**
+   * Holding a task right now — which is *why* it may have stopped polling.
+   *
+   * The field that makes a quiet queue readable. The activity loop is
+   * sequential, so a worker running a 60-second activity polls nothing for 60
+   * seconds and looks exactly like one that died. Holding a live lease is the
+   * positive evidence that separates them, and it is the reason a poll carries
+   * an identity at all.
+   */
+  busy: boolean;
+}
+
 export interface QueueWorkers {
   taskQueue: string;
   /** Epoch ms of the last workflow-task poll, absent if there has never been one. */
   workflowPolledAt?: number;
   /** Epoch ms of the last activity-task poll. */
   activityPolledAt?: number;
+  /**
+   * The workers seen on this queue, newest poll first.
+   *
+   * The two timestamps above are the aggregate — "something asked" — and remain
+   * the right answer to "is this pool served at all". This is the breakdown, and
+   * the only thing that can say *how many* and *which*.
+   */
+  workers: WorkerInfo[];
 }
 
 /**
@@ -497,14 +546,15 @@ export interface QueueWorkers {
  * Defined here, beside the type, so the CLI and the dashboard cannot drift into
  * two different answers — the same reason `isStuck` lives here.
  *
- * **A busy worker looks like an absent one.** The activity loop is sequential:
- * it awaits the activity it claimed before polling again, so a worker running a
- * single 60-second activity stops polling for 60 seconds and its queue goes
- * stale. Both readings — nothing is serving this queue, or everything serving
- * it is saturated — are things an operator wants to know, and this cannot tell
- * them apart. Callers should say what was observed (nothing has polled) rather
- * than what it implies (no worker exists). Distinguishing them needs
- * outstanding-lease tracking, which is a bigger change than this one.
+ * **A busy worker used to look like an absent one.** The activity loop is
+ * sequential: it awaits the activity it claimed before polling again, so a
+ * worker running a single 60-second activity stops polling for 60 seconds and
+ * its queue goes stale. That is now distinguishable — a worker holding a live
+ * lease is reported `busy` (see `WorkerInfo`), and a busy worker serves its
+ * queue however long it has been since it last asked for more.
+ *
+ * The recency test remains for the idle case, which is the common one: a worker
+ * with nothing to do holds no lease and is known only by polling.
  */
 export function isQueueServed(
   queues: QueueWorkers[],
@@ -517,9 +567,31 @@ export function isQueueServed(
     // A worker polling every queue serves this one too.
     if (q.taskQueue !== taskQueue && q.taskQueue !== ANY_TASK_QUEUE)
       return false;
+    if (q.workers.some((w) => w.role === role && w.busy)) return true;
     const at = q[field];
     return at !== undefined && now - at <= QUEUE_STALE_MS;
   });
+}
+
+/**
+ * The workers that serve `taskQueue` in `role`, including the ones polling
+ * every queue.
+ *
+ * Beside `isQueueServed` and for the same reason: "a worker on `*` serves
+ * `email` too" is a rule, and two clients applying it differently would
+ * disagree about how big a fleet is. Returns every worker ever seen, however
+ * long ago — staleness is `lastPolledAt`, which the caller can read, and
+ * filtering here would hide the worker that went quiet, which is usually the
+ * one being looked for.
+ */
+export function workersServing(
+  queues: QueueWorkers[],
+  taskQueue: string,
+  role: WorkerRole,
+): WorkerInfo[] {
+  return queues
+    .filter((q) => q.taskQueue === taskQueue || q.taskQueue === ANY_TASK_QUEUE)
+    .flatMap((q) => q.workers.filter((w) => w.role === role));
 }
 
 /**
@@ -579,8 +651,16 @@ export interface WorkflowService {
    * runtime: one set of loops there serves every execution regardless of how it
    * was routed, so `createLocalRuntime` keeps working as a test harness whatever
    * queue names a workflow uses. A deployed worker always names its queue.
+   *
+   * `identity` names the worker asking. Optional, because a client that does
+   * not supply one still gets tasks — it is only the fleet view that suffers,
+   * reporting that something polled without being able to say what. See
+   * `WorkerInfo`.
    */
-  pollWorkflowTask(taskQueue?: string): Promise<WorkflowTask | undefined>;
+  pollWorkflowTask(
+    taskQueue?: string,
+    identity?: string,
+  ): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
     result: WorkflowTaskResult,
@@ -594,7 +674,10 @@ export interface WorkflowService {
    */
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   /** Claim the next activity task on `taskQueue`; omitted means any (see above). */
-  pollActivityTask(taskQueue?: string): Promise<LeasedActivityTask | undefined>;
+  pollActivityTask(
+    taskQueue?: string,
+    identity?: string,
+  ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /**
    * Report that this attempt is still alive. Renews the task's lease so it is not

@@ -22,19 +22,26 @@
  * refills almost immediately, and until it does the honest answer is "nothing
  * has polled yet".
  *
- * ## Polls, not workers
+ * ## Workers, now, and not only polls
  *
- * Nothing in `pollWorkflowTask` or `pollActivityTask` carries a worker
- * identity, so the server cannot count workers or name them — only observe that
- * *something* asked. Adding an identity to the poll would make "3 workers on
- * `default`, one silent for 5 minutes" possible, and is the natural next step;
- * it is a change to the worker-facing protocol and every implementation of it,
- * which is why it is not folded in here.
+ * Polls carry an identity, so this counts and names workers rather than merely
+ * observing that *something* asked. The aggregate timestamps are still kept
+ * beside the per-worker rows: they answer "is this pool served at all", which
+ * survives a worker that never identified itself, and they are the cheapest
+ * thing for a caller that only needs a yes or no.
  *
- * See `isQueueServed` in `protocol/service.ts` for how a reading is
- * interpreted, including the case a poll record cannot distinguish: a
- * sequential worker busy inside a long activity stops polling, and looks
- * exactly like one that is gone.
+ * An unidentified poll still updates the aggregate and creates no worker row.
+ * That is the honest reading — something asked, and it did not say who — and it
+ * keeps `createLocalRuntime` and any hand-rolled client working unchanged.
+ *
+ * ## What it still cannot see
+ *
+ * Whether a worker is *busy* is not knowable from polls, and is not decided
+ * here: the activity loop is sequential, so a worker mid-activity stops asking
+ * and looks identical to one that died. `server_core` joins these rows against
+ * the outstanding leases to settle that, because the lease tables are the only
+ * things that know. See `isQueueServed` in `protocol/service.ts` for how the
+ * combined reading is interpreted.
  */
 
 import {
@@ -49,12 +56,31 @@ export interface WorkerRegistry {
    * including the ones that come back empty — an idle poll is the strongest
    * evidence there is that a worker is alive and waiting.
    *
-   * `undefined` means the caller polls every queue; it is recorded under
-   * `ANY_TASK_QUEUE`.
+   * `taskQueue` `undefined` means the caller polls every queue; it is recorded
+   * under `ANY_TASK_QUEUE`. `identity` `undefined` means the caller did not say
+   * who it is: the queue's aggregate still moves, and no worker row appears.
    */
-  recordPoll(role: WorkerRole, taskQueue: string | undefined): void;
-  /** Every queue that has ever been polled, in the order first seen. */
+  recordPoll(
+    role: WorkerRole,
+    taskQueue: string | undefined,
+    identity?: string,
+  ): void;
+  /**
+   * Every queue that has ever been polled, in the order first seen, each with
+   * the workers seen on it.
+   *
+   * `busy` is always `false` here — this table cannot know, and says so by
+   * reporting the conservative value rather than omitting the field. The caller
+   * that can know fills it in; see `server_core.listQueues`.
+   */
   queues(): QueueWorkers[];
+}
+
+/** A worker row, before anything knows whether it is busy. */
+interface Observed {
+  identity: string;
+  role: WorkerRole;
+  lastPolledAt: number;
 }
 
 export function createWorkerRegistry(
@@ -63,26 +89,65 @@ export function createWorkerRegistry(
   // Insertion-ordered, which is what a Map gives us, so a listing is stable
   // between reads rather than reshuffling under a polling dashboard.
   const seen = new Map<string, QueueWorkers>();
+  // Keyed by queue, then by role and identity together — a row per role,
+  // because a process running both loops fails at them independently. The
+  // composite is only ever a key: both halves are kept on the value rather than
+  // parsed back out of it, so no separator has to be chosen that an
+  // operator-supplied identity cannot contain.
+  const workers = new Map<string, Map<string, Observed>>();
+
+  /** Distinct per (role, identity); never parsed, only compared. */
+  function workerKeyOf(role: WorkerRole, identity: string): string {
+    return `${role} ${identity}`;
+  }
 
   return {
-    recordPoll(role, taskQueue) {
+    recordPoll(role, taskQueue, identity) {
       const key = taskQueue ?? ANY_TASK_QUEUE;
       let entry = seen.get(key);
       if (!entry) {
-        entry = {taskQueue: key};
+        entry = {taskQueue: key, workers: []};
         seen.set(key, entry);
       }
       // Mutated in place rather than replaced: this runs on every poll from
       // every worker — hundreds a second at the default 5ms idle interval — and
       // it is the hottest write in the server.
-      if (role === 'workflow') entry.workflowPolledAt = now();
-      else entry.activityPolledAt = now();
+      const at = now();
+      if (role === 'workflow') entry.workflowPolledAt = at;
+      else entry.activityPolledAt = at;
+      if (identity === undefined) return;
+      let onQueue = workers.get(key);
+      if (!onQueue) {
+        onQueue = new Map();
+        workers.set(key, onQueue);
+      }
+      const workerKey = workerKeyOf(role, identity);
+      const worker = onQueue.get(workerKey);
+      if (worker) worker.lastPolledAt = at;
+      else onQueue.set(workerKey, {identity, role, lastPolledAt: at});
     },
 
     queues() {
       // Copied, so a caller cannot hold a reference that keeps changing under
       // it while it renders.
-      return [...seen.values()].map((q) => ({...q}));
+      return [...seen.values()].map((q) => ({
+        ...q,
+        workers: [...(workers.get(q.taskQueue)?.values() ?? [])]
+          .map((observed) => ({
+            identity: observed.identity,
+            role: observed.role,
+            taskQueue: q.taskQueue,
+            lastPolledAt: observed.lastPolledAt,
+            busy: false,
+          }))
+          // Newest poll first, tie-broken by identity so two reads of an idle
+          // fleet cannot disagree about the order.
+          .sort(
+            (a, b) =>
+              b.lastPolledAt - a.lastPolledAt ||
+              (a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0),
+          ),
+      }));
     },
   };
 }

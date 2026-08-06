@@ -12,9 +12,28 @@
  * while doing no work and hammering a dead endpoint. See planning/tickets/02.
  */
 
+import * as os from 'node:os';
 import type {WorkflowService} from '../protocol';
 import type {ActivityWorker} from './activity_worker';
 import type {WorkflowWorker} from './workflow_worker';
+
+/**
+ * What this process calls itself when it asks for work.
+ *
+ * `${pid}@${hostname}`, which is the convention Temporal's SDKs use, and it is
+ * chosen for what an operator does next: both halves are things you can act on
+ * — ssh to the host, find the pid, read its logs — where a random id would only
+ * be a handle to something you still have to locate.
+ *
+ * Computed here rather than anywhere lower down. `core/` may not read the
+ * process or the clock at all, and identity is exactly the kind of ambient fact
+ * that ban exists to keep out of replay; the worker is the outermost layer and
+ * the only one that legitimately knows where it is running.
+ *
+ * Read once per process rather than per poll: `os.hostname()` can hit the
+ * network on a misconfigured host, and this runs every few milliseconds.
+ */
+const DEFAULT_IDENTITY = `${process.pid}@${os.hostname()}`;
 
 // Ref'd on purpose: a worker process must stay alive between polls. The loops are
 // bounded by an explicit stop(), so this never keeps a process alive spuriously.
@@ -40,6 +59,16 @@ export interface WorkerLoopOptions {
    * Omitted means "any queue", which only the in-process runtime should use.
    */
   taskQueue?: string;
+  /**
+   * What this worker calls itself, sent on every poll so the server can count
+   * and name the fleet. Defaults to `${pid}@${hostname}`.
+   *
+   * Worth overriding wherever the process is not where an operator would look —
+   * a container id or a deployment name beats a pid on a host nobody can ssh
+   * to. Not verified and not unique by construction: two processes claiming one
+   * identity are counted once. See `WorkerInfo`.
+   */
+  identity?: string;
   /** Backoff when a poll returns no task. */
   pollIntervalMs?: number;
   /** Delay after the first failure; doubles per consecutive failure. Default 50ms. */
@@ -128,8 +157,9 @@ export function runWorkflowWorker(
   worker: WorkflowWorker,
   options: WorkerLoopOptions = {},
 ): WorkerLoop {
+  const identity = options.identity ?? DEFAULT_IDENTITY;
   return runPollLoop('workflow worker', options, async () => {
-    const task = await service.pollWorkflowTask(options.taskQueue);
+    const task = await service.pollWorkflowTask(options.taskQueue, identity);
     if (!task) return false;
     let result;
     try {
@@ -159,8 +189,9 @@ export function runActivityWorker(
   worker: ActivityWorker,
   options: WorkerLoopOptions = {},
 ): WorkerLoop {
+  const identity = options.identity ?? DEFAULT_IDENTITY;
   return runPollLoop('activity worker', options, async () => {
-    const task = await service.pollActivityTask(options.taskQueue);
+    const task = await service.pollActivityTask(options.taskQueue, identity);
     if (!task) return false;
     // One attempt per delivery; the lease redelivers on failure/crash
     // (at-least-once), unless the attempt heartbeats to keep its claim.

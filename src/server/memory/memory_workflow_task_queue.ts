@@ -39,7 +39,14 @@ export class MemoryWorkflowTaskQueue implements WorkflowTaskQueue {
     if (!this.pending.includes(workflowId)) this.pending.push(workflowId);
   }
 
-  poll(taskQueue?: string): {token: TaskToken; workflowId: string} | undefined {
+  leaseHolders(): Set<string> {
+    return this.leases.holders();
+  }
+
+  poll(
+    taskQueue?: string,
+    identity?: string,
+  ): {token: TaskToken; workflowId: string} | undefined {
     for (const id of this.leases.reclaimExpired()) {
       // redeliver crashed workers' tasks
       this.inFlight.delete(id);
@@ -54,7 +61,10 @@ export class MemoryWorkflowTaskQueue implements WorkflowTaskQueue {
     if (index < 0 || this.pending.length === 0) return undefined;
     const [workflowId] = this.pending.splice(index, 1);
     this.inFlight.add(workflowId);
-    return {token: this.leases.lease(workflowId, this.leaseMs), workflowId};
+    return {
+      token: this.leases.lease(workflowId, this.leaseMs, identity),
+      workflowId,
+    };
   }
 
   complete(token: TaskToken): void {
