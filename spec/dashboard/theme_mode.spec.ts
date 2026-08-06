@@ -9,6 +9,7 @@
  * colour. Neither is reachable from a browser without disabling storage.
  */
 
+import 'jasmine';
 import {
   DEFAULT_THEME,
   STORAGE_KEY,

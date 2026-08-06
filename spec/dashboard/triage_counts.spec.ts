@@ -8,6 +8,7 @@
  * confident zero under a naive count.
  */
 
+import 'jasmine';
 import {ANY_TASK_QUEUE} from '../../src/protocol';
 import type {ExecutionGroup, ExecutionGroups} from '../../src/protocol';
 import {triageCounts} from '../../dashboard/app/triage_counts';

@@ -8,6 +8,7 @@
  * number, and neither would be noticed by looking at the page.
  */
 
+import 'jasmine';
 import type {HistoryEvent} from '../../src/protocol/history_events';
 import {
   EVENT_CATEGORIES,

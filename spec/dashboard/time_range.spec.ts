@@ -10,6 +10,7 @@
  * Runs without a browser because `time_range.ts` touches no DOM.
  */
 
+import 'jasmine';
 import {
   TIME_RANGES,
   isTimeRange,

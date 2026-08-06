@@ -8,6 +8,7 @@
  * know which three did not take.
  */
 
+import 'jasmine';
 import {
   failuresOf,
   runBatch,
