@@ -45,16 +45,26 @@ import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
 import {
   ANY_TASK_QUEUE,
   isQueueServed,
+  workersServing,
   type ExecutionGroup,
   type ExecutionGroups,
   type QueueWorkers,
+  type WorkerInfo,
   type WorkerRole,
 } from 'workflow-engine/protocol';
 import {client} from './client.js';
 import {Poller} from './poller.js';
 import {executionsHref} from './routes.js';
 import {formatDuration} from './history_view.js';
-import {absoluteTime, badge, heading, panel, surface, table} from './theme.js';
+import {
+  absoluteTime,
+  badge,
+  heading,
+  panel,
+  relativeTime,
+  surface,
+  table,
+} from './theme.js';
 
 export class QueuesView extends LitElement {
   private readonly groups = new Poller<ExecutionGroups>(this, (signal) =>
@@ -141,11 +151,20 @@ export class QueuesView extends LitElement {
   ];
 
   /**
-   * A role's liveness pill.
+   * A role's liveness pill: whether a pool is served, and by how many.
    *
    * Three states, not two. Before the fleet has been read the honest answer is
    * "unknown", and rendering that as "absent" would raise an alarm on every
    * first paint.
+   *
+   * The pill used to hedge — "no worker, or all of them busy" — because a poll
+   * record could not tell those apart. It can now: a worker holding a lease is
+   * reported busy and counts as serving, so "none" means none, and a saturated
+   * pool reads as `act 2/2 busy` rather than as an absent one.
+   *
+   * The count is omitted when no worker has identified itself, which is what a
+   * client polling without an identity looks like. Rendering "0" there would
+   * claim the pool is empty on the strength of something that never said.
    */
   private rolePill(taskQueue: string, role: WorkerRole): TemplateResult {
     const queues = this.queues.value;
@@ -153,14 +172,40 @@ export class QueuesView extends LitElement {
     if (queues === undefined)
       return html`<span class="badge unknown">${label} ?</span>`;
     const served = isQueueServed(queues, taskQueue, role, Date.now());
-    return html`<span class="badge ${served ? 'live' : 'absent'}"
-      title=${
-        served
-          ? `something is polling ${taskQueue} for ${role} work`
-          : `nothing is polling ${taskQueue} for ${role} work — no worker, or all of them busy`
-      }
-      >${label} ${served ? 'live' : 'none'}</span
+    const workers = workersServing(queues, taskQueue, role);
+    const busy = workers.filter((w) => w.busy).length;
+    const text = !served
+      ? 'none'
+      : workers.length === 0
+        ? 'live'
+        : busy === 0
+          ? `${workers.length}`
+          : `${busy}/${workers.length} busy`;
+    return html`<span
+      class="badge ${served ? 'live' : 'absent'}"
+      title=${this.pillTitle(taskQueue, role, served, workers)}
+      >${label} ${text}</span
     >`;
+  }
+
+  /** The pill's tooltip: who, and when each was last heard from. */
+  private pillTitle(
+    taskQueue: string,
+    role: WorkerRole,
+    served: boolean,
+    workers: WorkerInfo[],
+  ): string {
+    if (workers.length === 0)
+      return served
+        ? `something is polling ${taskQueue} for ${role} work, without identifying itself`
+        : `nothing has polled ${taskQueue} for ${role} work recently`;
+    const now = Date.now();
+    return workers
+      .map(
+        (w) =>
+          `${w.identity} — ${w.busy ? 'busy' : `idle, last polled ${relativeTime(w.lastPolledAt, now)}`}`,
+      )
+      .join('\n');
   }
 
   /** A count, dimmed at zero so the non-zero ones are what the eye lands on. */

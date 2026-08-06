@@ -77,13 +77,13 @@ Usage:
       Status, what the execution is waiting on, and its history. Long
       histories show the most recent page; --from=0 starts at the beginning.
   tempo queues [--json]
-      Which task queues workers are polling, per role. The question the
+      Which workers are polling each task queue, per role. The question the
       execution commands cannot answer: an execution parked on an activity
       reads the same whether a worker is about to claim it or nothing has
-      ever polled its queue. A queue that reads "live" is being asked for
-      work right now. Note that a worker busy inside a long activity stops
-      polling, so a silent queue means "nothing is asking" — which is
-      either no worker, or every worker saturated.
+      ever polled its queue. Each role reads as a worker count — "3" is
+      three idle workers, "2 busy/3" is three of which two are mid-task,
+      and "never" means nothing has ever asked. A worker that has not
+      identified itself reads as "live" instead of a count.
 
 Options:
   --server=URL   Server to talk to. Default $TEMPO_SERVER_URL, else

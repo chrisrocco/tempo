@@ -23,6 +23,9 @@ import {
   ANY_TASK_QUEUE,
   QUEUE_STALE_MS,
   isStuck,
+  workersServing,
+  type QueueWorkers,
+  type WorkerRole,
   type ExecutionDetail,
   type DescribeOptions,
   type ExecutionFilter,
@@ -389,8 +392,8 @@ export async function listQueues(
     const c = counts.get(name);
     process.stdout.write(
       `${name.padEnd(width)}  ` +
-        `${describePoll(q?.workflowPolledAt, now).padEnd(10)}  ` +
-        `${describePoll(q?.activityPolledAt, now).padEnd(10)}  ` +
+        `${describeRole(queues, name, 'workflow', q?.workflowPolledAt, now).padEnd(10)}  ` +
+        `${describeRole(queues, name, 'activity', q?.activityPolledAt, now).padEnd(10)}  ` +
         `${String(c?.running ?? 0).padStart(7)}  ` +
         `${String(c?.stuck ?? 0).padStart(5)}  ` +
         `${String(c?.failed ?? 0).padStart(6)}  ` +
@@ -402,6 +405,32 @@ export async function listQueues(
       `\n${ANY_TASK_QUEUE} is a worker polling every queue — the in-process runtime does this.\n`,
     );
   return 0;
+}
+
+/**
+ * How one role's fleet reads in a column.
+ *
+ * Prefers the worker count over the poll timestamp, because it says strictly
+ * more: `2 busy/3` is a saturated pool, `3` is an idle one, and both used to
+ * render as the same `live`. A busy worker is serving even though it stopped
+ * polling, which is why the timestamp alone was never enough — see
+ * `isQueueServed`.
+ *
+ * Falls back to the timestamp when nothing has identified itself, which is what
+ * a client polling without an identity looks like. Reporting `0` there would
+ * assert an empty pool on the strength of something that never said who it was.
+ */
+function describeRole(
+  queues: QueueWorkers[],
+  taskQueue: string,
+  role: WorkerRole,
+  polledAt: number | undefined,
+  now: number,
+): string {
+  const workers = workersServing(queues, taskQueue, role);
+  if (workers.length === 0) return describePoll(polledAt, now);
+  const busy = workers.filter((w) => w.busy).length;
+  return busy === 0 ? String(workers.length) : `${busy} busy/${workers.length}`;
 }
 
 /** How a single role's last poll reads on one line. */

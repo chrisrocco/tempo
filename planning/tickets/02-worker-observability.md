@@ -105,6 +105,49 @@ track last-seen per worker. This is what `tempo status` needs to report connecte
 worker counts and staleness, and the foundation for queue depth / lease age
 stats. Largest change: touches `protocol`, `server_host`, and `worker_loops`.
 
+> **Tier 3 landed — identity on the poll, joined to the lease table.** Polls
+> carry an `identity` (`${pid}@${hostname}` by default, the convention Temporal
+> uses); `worker_registry` keeps a row per worker per role; `WorkerInfo` carries
+> it on `QueueWorkers`, and `workersServing` sits beside `isQueueServed` so the
+> CLI and dashboard cannot drift.
+>
+> **The choice the ticket left open was "rides along with polls _or_ a dedicated
+> register call", and the answer is that identity-on-poll alone would not have
+> fixed what T3 was raised for.** The motivating complaint is that a quiet queue
+> could mean "no worker" or "all of them busy". Adding identity gives the names
+> of the workers you cannot account for without saying why — a busy worker still
+> stops polling, and our activity loop is sequential, so one 60-second activity
+> makes a worker invisible. Temporal has the same ambiguity from poller info
+> alone, and answered it years later with a separate 60-second worker heartbeat
+> (`temporal worker list`).
+>
+> A heartbeat was not needed here, because the missing evidence already existed:
+> `LeaseTable` backs both task queues, so the server always knew which tasks
+> were claimed — it just did not know by whom. Recording the holder closes it.
+> Silent **and** holding a live lease is busy; silent and holding nothing is
+> gone. One field on the poll, one on the lease.
+>
+> Three decisions:
+>
+> - **`busy` is decided in `server_core`, not the registry.** The registry
+>   watches polls, the lease tables watch claims, and neither should learn about
+>   the other. `listQueues` is the only thing holding both.
+> - **A process running both loops is two rows.** They poll and fail
+>   independently; a wedged activity loop beside a healthy workflow loop is a
+>   real state a merged row would hide.
+> - **`isQueueServed` counts a busy worker as serving.** The recency test stays
+>   for the idle case, which is the common one. `holders()` filters by deadline
+>   rather than trusting the table, because expired leases are only swept on the
+>   next poll — on an idle queue a dead worker's lease would otherwise vouch for
+>   it forever.
+>
+> **Not done:** no capacity or saturation reporting, which is the other half of
+> Temporal's heartbeat. The activity loop is strictly sequential, so "available
+> task slots" is always 1 or 0 and would say nothing that `busy` does not. And a
+> worker that crashes _before its first poll_ is still invisible — there is no
+> registration, so that stays `tempo status` reading process state, which is the
+> deployment API's job.
+
 ## Acceptance criteria
 
 - [x] **T1:** a worker that cannot reach its server logs a distinguishable error
@@ -112,15 +155,16 @@ stats. Largest change: touches `protocol`, `server_host`, and `worker_loops`.
 - [x] **T1:** error-path backoff is exponential and capped; idle polling cadence
       is unchanged.
 - [x] **T2:** `health` exists on the RPC surface and `RemoteService` exposes it.
-- [ ] **T3:** the server can enumerate live workers by role with a last-seen
+- [x] **T3:** the server can enumerate live workers by role with a last-seen
       timestamp.
 - [ ] `npm run typecheck` clean; `npm test` green.
 
 ## Note for the deployment API
 
-Until Tier 3 lands, `tempo status` can only report **systemd process state** per
-replica plus what the server says about itself — which since T2 is a real
-`health` probe (uptime, durable vs. in-memory, data dir) rather than a ping
-inferred from an unrelated call. Still not whether workers are actually working:
-that is exactly what T3 adds. The documented CLI surface in
-[`src/cli/cli.ts`](../../src/cli/cli.ts) should not promise more than that.
+`tempo status` can now report **systemd process state** per replica, a real
+`health` probe of the server (T2 — uptime, durable vs. in-memory, data dir), and
+connected worker counts with staleness and whether each is mid-task (T3). What
+it still cannot report is a worker that never polled at all: nothing registers,
+so a process that crashes on boot is indistinguishable from one that was never
+deployed. That gap is process state, not protocol, and belongs to the deployment
+API rather than to this ticket.
