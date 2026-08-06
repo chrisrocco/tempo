@@ -32,7 +32,7 @@
  */
 
 import * as path from 'node:path';
-import ts from 'typescript';
+import * as ts from 'typescript';
 
 /** A style violation, located precisely enough to jump to. */
 export interface StyleViolation {

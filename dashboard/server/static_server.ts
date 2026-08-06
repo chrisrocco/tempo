@@ -34,7 +34,7 @@
  */
 
 import {readFileSync} from 'node:fs';
-import path from 'node:path';
+import * as path from 'node:path';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

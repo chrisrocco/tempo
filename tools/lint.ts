@@ -13,7 +13,7 @@
  * here and in CI's lint step.
  */
 
-import path from 'node:path';
+import * as path from 'node:path';
 import {checkBoundaries, formatViolations, readSourceFiles} from './boundaries';
 import {
   checkRepoDependencies,
