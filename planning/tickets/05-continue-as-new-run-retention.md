@@ -1,7 +1,17 @@
 # 05 — A previous run is unreachable after continue-as-new
 
 **Type:** decision (storage + retention) · **Blocks:** run-chain navigation in the
-dashboard
+dashboard · **Tracked in:** [#33](https://github.com/chrisrocco/tempo/issues/33)
+
+> **Status: open, parked.** Not urgent — nothing is broken today. #33 carries the
+> Temporal comparison and the costed shape of each option; this file is the
+> original statement of the problem.
+>
+> Two things established since this was written, both in #33: our `runId` is a
+> monotonic counter, so chain navigation is arithmetic and needs none of
+> Temporal's pointer fields; and the framing below is slightly off — retaining
+> runs does not undo continue-as-new, which bounds _per-run history_, not total
+> stored bytes. Those are separate problems.
 
 ## Problem
 
