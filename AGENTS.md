@@ -119,6 +119,42 @@ others refer to it by path. The determinism boundary is owned by
 `src/workflow.ts`, and `core/` modules point at it. Duplicating a concept across
 three fileoverviews recreates the drift this pattern exists to prevent.
 
+### Decisions, including the ones you didn't take
+
+A decision is documentation with a shape of its own, and the rule above is not
+enough by itself: "design rationale" says the choice was explained, not that the
+**alternatives** were. Record what was rejected and why — that is the half that
+stops the next reader relitigating something already settled, and the half that
+tells them when reopening it *would* be right.
+
+-   **The decision lives with the code it constrains**, in the `@fileoverview`
+    of the module that owns the idea. Why the listing's order is not
+    configurable is in `server/execution_query.ts`; why the URL carries a
+    duration rather than an instant is in `dashboard/app/time_range.ts`. If you
+    can't name the owning module, re-read
+    [Homeless documentation is a design smell](#homeless-documentation-is-a-design-smell)
+    — it's the same signal.
+-   **Say what it cost to decide, not only what was decided.** "No sort control"
+    is a note. "No sort control, because the cursor *is* the sort key, so a
+    second ordering silently resolves old links into a differently-ordered set"
+    is a decision — it survives someone who disagrees.
+-   **A ticket in `planning/` that lands gets a `> **Status:** …` blockquote at
+    the top**, naming what shipped, any deviation from the shape it proposed,
+    and what was deliberately left undone. The ticket keeps the problem
+    statement, the code keeps the rationale, and the block is the link between
+    them. See `planning/tickets/04-validate-markers-against-commands.md`.
+-   **A decision *not* to build something still lands** — same block, same
+    place, with the reasoning that made waiting the cheap option. Nothing was
+    built, so no module can host it, which makes the ticket its only home. See
+    ticket 07.
+-   **When a decision outgrows a fileoverview, open a GitHub issue** and link it
+    from the ticket, rather than growing a design document that no code change
+    will ever force someone to revisit. See ticket 05.
+
+The forcing function is the one the rest of this section relies on: a decision
+recorded beside the code it governs is in the diff when that code changes, so
+review catches it going stale.
+
 ### When you're tempted to add a doc file
 
 Find the module that owns the idea and put it there. If genuinely no module owns
