@@ -244,3 +244,89 @@ describe('conventions — DOM sink writes', () => {
     expect(violations).toEqual([]);
   });
 });
+
+describe('conventions — the shell and the bundle behind it', () => {
+  it('rejects a module script in the page the dashboard ships', () => {
+    const violations = checkConventions([
+      file(
+        'dashboard/app/index.html',
+        '<script type="module" src="/app.js"></script>',
+      ),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('classic-script');
+    expect(violations[0].message).toContain('classic script');
+  });
+
+  it('accepts the deferred classic script it asks for', () => {
+    const violations = checkConventions([
+      file('dashboard/app/index.html', '<script defer src="/app.js"></script>'),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  // The rule has to survive being explained: `index.html` carries a comment
+  // saying why the script is classic, and that comment names the banned form.
+  it('does not read a comment about the rule as breaking it', () => {
+    const violations = checkConventions([
+      file(
+        'dashboard/app/index.html',
+        '<!--\n  Not `type="module"`: a downstream build rejects one.\n-->\n<script defer src="/app.js"></script>',
+      ),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * The half that is easy to miss: the shell can be perfectly classic while the
+   * bundle behind it is ESM, and the only symptom is a blank page whose HTML and
+   * JavaScript both look right.
+   */
+  it('rejects an ESM bundle behind a classic script', () => {
+    const violations = checkConventions([
+      file(
+        'dashboard/package.json',
+        '{"scripts": {"build": "esbuild app/app.ts --bundle --format=esm --outdir=dist"}}',
+      ),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('bundle-format');
+    expect(violations[0].message).toContain('--format=iife');
+  });
+
+  it('accepts the iife build the classic script needs', () => {
+    const violations = checkConventions([
+      file(
+        'dashboard/package.json',
+        '{"scripts": {"build": "esbuild app/app.ts --bundle --format=iife --outdir=dist"}}',
+      ),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  // The engine's own manifest is not the dashboard's, and nothing bundles it.
+  it('asks nothing of the manifests that build no bundle', () => {
+    const violations = checkConventions([
+      file('package.json', '{"scripts": {"x": "esbuild --format=esm"}}'),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  // A TypeScript rule reading an HTML page would report nonsense about both.
+  it('does not run the TypeScript rules over a page', () => {
+    const violations = checkConventions([
+      file(
+        'dashboard/app/index.html',
+        '<script defer src="/app.js"></script>\n<p>import path from "node:path"</p>',
+      ),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+});

@@ -346,14 +346,24 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
   return violations;
 }
 
-/** Read every `.ts` file under `root`, returning repo-relative POSIX paths. */
-export function readSourceFiles(root: string, dirs: string[]): SourceFile[] {
+/**
+ * Read every matching file under `root`, returning repo-relative POSIX paths.
+ *
+ * `extensions` defaults to TypeScript because that is what the boundary rules
+ * are about; `tools/conventions.ts` asks for `.html` as well, since one of its
+ * rules is about the shell the dashboard ships.
+ */
+export function readSourceFiles(
+  root: string,
+  dirs: string[],
+  extensions: readonly string[] = ['.ts'],
+): SourceFile[] {
   const files: SourceFile[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(path.join(root, dir))) {
       const rel = path.posix.join(dir, entry);
       if (statSync(path.join(root, rel)).isDirectory()) walk(rel);
-      else if (rel.endsWith('.ts'))
+      else if (extensions.some((extension) => rel.endsWith(extension)))
         files.push({
           path: rel,
           text: readFileSync(path.join(root, rel), 'utf8'),

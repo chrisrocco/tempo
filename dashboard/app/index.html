@@ -2,7 +2,25 @@
 <meta charset="utf-8" />
 <title>tempo</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<script type="module" src="/app.js"></script>
+<!--
+  A classic script, not `type="module"` — a downstream build system consumes
+  this shell and does not accept a module script.
+
+  It is half of a pair: the bundle is built `--format=iife`
+  (`dashboard/package.json`). esbuild's ESM output carries `import`/`export`
+  statements whenever the entry exports something or a dependency is left
+  external, and those are a syntax error in a classic script — the page dies
+  before anything renders. This entry does neither today, so the two formats
+  currently differ only by the wrapper; the pairing is what stops the first
+  export from breaking the page silently. `tools/conventions.ts` checks that the
+  two stay agreed, since neither file mentions the other and each looks correct
+  on its own.
+
+  `defer` restores the timing a module script had by default: run after parsing,
+  so `<tempo-app>` below is already in the document when the custom elements are
+  defined.
+-->
+<script defer src="/app.js"></script>
 <style>
   /*
     The palettes, and the only place they are declared.
