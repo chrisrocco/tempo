@@ -2,7 +2,6 @@
   "name": "@tempo/dashboard",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "description": "The tempo dashboard: a Lit app and the small server that hands it to a browser and forwards its RPC calls.",
   "scripts": {
     "build": "esbuild app/app.ts app/index.html --bundle --format=iife --sourcemap --outdir=dist --loader:.html=copy",

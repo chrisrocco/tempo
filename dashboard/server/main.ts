@@ -38,10 +38,16 @@ import {proxyRpc} from './rpc_proxy';
 
 const DEFAULT_ENGINE_URL = 'http://127.0.0.1:7233';
 
-// Resolved from the working directory rather than from `import.meta`, which is
-// banned repo-wide, and from this file's own location rather than the caller's
-// so `npm start -w @tempo/dashboard` works from anywhere in the tree.
-const packageRoot = path.resolve(process.argv[1] ?? '.', '..', '..');
+// `__dirname`, which is this file's own directory — so `npm start -w
+// @tempo/dashboard` works from anywhere in the tree, and so does a process
+// spawned with any working directory.
+//
+// It used to be `process.argv[1]`, which is the *entry* script rather than this
+// module: correct only while this file is the entry, and silently wrong the
+// first time something imported it. That reading of argv was a workaround for
+// `import.meta` being banned (tools/style.ts) with no `__dirname` to fall back
+// on. The package is CommonJS now, so there is one.
+const packageRoot = path.resolve(__dirname, '..');
 
 // The build output, not the sources: `app/` holds TypeScript the browser never
 // sees. `npm run build -w @tempo/dashboard` puts `index.html` and the bundle

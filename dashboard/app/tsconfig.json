@@ -8,9 +8,16 @@
   // engine's `protocol` entry rather than restating them, so a field added to a
   // projection is a compile error here. Nothing checked this code at all before
   // a config existed for it, so that error had nowhere to appear.
+  // `module`/`moduleResolution` are overridden because the root config is
+  // CommonJS for the Node half, and this half is neither: it is ESM source that
+  // esbuild bundles into an IIFE, so the module system is the bundler's problem
+  // and never reaches a browser. Inheriting CommonJS here would also break
+  // resolution of `workflow-engine/protocol` and of `lit`, which is ESM-only.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "types": []
   },
   "include": ["**/*.ts"]

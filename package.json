@@ -2,7 +2,6 @@
   "name": "workflow-engine",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "description": "A minimal-but-correct durable workflow engine (a small Temporal-shaped system).",
   "workspaces": [
     "dashboard"

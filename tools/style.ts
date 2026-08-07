@@ -18,13 +18,18 @@
  *    between a deliberate fire-and-forget and a forgotten `await`, and only the
  *    author knows which one it was.
  *
- * 2. **Top-level await in `bin/`.** Legal only under some module targets
- *    (TS1378). An entrypoint that uses it quietly constrains how the whole
- *    project may be compiled.
+ * 2. **Top-level await, anywhere.** The Node half of this repo is CommonJS
+ *    (`tsconfig.json` says why), and CommonJS has no top-level await — it is
+ *    TS1378, and a module that uses it does not run at all. This rule used to
+ *    cover `bin/` alone, back when the project was ESM and the concern was an
+ *    entrypoint quietly constraining how everything else could be compiled.
+ *    Entrypoints use `void run().then(…)`; so does everyone else now.
  *
- * 3. **`import.meta`.** Same reason, one level worse: it is a syntax error under
- *    CommonJS output rather than a diagnostic. Path resolution goes through
- *    `path.resolve` from the working directory instead.
+ * 3. **`import.meta`.** The same constraint, one level worse: a *syntax* error
+ *    under CommonJS rather than a diagnostic, so a single use breaks the file
+ *    for every reader of it. `__dirname` is what to reach for instead — the
+ *    reason the repo is CommonJS at all is a downstream build system that takes
+ *    `__dirname` and rejects `import.meta`.
  *
  * 4. **Unqualified browser globals in `dashboard/app/`.** `window.localStorage`,
  *    not `localStorage` — see `WINDOW_GLOBALS` for the list and the reasoning.
@@ -54,8 +59,12 @@ export interface StyleViolation {
   message: string;
 }
 
-/** Directories whose entrypoints must stay compilable under any module target. */
-const ENTRYPOINT_DIRS = ['bin/'];
+/**
+ * Where top-level `await` is checked: everywhere. Kept as a named constant
+ * because it was `['bin/']` until the Node half became CommonJS, and the empty
+ * prefix is the whole change — worth being able to see rather than infer.
+ */
+const TOP_LEVEL_AWAIT_DIRS = [''];
 
 /** Directories that run in a browser, where `window` is the ambient object. */
 const BROWSER_DIRS = ['dashboard/app/'];
@@ -230,7 +239,9 @@ export function checkStyle(
     if (relative.startsWith('..') || relative.includes('node_modules'))
       continue;
 
-    const isEntrypoint = ENTRYPOINT_DIRS.some((d) => relative.startsWith(d));
+    const bansTopLevelAwait = TOP_LEVEL_AWAIT_DIRS.some((d) =>
+      relative.startsWith(d),
+    );
     const isBrowser = BROWSER_DIRS.some((d) => relative.startsWith(d));
 
     const visit = (node: ts.Node): void => {
@@ -246,13 +257,13 @@ export function checkStyle(
           });
       }
 
-      if (isEntrypoint && ts.isAwaitExpression(node) && isTopLevel(node))
+      if (bansTopLevelAwait && ts.isAwaitExpression(node) && isTopLevel(node))
         violations.push({
           path: relative,
           line: lineOf(file, node),
           rule: 'top-level-await',
           message:
-            'top-level await is legal only under some module targets (TS1378) — use `void fn().then(…)` so the entrypoint does not constrain the build',
+            'top-level await does not exist in CommonJS (TS1378), and the Node half of this repo is CommonJS — use `void fn().then(…)`',
         });
 
       if (
