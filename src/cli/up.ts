@@ -21,30 +21,16 @@
  */
 
 import type {ChildProcess} from 'node:child_process';
-import * as path from 'node:path';
 import {startWorkflow} from './client';
 import {describeWorker} from './describe';
-import {forwardOutput, spawnEntry, stopChild, waitForLine} from './process';
-
-/**
- * The framework's own server main — shipped with the CLI, never user-built.
- *
- * Resolved from this module's own directory, so the CLI finds its server
- * wherever it is run from. It used to resolve against the *working directory*,
- * which assumed `npm run tempo` from the repo root and broke anywhere else —
- * a trade the comment here admitted to, taken because `import.meta` is banned
- * (`tools/style.ts`) and ESM left nothing else to use. CommonJS has
- * `__dirname`, so the trade is off.
- *
- * Two levels up from `src/cli/` is the package root; `bin/` sits beside `src/`.
- */
-const SERVER_ENTRY = path.resolve(
-  __dirname,
-  '..',
-  '..',
-  'bin',
-  'server-main.ts',
-);
+import type {Toolchain} from './ports/toolchain';
+import {
+  forwardOutput,
+  spawnLaunchable,
+  stopChild,
+  waitForLine,
+} from './process';
+import {createSourceToolchain} from './source_toolchain';
 
 /** One workflow to run to completion, for `up`'s one-shot mode. */
 export interface RunRequest {
@@ -102,6 +88,12 @@ export interface UpOptions {
    * instead of staying up until interrupted.
    */
   run?: RunRequest;
+  /**
+   * How targets become processes. Defaults to running them from the working
+   * tree (`source_toolchain.ts`); a build system supplies its own, and `up`
+   * never learns which it got.
+   */
+  toolchain?: Toolchain;
 }
 
 /** Resolve when the user interrupts us, or when a supervised child dies first. */
@@ -117,11 +109,19 @@ function waitForShutdown(
 }
 
 export async function up(options: UpOptions): Promise<number> {
+  const toolchain = options.toolchain ?? createSourceToolchain();
+
+  // Resolving is where a build system builds, so both targets are resolved
+  // before anything is started — a compile error should not arrive with a
+  // server already listening.
+  const workerLaunch = await toolchain.launch(options.entry);
+  const serverLaunch = await toolchain.server();
+
   // Validate the artifact before starting anything — a binary that cannot
   // describe itself cannot run, and failing here leaves nothing to clean up.
-  const manifest = await describeWorker(options.entry);
+  const manifest = await describeWorker(workerLaunch);
 
-  const server = spawnEntry(SERVER_ENTRY, {
+  const server = spawnLaunchable(serverLaunch, {
     env: {
       HOST: options.host,
       PORT: String(options.port ?? 0),
@@ -146,7 +146,7 @@ export async function up(options: UpOptions): Promise<number> {
         `tempo: bound ${boundHost} — reachable from other machines, and the RPC has no auth or TLS\n`,
       );
 
-    worker = spawnEntry(options.entry, {
+    worker = spawnLaunchable(workerLaunch, {
       env: {TEMPO_SERVER_URL: serverUrl, TEMPO_ROLE: undefined},
     });
     forwardOutput(worker, manifest.name);

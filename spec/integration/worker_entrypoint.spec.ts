@@ -20,7 +20,8 @@ import 'jasmine';
 import type {ChildProcess} from 'node:child_process';
 import type {AddressInfo} from 'node:net';
 import type {Server} from 'node:http';
-import {spawnEntry} from '../../src/cli/process';
+import {spawnLaunchable} from '../../src/cli/process';
+import {createSourceToolchain} from '../../src/cli/source_toolchain';
 import {
   createRemoteService,
   createRpcServer,
@@ -33,13 +34,17 @@ import {repoPath} from '../support/repo_root';
 /** The reference deployable binary, run as a deployment would run it. */
 const WORKER_ENTRY = repoPath('examples/greeter.ts');
 
-/** Run a worker binary to completion, capturing what it printed. */
-function runToCompletion(
+/**
+ * Run a worker binary to completion, capturing what it printed. Resolved through
+ * the source toolchain, which is how the CLI itself reaches a `.ts` entrypoint.
+ */
+async function runToCompletion(
   args: string[],
   env: Record<string, string> = {},
 ): Promise<{code: number | null; out: string; err: string}> {
+  const launchable = await createSourceToolchain().launch(WORKER_ENTRY);
   return new Promise((resolve) => {
-    const proc: ChildProcess = spawnEntry(WORKER_ENTRY, {args, env});
+    const proc: ChildProcess = spawnLaunchable(launchable, {args, env});
     let out = '';
     let err = '';
     proc.stdout?.on('data', (d: Buffer) => (out += d.toString()));
