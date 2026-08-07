@@ -87,5 +87,47 @@ export async function replay(
     applyEvent(ctx, ev);
     await settle(ctx);
   }
+  if (!ctx.done && !ctx.failed) emitUnrecorded(ctx);
   return ctx;
+}
+
+/**
+ * Emit commands the workflow issued while catching up that history never
+ * recorded — the correction to `isLive` being a proxy for the question that
+ * actually matters.
+ *
+ * Suppressing during catch-up is right exactly when history holds the command's
+ * marker, because then it is already durable and re-emitting would
+ * double-dispatch. It is wrong when history does not, and that happens whenever
+ * an activation carries **more than one** new event: an earlier completion can
+ * advance the workflow to a genuinely new command while the flag is still false,
+ * since the flag flips only as the last event is taken. The workflow-task queue
+ * coalesces a wake landing mid-task into exactly one more task, so a signal
+ * arriving while an activity completion is in flight produces that batch — which
+ * makes this the ordinary shape for any workflow with a signal-consuming branch
+ * beside a main line, not a corner case.
+ *
+ * Dropping the command wedged the execution with no diagnostic anywhere: the
+ * workflow parked on a promise nothing would resolve, and because replay never
+ * threw, the execution stayed `running` with no task failures recorded.
+ *
+ * Keyed on the marker rather than on the flag, because the marker is the durable
+ * record of dispatch and the flag was only ever standing in for it.
+ * `cancelChild` is excluded: it writes no marker on purpose, so for it "no
+ * marker" cannot mean "never dispatched".
+ */
+function emitUnrecorded(ctx: WorkflowContext): void {
+  const recorded = new Set<number>();
+  for (const ev of ctx.events) {
+    if ('seq' in ev && typeof ev.seq === 'number') recorded.add(ev.seq);
+  }
+  const emitted = new Set(ctx.commands.map((c) => c.seq));
+  for (const [seq, command] of ctx.requested) {
+    if (command.type === 'cancelChild') continue;
+    if (recorded.has(seq) || emitted.has(seq)) continue;
+    ctx.commands.push(command);
+  }
+  // Call order, which is what `seq` means — a recovered command belongs where
+  // the workflow issued it, not appended after work that came later.
+  ctx.commands.sort((a, b) => a.seq - b.seq);
 }
