@@ -8,6 +8,7 @@
  * a run fast enough that everything shares one millisecond (a division by zero).
  */
 
+import 'jasmine';
 import type {HistoryEvent} from '../../src/protocol/history_events';
 import {buildTimeline, fractionOf} from '../../dashboard/app/history_spans';
 

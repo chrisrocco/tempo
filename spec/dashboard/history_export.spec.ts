@@ -8,6 +8,7 @@
  * the download.
  */
 
+import 'jasmine';
 import type {HistoryEvent} from '../../src/protocol/history_events';
 import {
   MAX_PAGES,

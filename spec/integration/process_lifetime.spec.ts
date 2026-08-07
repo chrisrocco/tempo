@@ -24,7 +24,7 @@
  */
 
 import {spawn} from 'node:child_process';
-import path from 'node:path';
+import * as path from 'node:path';
 
 interface Run {
   stdout: string;

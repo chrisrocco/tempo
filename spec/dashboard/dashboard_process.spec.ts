@@ -21,9 +21,10 @@
  * it was merely told the URL of.
  */
 
+import 'jasmine';
 import {spawn, type ChildProcess} from 'node:child_process';
 import type {AddressInfo} from 'node:net';
-import path from 'node:path';
+import * as path from 'node:path';
 import {createRpcServer, createServerHost} from '../../src/services';
 import type {ServerHost} from '../../src/services';
 

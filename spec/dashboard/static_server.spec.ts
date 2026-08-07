@@ -15,9 +15,10 @@
  * matter; the rest is a content type and a cache header.
  */
 
+import 'jasmine';
 import {mkdtempSync, mkdirSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import path from 'node:path';
+import * as path from 'node:path';
 import {
   createStaticServer,
   resolveWithin,

@@ -9,6 +9,7 @@
  * a separate module from `router.ts`.
  */
 
+import 'jasmine';
 import {
   DETAIL_TABS,
   HISTORY_VIEWS,

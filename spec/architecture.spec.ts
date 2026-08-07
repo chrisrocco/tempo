@@ -7,7 +7,7 @@
  * feeds it deliberately broken files.
  */
 
-import path from 'node:path';
+import * as path from 'node:path';
 import {checkDependencies, checkRepoDependencies} from '../tools/dependencies';
 import {
   checkBoundaries,

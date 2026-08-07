@@ -39,7 +39,7 @@
  */
 
 import {readFileSync} from 'node:fs';
-import path from 'node:path';
+import * as path from 'node:path';
 
 /** A dependency that is not on a list, and where it was declared. */
 export interface DependencyViolation {

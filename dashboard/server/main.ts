@@ -32,7 +32,7 @@
  */
 
 import * as http from 'node:http';
-import path from 'node:path';
+import * as path from 'node:path';
 import {createStaticServer} from './static_server';
 import {proxyRpc} from './rpc_proxy';
 

@@ -8,6 +8,7 @@
  * parameters, which is the kind of failure nobody looks for.
  */
 
+import 'jasmine';
 import {parseArgs} from '../../dashboard/app/start_args';
 
 describe('dashboard start form — reading the arguments box', () => {

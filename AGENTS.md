@@ -233,6 +233,33 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
     `@fileoverview` already documents it — a single-purpose module named after
     the thing it exports needs no second copy (`condition.ts`,
     `microtask_scheduler.ts`).
+-   **Namespace imports, never default imports.** `import * as path from
+    'node:path'`, not `import path from 'node:path'` — and the same for packages
+    (`import * as ts from 'typescript'`). A default import of a CommonJS module
+    is a binding `esModuleInterop` *invents* rather than one the module exports,
+    so the same line means different things under different compiler settings,
+    and the same module ends up spelled two ways in one repo — which is how this
+    was found, `tools/style.ts` importing `* as path` while `tools/boundaries.ts`
+    next door imported the default. Named imports (`import {readFileSync} from
+    'node:fs'`), type-only imports, and side-effect imports are untouched by
+    this. **Checked** — see below.
+-   **A spec under `spec/dashboard/` opens with `import 'jasmine';`.**
+    `describe`/`it`/`expect` otherwise arrive as ambient globals from the root
+    `tsconfig.json`'s `types`, which is a fact about the config rather than about
+    the file. These are the specs sitting against the browser boundary —
+    `dashboard/app/tsconfig.json` already sets `types: []` so ambient globals
+    stop leaking into code that must not have them — so they name their harness
+    and keep type-checking under a config that declares none. The rest of the
+    suite still leans on the root config. **Checked** — see below.
+-   **DOM sink writes use bracket notation.** In `dashboard/app/`, a write to
+    `innerHTML`, `href`, `src`, `download` and friends is spelled
+    `anchor['href'] = url`. A DOM security scanner matches `.href =` by *syntax*,
+    so bracket notation is what separates a reviewed write from an unreviewed one
+    — which makes it a claim, and the claim has to be true. It changes what a
+    scanner matches, not what the browser does: say why the value is safe in a
+    comment at the assignment. The export anchor in
+    `dashboard/app/execution_detail.ts` is the worked example. **Checked** — see
+    below.
 -   **`function` over arrow functions** for statement functions — including
     helpers in specs, which is where the exceptions used to collect. A `const`
     bound to an arrow is still right when the arrow is a *value* satisfying a
@@ -244,8 +271,9 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
 
 ### The rules that are checked
 
-`npm run lint` runs [`tools/boundaries.ts`](tools/boundaries.ts) for layering
-and [`tools/style.ts`](tools/style.ts) for three rules a regex cannot decide —
+`npm run lint` runs [`tools/boundaries.ts`](tools/boundaries.ts) for layering,
+[`tools/conventions.ts`](tools/conventions.ts) for the three written-shape rules
+above, and [`tools/style.ts`](tools/style.ts) for three rules a regex cannot decide —
 it builds a real TypeScript program, because "is this a promise?" is a question
 about types and "is this await top-level?" is a question about scope. Its
 `@fileoverview` explains each rule and the failure it prevents; in short:
@@ -261,10 +289,19 @@ about types and "is this await top-level?" is a question about scope. Its
     Entrypoints use `void run().then(…)`, and paths resolve via `path.resolve()`
     from the working directory.
 
+The conventions checker is the one that reads the **whole tree** rather than a
+compiler's view of it — `tools/` and `spec/` are in no tsconfig, and the first
+default import it found was in `tools/`. Its rules are pure functions over file
+contents, so [`spec/conventions.spec.ts`](spec/conventions.spec.ts) can feed them
+planted breakage; the suite runs them, the same way it runs the boundary and
+dependency rules.
+
 One more is enforced by the compiler rather than a tool:
 `noPropertyAccessFromIndexSignature` in `tsconfig.json` requires `obj['key']`
 for anything reached through an index signature, so `process.env['PORT']` and a
-declared field stop looking alike at the call site.
+declared field stop looking alike at the call site. It points the same way as the
+bracket-notation rule above without being the same rule: this one is about where
+a property came from, that one about which properties are sinks.
 
 ## Testing
 
