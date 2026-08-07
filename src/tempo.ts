@@ -2,19 +2,19 @@
  * @fileoverview
  * ★ WORKER ENTRYPOINT — the single call a deployable worker binary makes.
  *
- * `Tempo.startWorker({name, workflows, activities})` is the distributed-mode
- * counterpart to `createLocalRuntime()`: it wires a `RemoteService` to the poll
- * loops in `worker/`, taking its registries straight from imported module
- * namespaces (`import * as activities from './activities'`). The export name is
- * the registered name, so there is no registration boilerplate.
+ * `Tempo.startWorker({name, workflows, activities})` wires a service to the
+ * registries it builds from imported module namespaces (`import * as activities
+ * from './activities'`). The export name is the registered name, so there is no
+ * registration boilerplate.
  *
- * Deployment config is read from the environment, never passed in code, so the
- * same binary is deployable anywhere. The worker binary's full input surface:
+ * The worker binary's full input surface, each environment variable winning over
+ * the option of the same name in code:
  *
- *   TEMPO_SERVER_URL  server to connect to (default http://127.0.0.1:7233)
+ *   TEMPO_SERVER_URL  server to connect to (else `serverUrl`, else 127.0.0.1:7233)
  *   TEMPO_ROLE        `workflow` | `activity` | unset (unset runs both loops)
- *   TEMPO_TASK_QUEUE  which pool to serve (default `default`)
+ *   TEMPO_TASK_QUEUE  which pool to serve (else `taskQueue`, else `default`)
  *   --describe        print {name, workflows, activities} as JSON and exit
+ *   --runtime=MODE    `remote` (default) or `local` — see below
  *
  * Running the *same* binary twice with a different `TEMPO_ROLE` is how the two
  * worker tiers are deployed: workflow workers replay workflow code, activity
@@ -26,9 +26,67 @@
  * and activities — and it is not optional once a second app exists: with one
  * global queue, whichever worker wins a poll decides whether the task can run at
  * all, and one that cannot serve it fails the task rather than passing it on.
+ *
+ * ## Two runtimes behind one entrypoint
+ *
+ * **`remote`**, the default, is the deployable shape: a `RemoteService` over the
+ * RPC, and poll loops that claim work from a server somewhere else.
+ *
+ * **`local`** composes `createLocalRuntime()` instead — server, workers, and
+ * client in one process, dispatching by function call rather than by poll. It
+ * exists so a test can exercise *this entrypoint*, registries and all, without a
+ * port to pick or a server to bring up. `spec/integration/local.spec.ts` covers
+ * the runtime itself; what only this mode covers is the wiring in between,
+ * which is where a workflow that is exported but never registered would hide.
+ *
+ * The returned `Worker` carries `localRuntime` in that mode. It has to: a local
+ * worker holds the only reference to its own server, so without it nothing can
+ * start an execution and the process is inert.
+ *
+ * That is also why a *spawned* binary in local mode prints `WORKER_READY` and
+ * then exits: nothing outside the process can reach it, so once the module
+ * finishes there is no work and nothing holding the event loop open. Run that
+ * way it is a smoke test — every export registered, no server needed — and not
+ * a dev server. `tempo up` is the dev server, and it is remote by design.
+ *
+ * ### Why a flag rather than `TEMPO_RUNTIME`
+ *
+ * Every other input here is an environment variable, and this one deliberately
+ * is not. Environment variables are inherited: one `TEMPO_RUNTIME=local` left in
+ * a deployment's environment — or exported in a shell that later launches a real
+ * worker — turns a production worker into a process that serves nobody while
+ * still printing `WORKER_READY` and looking healthy to its supervisor. That is
+ * the failure `planning/tickets/02` is about, arrived at from a different
+ * direction. A flag has to be typed at the launch site and does not propagate to
+ * children, which is the property that matters for a testing affordance.
+ *
+ * ### What local mode ignores, and the one thing it refuses
+ *
+ * The server URL and the task queue are **ignored**: there is nothing to connect
+ * to, and one in-process pair serves every queue (`LocalService` polls with no
+ * queue filter). Ignored rather than rejected, because both are ambient in a dev
+ * shell — `tempo up` sets `TEMPO_SERVER_URL` for its own child — and erroring on
+ * an inherited value would make the flag unusable exactly where it is wanted.
+ *
+ * `TEMPO_ROLE` is the exception and throws. It splits the two poll loops, and
+ * local mode has no poll loops to split; honouring it half-way would leave a
+ * "workflow-only" local worker parking every execution on an activity nothing
+ * will ever run. That is a hang, not a failure, so it is worth the startup
+ * error.
+ *
+ * ## Config in code, with the environment still authoritative
+ *
+ * `serverUrl` and `taskQueue` may be supplied in code — the shape Temporal's own
+ * client takes, where the address is a connection argument rather than ambient
+ * state — and the environment still wins over both. So what code supplies is the
+ * *default the app ships with*, not the deployment: the same artifact still
+ * redeploys against a different server by changing `TEMPO_SERVER_URL`, with no
+ * rebuild. That is the property the older "config is never passed in code" rule
+ * was protecting, and overriding is what preserves it.
  */
 
 import type {WorkflowFn} from './core';
+import {createLocalRuntime, type Runtime} from './local_runtime';
 import {DEFAULT_TASK_QUEUE} from './protocol';
 import {createJsonLogger} from './server';
 import {createRemoteService} from './services';
@@ -54,9 +112,27 @@ export const DEFAULT_SERVER_URL = 'http://127.0.0.1:7233';
  */
 export type WorkerRole = 'workflow' | 'activity';
 
+/**
+ * Which composition a worker runs under: a `RemoteService` polling a server, or
+ * the in-process `createLocalRuntime()`. See the two-runtimes section above.
+ */
+export type RuntimeMode = 'local' | 'remote';
+
 export interface StartWorkerOptions {
   /** Service identity: the unit name, the `tempo status` row, the `tempo logs` target. */
   name: string;
+  /**
+   * Which server to connect to in remote mode. `TEMPO_SERVER_URL` overrides it,
+   * so this is the default the application ships with rather than its
+   * deployment. Ignored in local mode — there is nothing to connect to.
+   */
+  serverUrl?: string;
+  /**
+   * Which runtime to compose. `--runtime=` overrides it, so a binary that ships
+   * `runtime: 'remote'` can still be booted locally without editing code, and a
+   * test can ask for local mode without touching `process.argv`.
+   */
+  runtime?: RuntimeMode;
   /**
    * Which pool this worker serves. `TEMPO_TASK_QUEUE` overrides it, so one binary
    * can be deployed into several pools.
@@ -75,8 +151,19 @@ export interface StartWorkerOptions {
 
 export interface Worker {
   readonly name: string;
-  /** The roles this process actually started. */
+  /**
+   * The roles this process actually started. In local mode there are no poll
+   * loops, so this reports what the binary *registered* — which is what the
+   * readiness line has always meant to a supervisor.
+   */
   readonly roles: readonly WorkerRole[];
+  /**
+   * The in-process runtime, in local mode only. A local worker holds the sole
+   * reference to its own server, so this is the only way to start an execution
+   * against it; in remote mode it is `undefined` and the client is somewhere
+   * else entirely.
+   */
+  readonly localRuntime?: Runtime;
   /** Stop polling and wait for in-flight work to finish. Idempotent. */
   stop(): Promise<void>;
 }
@@ -94,6 +181,44 @@ function callableEntries(source: object | undefined): [string, AnyFn][] {
   return Object.entries(source).filter(
     (entry): entry is [string, AnyFn] => typeof entry[1] === 'function',
   );
+}
+
+/**
+ * Which runtime to compose: `--runtime=` if the launch site said, else what the
+ * code shipped, else remote.
+ *
+ * Exported because the precedence is the interesting part and a spec should be
+ * able to state it without rewriting `process.argv`. Takes `argv` for the same
+ * reason.
+ *
+ * A bare `--runtime` is an error rather than a synonym for `local`: the flag has
+ * two modes and guessing which one an unfinished argument meant is how a worker
+ * ends up in the wrong one silently.
+ */
+export function resolveRuntime(
+  argv: readonly string[],
+  option: RuntimeMode | undefined,
+): RuntimeMode {
+  const flag = argv.find(
+    (arg) => arg === '--runtime' || arg.startsWith('--runtime='),
+  );
+  if (flag === undefined) return option ?? 'remote';
+
+  const value = flag.slice('--runtime='.length);
+  if (value !== 'local' && value !== 'remote')
+    throw new Error(
+      `--runtime must be "local" or "remote"${value ? ` (got "${value}")` : ' — it takes a value, as --runtime=local'}`,
+    );
+  return value;
+}
+
+/**
+ * Where a remote worker connects. The environment wins over the code, so the
+ * artifact redeploys against another server without a rebuild; the code's value
+ * is the default it ships with.
+ */
+function resolveServerUrl(option: string | undefined): string {
+  return process.env['TEMPO_SERVER_URL'] ?? option ?? DEFAULT_SERVER_URL;
 }
 
 /**
@@ -130,6 +255,99 @@ function resolveRoles(
   return roles;
 }
 
+/** What a runtime mode has to supply: something to stop, and maybe a way in. */
+interface Composition {
+  readonly localRuntime?: Runtime;
+  stop(): Promise<void>;
+}
+
+/**
+ * The deployable composition: a `RemoteService` over the RPC, and one poll loop
+ * per role, each claiming work from a server in another process.
+ */
+function composeRemote(args: {
+  name: string;
+  serverUrl: string;
+  taskQueue: string;
+  roles: readonly WorkerRole[];
+  workflows: readonly [string, AnyFn][];
+  activities: readonly [string, AnyFn][];
+}): Composition {
+  const service = createRemoteService(args.serverUrl);
+
+  // The worker's own lifecycle log, in the same JSON Lines shape the server
+  // emits, so one pipeline reads both. A poll failure is the fault most likely
+  // to matter here — an unreachable server makes a worker look healthy to its
+  // supervisor while doing nothing (planning/tickets/02).
+  const log = createJsonLogger();
+  const onError = (error: unknown, consecutive: number): void => {
+    log('worker.poll_failed', {
+      worker: args.name,
+      consecutive,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  };
+
+  const loops: WorkerLoop[] = [];
+  if (args.roles.includes('workflow')) {
+    const registry = createWorkflowRegistry();
+    for (const [exported, fn] of args.workflows)
+      registry.set(exported, fn as WorkflowFn);
+    loops.push(
+      runWorkflowWorker(service, createWorkflowWorker(registry), {
+        onError,
+        taskQueue: args.taskQueue,
+      }),
+    );
+  }
+  if (args.roles.includes('activity')) {
+    const registry = createActivityRegistry();
+    for (const [exported, fn] of args.activities)
+      registry.set(exported, fn as ActivityFn);
+    loops.push(
+      runActivityWorker(service, createActivityWorker(registry), {
+        onError,
+        taskQueue: args.taskQueue,
+      }),
+    );
+  }
+
+  return {
+    stop: () =>
+      Promise.all(loops.map((loop) => loop.stop())).then(() => undefined),
+  };
+}
+
+/**
+ * The in-process composition: `createLocalRuntime()` fed from the same module
+ * namespaces, so what a test exercises is the entrypoint's own registration and
+ * not a second wiring written for the test.
+ *
+ * Both halves are registered regardless of role, because there are no roles here
+ * — a `LocalService` dispatches to its workers by function call, and the split
+ * that `TEMPO_ROLE` describes has no meaning without poll loops to divide.
+ */
+function composeLocal(args: {
+  workflows: readonly [string, AnyFn][];
+  activities: readonly [string, AnyFn][];
+}): Composition {
+  const runtime = createLocalRuntime();
+  for (const [exported, fn] of args.workflows)
+    runtime.registerWorkflow(exported, fn as WorkflowFn);
+  for (const [exported, fn] of args.activities)
+    runtime.registerActivity(exported, fn as ActivityFn);
+
+  return {
+    localRuntime: runtime,
+    stop: () => {
+      // Timers hold the event loop open; shutting them down is what lets a
+      // process that started a local worker exit on its own.
+      runtime.shutdown();
+      return Promise.resolve();
+    },
+  };
+}
+
 export function startWorker(options: StartWorkerOptions): Worker {
   const workflows = callableEntries(options.workflows);
   const activities = callableEntries(options.activities);
@@ -147,63 +365,50 @@ export function startWorker(options: StartWorkerOptions): Worker {
     return {name: options.name, roles: [], stop: () => Promise.resolve()};
   }
 
+  const runtime = resolveRuntime(process.argv, options.runtime);
+  const requestedRole = process.env['TEMPO_ROLE']?.trim();
+  if (runtime === 'local' && requestedRole)
+    throw new Error(
+      `worker "${options.name}" cannot serve TEMPO_ROLE=${requestedRole} under --runtime=local — the local runtime has no poll loops to split, and half of one parks every execution it starts on work nothing will claim`,
+    );
+
   const roles = resolveRoles(
-    process.env['TEMPO_ROLE'],
+    requestedRole,
     options.name,
     workflows.length > 0,
     activities.length > 0,
   );
-  const service = createRemoteService(
-    process.env['TEMPO_SERVER_URL'] ?? DEFAULT_SERVER_URL,
-  );
 
-  // The worker's own lifecycle log, in the same JSON Lines shape the server
-  // emits, so one pipeline reads both. A poll failure is the fault most likely
-  // to matter here — an unreachable server makes a worker look healthy to its
-  // supervisor while doing nothing (planning/tickets/02).
+  // Resolved in both modes so the readiness line keeps one shape. In local mode
+  // it names a pool nothing routes on: one in-process pair serves every queue.
   const taskQueue =
     process.env['TEMPO_TASK_QUEUE'] ?? options.taskQueue ?? DEFAULT_TASK_QUEUE;
-  const log = createJsonLogger();
-  const onError = (error: unknown, consecutive: number): void => {
-    log('worker.poll_failed', {
-      worker: options.name,
-      consecutive,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  };
 
-  const loops: WorkerLoop[] = [];
-  if (roles.includes('workflow')) {
-    const registry = createWorkflowRegistry();
-    for (const [exported, fn] of workflows)
-      registry.set(exported, fn as WorkflowFn);
-    loops.push(
-      runWorkflowWorker(service, createWorkflowWorker(registry), {
-        onError,
-        taskQueue,
-      }),
-    );
-  }
-  if (roles.includes('activity')) {
-    const registry = createActivityRegistry();
-    for (const [exported, fn] of activities)
-      registry.set(exported, fn as ActivityFn);
-    loops.push(
-      runActivityWorker(service, createActivityWorker(registry), {
-        onError,
-        taskQueue,
-      }),
-    );
-  }
+  const composition =
+    runtime === 'local'
+      ? composeLocal({workflows, activities})
+      : composeRemote({
+          name: options.name,
+          serverUrl: resolveServerUrl(options.serverUrl),
+          taskQueue,
+          roles,
+          workflows,
+          activities,
+        });
 
   let stopping: Promise<void> | undefined;
   const worker: Worker = {
     name: options.name,
     roles,
+    localRuntime: composition.localRuntime,
     stop(): Promise<void> {
-      stopping ??= Promise.all(loops.map((loop) => loop.stop())).then(
-        () => undefined,
-      );
+      stopping ??= composition.stop().then(() => {
+        // Dropped on the way out so a process that starts several workers over
+        // its lifetime — which is what local mode invites — does not accumulate
+        // a handler per worker.
+        process.off('SIGTERM', shutdown);
+        process.off('SIGINT', shutdown);
+      });
       return stopping;
     },
   };

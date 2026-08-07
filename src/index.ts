@@ -27,6 +27,7 @@ export {
   DEFAULT_SERVER_URL,
   Tempo,
   startWorker,
+  type RuntimeMode,
   type StartWorkerOptions,
   type Worker,
   type WorkerRole,
