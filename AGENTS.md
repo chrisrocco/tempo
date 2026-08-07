@@ -186,8 +186,9 @@ to something that no longer exists.
 | `src/workflow.ts`                         | The determinism boundary — the  |
 :                                           : organizing idea, and the author :
 :                                           : rules                           :
-| `src/core/replay.ts`                      | Activation vs. replay, the live |
-:                                           : edge, observe-don't-await       :
+| `src/core/replay.ts`                      | Activation vs. replay, what     |
+:                                           : suppresses a command,           :
+:                                           : observe-don't-await             :
 | `src/core/condition.ts`                   | How a workflow waits, and why   |
 :                                           : `condition` exists              :
 | `src/server/ports/workflow_task_queue.ts` | The two concurrency bugs the    |

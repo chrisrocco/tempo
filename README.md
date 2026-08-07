@@ -163,8 +163,8 @@ the engine:
     fixpoint. A workflow parked on `condition(() => queue.length > 0)` wakes
     here, *after* the handler pushed to the queue — that ordering is why the
     queue pattern never misses an item.
-8.  **The workflow runs on** past the live edge and emits new commands; the
-    worker responds with them.
+8.  **The workflow runs on** and emits the commands history holds no event for;
+    the worker responds with them.
 9.  **The server applies the result** —
     [`applyWorkflowTaskResult`](src/server/server_core.ts) — behind a version
     check that discards a lease-race loser. Each command is dispatched: a marker
@@ -248,7 +248,7 @@ Read in this order the first time; each builds on the last:
 Read                                                                                   | What it covers
 -------------------------------------------------------------------------------------- | --------------
 [`src/workflow.ts`](src/workflow.ts)                                                   | The determinism boundary, and the rules workflow code obeys
-[`src/core/replay.ts`](src/core/replay.ts)                                             | Activation vs. replay, the live edge, observe-don't-await
+[`src/core/replay.ts`](src/core/replay.ts)                                             | Activation vs. replay, what suppresses a command, observe-don't-await
 [`src/core/context.ts`](src/core/context.ts)                                           | Per-task state, and the AsyncLocalStorage caveat
 [`src/core/condition.ts`](src/core/condition.ts) · [`signals.ts`](src/core/signals.ts) | How a workflow waits, and the queue pattern
 [`src/core/workflow_api.ts`](src/core/workflow_api.ts)                                 | The primitives, `proxyActivities`, `continueAsNew`
@@ -268,7 +268,7 @@ understand what the engine does.
 Spec                                                                  | Covers
 --------------------------------------------------------------------- | ------
 [`integration/local`](spec/integration/local.spec.ts)                 | The whole programming model against `createLocalRuntime`
-[`core/replay`](spec/core/replay.spec.ts)                             | The live edge, command suppression, terminal outcomes
+[`core/replay`](spec/core/replay.spec.ts)                             | Command suppression, divergence detection, terminal outcomes
 [`core/apply_event`](spec/core/apply_event.spec.ts)                   | Event routing, markers, buffering, the nondeterminism check
 [`core/condition`](spec/core/condition.spec.ts)                       | Parking, the unblock fixpoint, the condSeq invariant
 [`core/workflow_api`](spec/core/workflow_api.spec.ts)                 | seq allocation and command payloads

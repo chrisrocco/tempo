@@ -88,11 +88,11 @@ describe('core replay — empty history', () => {
   });
 });
 
-describe('core replay — the live edge', () => {
+describe('core replay — command suppression', () => {
   /**
    * The central guarantee. A command already recorded in history must NOT be
-   * re-emitted, or the runtime would dispatch it a second time. Only calls made
-   * after history runs out are new work.
+   * re-emitted, or the runtime would dispatch it a second time. What history
+   * holds no event for is what is new.
    */
   it('suppresses commands that history has already recorded', async () => {
     // Two recorded completions, three calls: only the third is new work. The
@@ -135,7 +135,7 @@ describe('core replay — the live edge', () => {
     expect(ctx.result).toBe(3);
   });
 
-  it('goes live once the last recorded event is consumed', async () => {
+  it('emits only the call history has no event for', async () => {
     const ctx = createContext([], [{type: 'timerFired', seq: 0}]);
 
     await replay(ctx, async () => {
@@ -143,15 +143,7 @@ describe('core replay — the live edge', () => {
       await sleep(10);
     });
 
-    expect(ctx.isLive).toBeTrue();
     expect(ctx.commands.map((c) => c.seq)).toEqual([1]);
-  });
-
-  it('starts live when there is no history to catch up on', () => {
-    expect(createContext([], []).isLive).toBeTrue();
-    expect(
-      createContext([], [{type: 'timerFired', seq: 0}]).isLive,
-    ).toBeFalse();
   });
 
   /**
@@ -298,14 +290,16 @@ describe('core replay — new work reached while history remains', () => {
   });
 
   /**
-   * `cancelChild` is the exception the rule cannot cover: it writes no marker of
-   * its own (its durable record is the `cancelRequested` on the child), so history
-   * has nothing at its seq either way and the live-edge flag still decides. Pinned
-   * because that fallback is now the only thing the flag is used for.
+   * `cancelChild` was the one command the rule could not cover, because it wrote
+   * no marker — so its seq was absent from history whether or not it had been
+   * dispatched, and the live-edge flag decided. `childCancelRequested` (issue #50)
+   * is what makes it answerable like everything else, and these two pin the answer
+   * in both directions.
    */
-  it('does not re-emit a cancelChild a past task already dispatched', async () => {
+  it('does not re-emit a cancelChild history has recorded', async () => {
     const events: HistoryEvent[] = [
       {type: 'childStarted', seq: 0, childId: 'child', detached: true},
+      {type: 'childCancelRequested', seq: 1, targetSeq: 0},
       {type: 'activityScheduled', seq: 2, name: 'after', args: [], options: {}},
     ];
     const ctx = createContext([], events);
@@ -321,6 +315,32 @@ describe('core replay — new work reached while history remains', () => {
       targetSeq: 0,
       seq: 1,
     });
+  });
+
+  it('emits a cancelChild reached mid-batch, which no marker records', async () => {
+    // The gap #49 left open. The completion moves the workflow on to `cancel()`
+    // while the signal behind it keeps history from having run out — the shape
+    // that used to drop the command with nothing to show it had gone.
+    const events: HistoryEvent[] = [
+      {type: 'childStarted', seq: 0, childId: 'child', detached: true},
+      {type: 'activityScheduled', seq: 1, name: 'look', args: [], options: {}},
+      {type: 'activityCompleted', seq: 1, result: 'ok'},
+      {type: 'signal', name: 'ping', payload: 'hello'},
+    ];
+    const ctx = createContext([], events);
+
+    await replay(ctx, async () => {
+      setHandler(ping, () => {});
+      const handle = startChild('watcher');
+      await runActivity('look');
+      handle.cancel();
+      await sleep(1000);
+    });
+
+    expect(ctx.commands).toEqual([
+      {type: 'cancelChild', targetSeq: 0, seq: 2},
+      {type: 'startTimer', ms: 1000, seq: 3},
+    ]);
   });
 });
 

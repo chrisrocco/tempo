@@ -153,6 +153,19 @@ export function buildTimeline(
         close(event.seq, at, 'failed', event.error, event.childId);
         break;
 
+      // A mark, not a span: a cancel is a request with no outcome event of its
+      // own, so there is nothing for `close` to pair it with. The child it names
+      // is still open — a detached child has no completion, so it never closes —
+      // which is what makes the label resolvable to an id rather than a seq.
+      case 'childCancelRequested': {
+        const target = open.get(event.targetSeq);
+        marks.push({
+          at,
+          label: `cancel requested for ${target?.childId ?? `seq ${event.targetSeq}`}`,
+          tone: 'danger',
+        });
+        break;
+      }
       case 'signal':
         marks.push({at, label: `signal ${event.name}`, tone: 'accent'});
         break;

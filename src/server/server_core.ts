@@ -36,10 +36,21 @@
  * `childStarted.detached`: the marker is unconditional, and the flag tells the
  * recovery path which children have a completion coming.
  *
- * `cancelChild` is the one command that legitimately writes no marker of its own.
- * Its effect *is* a durable record — the `cancelRequested` event it appends to the
- * child's history — and `requestCancel` short-circuits on finding one, so a
- * re-dispatched cancel is idempotent rather than a second cancellation.
+ * **Every** command leaves one, with no exceptions left. `cancelChild` used to be
+ * the exception, on the grounds that its effect is already a durable record — the
+ * `cancelRequested` it appends to the *child's* history — and that `requestCancel`
+ * short-circuits on finding one, so a re-dispatched cancel is idempotent rather
+ * than a second cancellation. All of that is still true, and it is an argument
+ * about **safety**: re-dispatch does no harm.
+ *
+ * It stopped being sufficient when replay began deciding what to emit by asking
+ * whether history holds a command's seq (`core/workflow_api`). That question needs
+ * **observability**, and a record living on another execution cannot supply it: a
+ * cancel that reached the workflow mid-batch was dropped and never re-issued, with
+ * not even a gap in the seqs to notice — the wedge of issue #39, surviving in the
+ * one place its fix could not see (issue #50). `childCancelRequested` is what
+ * closes it, and its write ordering is the one thing about it that differs from
+ * the markers above; see the `cancelChild` branch of `applyCommand`.
  *
  * ## `continueAsNew` is a terminal disposition here, not in the core
  *
@@ -550,6 +561,24 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     } else if (cmd.type === 'cancelChild') {
       const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
       if (childId) await requestCancel(childId);
+      // Marker last, which is the opposite of every branch above, and deliberate.
+      // Theirs go first because the work they dispatch reports back and `resume`
+      // re-drives it from the marker; a cancel does neither. So a marker written
+      // first and then lost to a crash would suppress the only recovery a cancel
+      // has — the next replay re-issuing it. Written last, a crash costs the
+      // marker, the command is re-emitted, and `requestCancel` short-circuits if
+      // it already landed.
+      //
+      // Recorded even when no child was found. The marker is the record of
+      // *dispatch*, not of effect: a cancel naming a seq this parent never
+      // spawned is still a cancel the workflow issued and must not issue twice,
+      // and the alternative — no marker on that path — puts the silent drop back
+      // exactly where it was.
+      await appendEvent(workflowId, {
+        type: 'childCancelRequested',
+        seq: cmd.seq,
+        targetSeq: cmd.targetSeq,
+      });
     }
   }
 
