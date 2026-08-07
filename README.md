@@ -151,9 +151,11 @@ the engine:
     [`worker/worker_loops.ts`](src/worker/worker_loops.ts). It holds no state
     between tasks, so any worker can serve any execution.
 5.  **Replay** builds a fresh context and re-runs the workflow function against
-    the whole history — [`core/replay.ts`](src/core/replay.ts). Commands are
-    suppressed while catching up; once the last event is consumed the context
-    goes live.
+    the whole history — [`core/replay.ts`](src/core/replay.ts). A command whose
+    `seq` history already holds an event for is suppressed, because it is already
+    durable; anything history has no seq for is new work. Position in the batch
+    does not decide this — see the fileoverview for the wedge that assumption
+    caused.
 6.  **`applyEvent`** routes the signal to its registered handler, or buffers it
     if the handler is not set up yet —
     [`core/apply_event.ts`](src/core/apply_event.ts).

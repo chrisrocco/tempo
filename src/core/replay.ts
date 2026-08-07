@@ -15,14 +15,32 @@
  * absent a sticky cache, is every task today. Because any activation might land
  * cold, every suspension point must be reconstructible identically from history.
  *
- * ## The live edge
+ * ## The live edge, and what actually suppresses a command
  *
  * Each primitive call allocates a `seq`, registers a completion promise, and
- * pushes a command **only if `isLive`**. While replaying recorded history the
- * commands are suppressed — they are already durable, so re-emitting them would
- * double-dispatch. The moment the last recorded event is consumed `isLive` flips
- * to true (the **live edge**) and further calls push genuinely new work. One flag
- * divides "catching up" from "making progress".
+ * pushes a command **unless history already holds an event at that seq**. A
+ * marker or a completion is proof the command was dispatched and is durable, so
+ * re-emitting it would double-dispatch; anything history has no seq for is
+ * genuinely new work. That rule lives in `workflow_api.issue`, which also owns
+ * the two commands leaving no trace.
+ *
+ * `isLive` — set as the last recorded event is taken — reads like the same rule
+ * and is not. It is a *positional* answer to a question about *content*, and the
+ * two agree only when the batch's last event is the one that unblocks the
+ * workflow. That holds when an activation applies exactly one new event, which
+ * used to be the only shape the specs covered.
+ *
+ * It breaks the moment a batch has a trailing event, and that batch is ordinary:
+ * `ports/workflow_task_queue` coalesces a wake landing mid-task into exactly one
+ * more, so a signal arriving while an activity completion is in flight produces
+ * `[…, activityCompleted, signal]` — which any workflow with a signal-driven
+ * branch beside a main line generates continuously. Settling the earlier
+ * completion carries the workflow to a genuinely new command while `isLive` is
+ * still false. Keyed on the flag, that command was recorded in `requested` and
+ * never pushed: the worker responded without it, history never got its marker, so
+ * the next replay dropped it for the same reason, forever. Nothing threw, the
+ * execution stayed `running` with no task failures, and it was parked on work the
+ * server had no record of — a permanent, silent wedge (issue #39).
  *
  * ## `settle`: drain + condition unblock
  *
@@ -83,6 +101,8 @@ export async function replay(
   await settle(ctx);
   while (!ctx.done && !ctx.failed && ctx.idx < ctx.events.length) {
     const ev = ctx.events[ctx.idx++];
+    // Kept for `cancelChild`, which history cannot answer for; every other
+    // command is suppressed on its seq rather than on this flag.
     if (ctx.idx === ctx.events.length) ctx.isLive = true;
     applyEvent(ctx, ev);
     await settle(ctx);
