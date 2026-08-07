@@ -7,7 +7,8 @@
  * anything; `tempo deploy` will use it to decide which role services to install.
  */
 
-import {spawnEntry} from './process';
+import {spawnLaunchable} from './process';
+import type {Launchable} from './ports/toolchain';
 
 export interface WorkerManifest {
   name: string;
@@ -27,16 +28,21 @@ function isManifest(value: unknown): value is WorkerManifest {
 }
 
 /**
- * Run `<entry> --describe` and parse its manifest. Doubles as a smoke test: an
- * artifact that cannot describe itself cannot run, so failing here is failing
- * before anything has been started or installed.
+ * Run `--describe` against an already-resolved worker and parse its manifest.
+ * Doubles as a smoke test: an artifact that cannot describe itself cannot run,
+ * so failing here is failing before anything has been started or installed.
+ *
+ * Takes a `Launchable` rather than a path, so this module has no opinion about
+ * how the artifact came to be runnable — under a build system, resolving it is
+ * what built it.
  */
 export function describeWorker(
-  entry: string,
+  worker: Launchable,
   timeoutMs = 20000,
 ): Promise<WorkerManifest> {
+  const entry = [worker.command, ...worker.args].join(' ');
   return new Promise((resolve, reject) => {
-    const child = spawnEntry(entry, {args: ['--describe']});
+    const child = spawnLaunchable(worker, {args: ['--describe']});
     let out = '';
     let err = '';
     const timer = setTimeout(() => {

@@ -1,58 +1,37 @@
 /**
  * @fileoverview
- * Child-process plumbing shared by the CLI: launching an entrypoint, waiting on
- * a readiness line, forwarding output, and stopping a child without orphans.
- * `tempo up` supervises processes with this; `tempo deploy` will reuse the same
- * launch shape to interrogate a built artifact.
+ * Child-process plumbing shared by the CLI: spawning what a toolchain resolved,
+ * waiting on a readiness line, forwarding output, and stopping a child without
+ * orphans. `tempo up` supervises processes with this.
  */
 
 import {spawn, type ChildProcess} from 'node:child_process';
+import type {Launchable} from './ports/toolchain';
 
-/**
- * The `tsx` loader, resolved from *this* module to an absolute path.
- *
- * `--import tsx` would make the **child** resolve the bare specifier from its
- * own working directory, which is not necessarily ours and need not contain a
- * `node_modules` at all — `tempo up` run from anywhere but the package root
- * died on `Cannot find package 'tsx'`, in the child, with the parent reporting
- * only a non-zero exit. `require.resolve` answers from this file's location
- * instead, which is the same reason `up.ts` resolves its server entry from
- * `__dirname`.
- */
-const TSX_LOADER = require.resolve('tsx');
-
-export interface SpawnEntryOptions {
+export interface SpawnOptions {
+  /** Arguments appended after the launchable's own. */
   args?: string[];
   env?: Record<string, string | undefined>;
 }
 
 /**
- * Launch a server or worker entrypoint. A TypeScript path runs under `tsx` so
- * sources work with no build step; a `.js` path runs under plain Node; anything
- * else is taken to be a self-contained executable and run directly — which is
- * the shape a built binary has.
+ * Spawn something a `Toolchain` resolved. This module deliberately does not know
+ * how a target became a command — that question has a different answer per build
+ * system and lives behind `ports/toolchain.ts`; what is left here is the same
+ * either way: pipe the output, inherit the environment, hand back the child.
  */
-export function spawnEntry(
-  entry: string,
-  options: SpawnEntryOptions = {},
+export function spawnLaunchable(
+  launchable: Launchable,
+  options: SpawnOptions = {},
 ): ChildProcess {
-  const args = options.args ?? [];
-  let command: string;
-  let commandArgs: string[];
-  if (entry.endsWith('.ts') || entry.endsWith('.mts')) {
-    command = process.execPath;
-    commandArgs = ['--import', TSX_LOADER, entry, ...args];
-  } else if (entry.endsWith('.js') || entry.endsWith('.mjs')) {
-    command = process.execPath;
-    commandArgs = [entry, ...args];
-  } else {
-    command = entry;
-    commandArgs = args;
-  }
-  return spawn(command, commandArgs, {
-    env: {...process.env, ...options.env},
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  return spawn(
+    launchable.command,
+    [...launchable.args, ...(options.args ?? [])],
+    {
+      env: {...process.env, ...options.env},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
 }
 
 /**
