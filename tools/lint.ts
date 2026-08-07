@@ -77,7 +77,9 @@ const styleViolations = [
   ...checkStyle(programFor(root, 'dashboard/app/tsconfig.json'), root),
 ];
 if (styleViolations.length === 0) {
-  console.log('style: clean (floating promises, top-level await, import.meta)');
+  console.log(
+    'style: clean (floating promises, top-level await, import.meta, window globals)',
+  );
 } else {
   console.error(formatStyleViolations(styleViolations));
   console.error(`\nstyle: ${styleViolations.length} violation(s)`);

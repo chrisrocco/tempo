@@ -643,7 +643,7 @@ export class ExecutionDetailView extends LitElement {
           type: 'application/json',
         }),
       );
-      const anchor = document.createElement('a');
+      const anchor = window.document.createElement('a');
       // Bracket notation on the two sink properties, per the repo convention in
       // tools/conventions.ts: a DOM security scanner matches `.href =` and
       // `.download =` by syntax, and the audit trail it produces is only useful
