@@ -4,10 +4,11 @@
  * entrypoint that hands both to the library.
  *
  * Run it with `tempo up examples/greeter.ts`, or directly — `TEMPO_SERVER_URL`
- * picks the server, `TEMPO_ROLE` picks a single poll loop, and `--describe`
- * prints what the artifact contains (see src/tempo.ts for the full input
- * surface). This is the binary spec/integration/distributed.spec.ts and
- * cli.spec.ts actually run, so it stays honest.
+ * picks the server, `TEMPO_ROLE` picks a single poll loop, `--runtime=local`
+ * composes an in-process runtime instead of connecting to anything, and
+ * `--describe` prints what the artifact contains (see src/tempo.ts for the full
+ * input surface). This is the binary spec/integration/distributed.spec.ts,
+ * cli.spec.ts, and worker_entrypoint.spec.ts actually run, so it stays honest.
  *
  * Real projects should split activities and workflows into separate modules: a
  * workflow module that imports activities with `import type * as` keeps their

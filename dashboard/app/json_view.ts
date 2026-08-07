@@ -54,7 +54,7 @@ export class JsonView extends LitElement {
   declare copied: 'idle' | 'ok' | 'failed';
 
   /** Clears the copy feedback; cancelled on disconnect so it cannot outlive us. */
-  private copyTimer: ReturnType<typeof setTimeout> | undefined;
+  private copyTimer: ReturnType<typeof window.setTimeout> | undefined;
 
   constructor() {
     super();
@@ -65,7 +65,7 @@ export class JsonView extends LitElement {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
-    if (this.copyTimer !== undefined) clearTimeout(this.copyTimer);
+    if (this.copyTimer !== undefined) window.clearTimeout(this.copyTimer);
   }
 
   /**
@@ -77,15 +77,15 @@ export class JsonView extends LitElement {
    */
   private async copy(text: string): Promise<void> {
     try {
-      await navigator.clipboard.writeText(text);
+      await window.navigator.clipboard.writeText(text);
       this.copied = 'ok';
     } catch {
       // Either no clipboard API (insecure context) or permission refused.
       // Which one it was does not change what the reader can do about it.
       this.copied = 'failed';
     }
-    if (this.copyTimer !== undefined) clearTimeout(this.copyTimer);
-    this.copyTimer = setTimeout(() => {
+    if (this.copyTimer !== undefined) window.clearTimeout(this.copyTimer);
+    this.copyTimer = window.setTimeout(() => {
       this.copied = 'idle';
     }, COPY_FEEDBACK_MS);
   }

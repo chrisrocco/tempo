@@ -43,7 +43,7 @@ type RpcResponse = {ok: true; value: unknown} | {ok: false; error: string};
  * connection, and only its *result* is discarded.
  */
 async function call<T>(body: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch('/', {
+  const response = await window.fetch('/', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify(body),

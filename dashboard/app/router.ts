@@ -22,7 +22,7 @@ import {type Route, parseRoute} from './routes.js';
 
 /** Navigate, which is just a hash assignment — the event does the rest. */
 export function navigate(href: string): void {
-  location.hash = href;
+  window.location.hash = href;
 }
 
 /**
@@ -30,13 +30,13 @@ export function navigate(href: string): void {
  *
  * `hashchange` rather than `popstate`: both fire for a hash change, but
  * `hashchange` is the one that means *only* that, and it also fires for the
- * programmatic `location.hash =` assignment that `navigate` performs.
+ * programmatic `window.location.hash =` assignment that `navigate` performs.
  */
 export class RouteController implements ReactiveController {
   route: Route;
 
   constructor(private readonly host: ReactiveControllerHost) {
-    this.route = parseRoute(location.hash);
+    this.route = parseRoute(window.location.hash);
     host.addController(this);
   }
 
@@ -52,7 +52,7 @@ export class RouteController implements ReactiveController {
 
   /** An arrow so it keeps `this` and stays identical across add/remove. */
   private readonly onHashChange = (): void => {
-    this.route = parseRoute(location.hash);
+    this.route = parseRoute(window.location.hash);
     this.host.requestUpdate();
   };
 }

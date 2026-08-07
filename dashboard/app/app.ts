@@ -97,8 +97,12 @@ class TempoApp extends LitElement {
     // Applied here rather than at module load: the stored choice has to reach
     // the document before first paint, and this runs once, when the shell is
     // constructed.
-    this.theme = readThemeMode(localStorage);
-    applyThemeMode(this.theme, document.documentElement, localStorage);
+    this.theme = readThemeMode(window.localStorage);
+    applyThemeMode(
+      this.theme,
+      window.document.documentElement,
+      window.localStorage,
+    );
   }
 
   static override styles = [
@@ -185,7 +189,11 @@ class TempoApp extends LitElement {
         aria-label="colour theme"
         @change=${(e: Event) => {
           this.theme = (e.target as HTMLSelectElement).value as ThemeMode;
-          applyThemeMode(this.theme, document.documentElement, localStorage);
+          applyThemeMode(
+            this.theme,
+            window.document.documentElement,
+            window.localStorage,
+          );
         }}
       >
         ${THEME_MODES.map(

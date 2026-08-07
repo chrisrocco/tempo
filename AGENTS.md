@@ -260,6 +260,18 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
     comment at the assignment. The export anchor in
     `dashboard/app/execution_detail.ts` is the worked example. **Checked** — see
     below.
+-   **Browser globals are qualified with `window.`** in `dashboard/app/`:
+    `window.localStorage`, `window.location.hash`, `window.document`,
+    `window.setTimeout`, `window.fetch`. Bare, each of these is
+    indistinguishable at the call site from an import or a local, and the
+    dashboard's other half is Node — where `fetch`, `setTimeout`, and
+    `navigator` all exist with different types and behaviour, and the two halves
+    get edited in the same sitting. The list is window-owned *state and
+    services*, not global constructors: `new URL(…)` and `new Blob(…)` stay as
+    they are, because `new window.Blob()` reads as a mistake and nothing about a
+    constructor is ambient. See `WINDOW_GLOBALS` in
+    [`tools/style.ts`](tools/style.ts) for the exact set. **Checked** — see
+    below.
 -   **`function` over arrow functions** for statement functions — including
     helpers in specs, which is where the exceptions used to collect. A `const`
     bound to an arrow is still right when the arrow is a *value* satisfying a
@@ -273,7 +285,7 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
 
 `npm run lint` runs [`tools/boundaries.ts`](tools/boundaries.ts) for layering,
 [`tools/conventions.ts`](tools/conventions.ts) for the three written-shape rules
-above, and [`tools/style.ts`](tools/style.ts) for three rules a regex cannot decide —
+above, and [`tools/style.ts`](tools/style.ts) for four rules a regex cannot decide —
 it builds a real TypeScript program, because "is this a promise?" is a question
 about types and "is this await top-level?" is a question about scope. Its
 `@fileoverview` explains each rule and the failure it prevents; in short:
@@ -288,6 +300,11 @@ about types and "is this await top-level?" is a question about scope. Its
     `import.meta` is a *syntax* error under CommonJS, not a diagnostic).
     Entrypoints use `void run().then(…)`, and paths resolve via `path.resolve()`
     from the working directory.
+-   **No unqualified browser global in `dashboard/app/`.** The `window.` rule
+    above, and the clearest case for needing a program rather than a regex:
+    `routes.ts` declares a local named `history`, and the bare word appears over
+    a hundred times across the app. Only the checker can tell that local from
+    `window.history` — which is exactly why the qualified form is worth writing.
 
 The conventions checker is the one that reads the **whole tree** rather than a
 compiler's view of it — `tools/` and `spec/` are in no tsconfig, and the first

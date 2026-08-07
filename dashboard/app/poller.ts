@@ -63,7 +63,7 @@ export class Poller<T> implements ReactiveController {
   pending = false;
 
   private task: PollTask<T>;
-  private timer: ReturnType<typeof setTimeout> | undefined;
+  private timer: ReturnType<typeof window.setTimeout> | undefined;
   private inFlight: AbortController | undefined;
   private failures = 0;
   private connected = false;
@@ -79,7 +79,10 @@ export class Poller<T> implements ReactiveController {
 
   hostConnected(): void {
     this.connected = true;
-    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    window.document.addEventListener(
+      'visibilitychange',
+      this.onVisibilityChange,
+    );
     // Fire-and-forget by design: `run` reports failure through `error` rather
     // than rejecting, and there is no caller here to await it.
     void this.run();
@@ -87,7 +90,10 @@ export class Poller<T> implements ReactiveController {
 
   hostDisconnected(): void {
     this.connected = false;
-    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    window.document.removeEventListener(
+      'visibilitychange',
+      this.onVisibilityChange,
+    );
     this.cancel();
   }
 
@@ -130,7 +136,7 @@ export class Poller<T> implements ReactiveController {
 
   /** Stop the timer and abort whatever is in flight. */
   private cancel(): void {
-    if (this.timer !== undefined) clearTimeout(this.timer);
+    if (this.timer !== undefined) window.clearTimeout(this.timer);
     this.timer = undefined;
     this.inFlight?.abort();
     this.inFlight = undefined;
@@ -170,12 +176,12 @@ export class Poller<T> implements ReactiveController {
    * kept running while nobody was looking.
    */
   private schedule(): void {
-    if (!this.connected || document.hidden) return;
+    if (!this.connected || window.document.hidden) return;
     const delay =
       this.failures === 0
         ? this.intervalMs
         : Math.min(this.intervalMs * 2 ** this.failures, MAX_BACKOFF_MS);
-    this.timer = setTimeout(() => void this.run(), delay);
+    this.timer = window.setTimeout(() => void this.run(), delay);
   }
 
   /**
@@ -184,7 +190,7 @@ export class Poller<T> implements ReactiveController {
    * `add` and `remove`.
    */
   private readonly onVisibilityChange = (): void => {
-    if (document.hidden) this.cancel();
+    if (window.document.hidden) this.cancel();
     else this.refresh();
   };
 }
