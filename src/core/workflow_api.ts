@@ -18,17 +18,51 @@ import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
 
 /**
+ * Has history already dispatched this command, so that emitting it again would
+ * double-dispatch?
+ *
+ * History answers directly for everything that leaves a trace at its seq: a
+ * marker, or a completion. Both are written by the server only after it has acted
+ * on the command, so a seq history has never seen is a command the server has
+ * never run.
+ *
+ * Two commands leave no trace, and they are not the same case:
+ *
+ * - **`cancelChild`** writes no marker on purpose — its durable record is the
+ *   `cancelRequested` event on the *child* (see `server/server_core`), which this
+ *   history cannot show. "No trace" is therefore *unknown*, not "never
+ *   dispatched", so it falls back to `isLive`. That is a proxy, with the same
+ *   blind spot the rest of this rule exists to close: a `cancelChild` issued
+ *   mid-batch is still dropped. Giving it a marker of its own is the fix, and it
+ *   is a protocol change rather than a change here.
+ * - **`continueAsNew`** writes no marker either, but for it "no trace" is
+ *   decisive: dispatching one *empties* the run's history (`resetForContinueAsNew`).
+ *   A run being replayed against events has provably not had one dispatched, so
+ *   re-emitting is not a risk — it is the only way the rollover ever happens.
+ */
+function alreadyDispatched(ctx: WorkflowContext, command: Command): boolean {
+  if (command.type === 'cancelChild') return !ctx.isLive;
+  return ctx.dispatchedSeqs.has(command.seq);
+}
+
+/**
  * The one place a command becomes real. Every site that mints a `Command` must go
  * through here: `requested` is recorded unconditionally (it is what the marker
- * check compares against on replay) while `commands` is only appended past the
- * live edge (re-emitting a durable command would double-dispatch). Setting one
- * without the other is the bug this helper exists to prevent — a command that
+ * check compares against on replay) while `commands` — what the server has yet to
+ * see — is appended only for work history does not already hold. Setting one
+ * without the other is the bug this helper exists to prevent: a command that
  * skipped `requested` looks unrequested on the next replay and would fail the
  * check on a perfectly correct workflow.
+ *
+ * The suppression rule is keyed on **history**, not on the live-edge flag. `isLive`
+ * says the batch is exhausted, which is a fact about position; the question here
+ * is whether this seq is already durable, which is a fact about content. They
+ * diverge whenever an activation carries more than one new event — see
+ * `core/replay`'s fileoverview for the wedge that produced.
  */
 function issue(ctx: WorkflowContext, command: Command): void {
   ctx.requested.set(command.seq, command);
-  if (ctx.isLive) ctx.commands.push(command);
+  if (!alreadyDispatched(ctx, command)) ctx.commands.push(command);
 }
 
 function scheduleCommand(spec: CommandSpec): Promise<unknown> {
