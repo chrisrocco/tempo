@@ -72,6 +72,11 @@ Two halves, in `app/` and `server/`.
 engine's projection types and predicates directly, which is what makes a field
 added to a projection a compile error here rather than `undefined` at runtime.
 
+The bundle is built `--format=iife` because `app/index.html` loads it as a
+classic script. That pairing is not free-standing — the comment at the top of
+`index.html` says why the shell cannot use `type="module"` and what breaks if the
+two drift apart, and `tools/conventions.ts` fails the lint if they do.
+
 `server/` serves `dist/` and forwards the page's RPC calls to the engine. The
 forwarding is why the browser only ever talks to one origin, and why the engine
 needed no CORS support added to it. It reads files and proxies; there is nothing

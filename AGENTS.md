@@ -284,8 +284,9 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
 ### The rules that are checked
 
 `npm run lint` runs [`tools/boundaries.ts`](tools/boundaries.ts) for layering,
-[`tools/conventions.ts`](tools/conventions.ts) for the three written-shape rules
-above, and [`tools/style.ts`](tools/style.ts) for four rules a regex cannot decide —
+[`tools/conventions.ts`](tools/conventions.ts) for the written-shape rules — the
+ones above, plus a few that are documented in the files they constrain rather
+than here — and [`tools/style.ts`](tools/style.ts) for four a regex cannot decide —
 it builds a real TypeScript program, because "is this a promise?" is a question
 about types and "is this await top-level?" is a question about scope. Its
 `@fileoverview` explains each rule and the failure it prevents; in short:
@@ -307,11 +308,12 @@ about types and "is this await top-level?" is a question about scope. Its
     `window.history` — which is exactly why the qualified form is worth writing.
 
 The conventions checker is the one that reads the **whole tree** rather than a
-compiler's view of it — `tools/` and `spec/` are in no tsconfig, and the first
-default import it found was in `tools/`. Its rules are pure functions over file
-contents, so [`spec/conventions.spec.ts`](spec/conventions.spec.ts) can feed them
-planted breakage; the suite runs them, the same way it runs the boundary and
-dependency rules.
+compiler's view of it — `tools/` and `spec/` are in no tsconfig, the first
+default import it found was in `tools/`, and some of its rules are about files no
+compiler reads at all. Its rules are pure functions over file contents, so
+[`spec/conventions.spec.ts`](spec/conventions.spec.ts) can feed them planted
+breakage; the suite runs them, the same way it runs the boundary and dependency
+rules.
 
 One more is enforced by the compiler rather than a tool:
 `noPropertyAccessFromIndexSignature` in `tsconfig.json` requires `obj['key']`

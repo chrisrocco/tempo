@@ -25,6 +25,7 @@ import 'jasmine';
 import {spawn, type ChildProcess} from 'node:child_process';
 import type {AddressInfo} from 'node:net';
 import * as path from 'node:path';
+import {Script} from 'node:vm';
 import {createRpcServer, createServerHost} from '../../src/services';
 import type {ServerHost} from '../../src/services';
 
@@ -96,17 +97,43 @@ describe('the dashboard process', () => {
    * names a module the server has never heard of — which is exactly what
    * happened when the app moved and `index.html` did not.
    */
-  it('serves the entry module the shell actually asks for', async () => {
+  it('serves the entry script the shell actually asks for', async () => {
     const html = await (await fetch(base)).text();
-    const src = /<script type="module" src="([^"]+)"><\/script>/.exec(
-      html,
-    )?.[1];
+    const src = /<script defer src="([^"]+)"><\/script>/.exec(html)?.[1];
 
     expect(src).toBeDefined();
     const response = await fetch(`${base}${src}`);
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/javascript');
+  });
+
+  /**
+   * The shell is consumed by a downstream build that will not take a module
+   * script, so the served page must not carry one — checked here on the *built*
+   * output, because that is what a browser fetches. `tools/conventions.ts` holds
+   * the same rule over the sources.
+   *
+   * The second assertion is the pair to it: whatever the page loads has to be
+   * *compilable* as a classic script. `vm.Script` compiles without running,
+   * which is exactly the parse an ESM statement fails.
+   *
+   * Being honest about its reach — today it would pass under either bundle
+   * format, because this entry exports nothing and leaves nothing external, so
+   * esbuild's ESM output happens to carry no module syntax at all. It bites the
+   * first time the entry exports something or a dependency is marked external,
+   * which is precisely when the format pairing stops being cosmetic.
+   */
+  it('loads its bundle as a classic script, and ships one that parses as one', async () => {
+    const html = await (await fetch(base)).text();
+    // The tag, not the page: `index.html` explains this rule in a comment, and
+    // a substring check would read the explanation as the violation.
+    expect(html).not.toMatch(/<script\b[^>]*type=["']module["']/);
+
+    const src = /<script defer src="([^"]+)"><\/script>/.exec(html)?.[1];
+    const bundle = await (await fetch(`${base}${src}`)).text();
+
+    expect(() => new Script(bundle)).not.toThrow();
   });
 
   /**
@@ -117,9 +144,7 @@ describe('the dashboard process', () => {
    */
   it('inlines the engine protocol into the bundle', async () => {
     const html = await (await fetch(base)).text();
-    const src = /<script type="module" src="([^"]+)"><\/script>/.exec(
-      html,
-    )?.[1];
+    const src = /<script defer src="([^"]+)"><\/script>/.exec(html)?.[1];
     const bundle = await (await fetch(`${base}${src}`)).text();
 
     expect(bundle).toContain('isStuck');

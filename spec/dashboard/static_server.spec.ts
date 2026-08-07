@@ -74,7 +74,7 @@ describe('the dashboard file server', () => {
     appRoot = mkdtempSync(path.join(tmpdir(), 'tempo-dist-'));
     writeFileSync(
       path.join(appRoot, 'index.html'),
-      '<title>tempo</title><script type="module" src="/app.js"></script>',
+      '<title>tempo</title><script defer src="/app.js"></script>',
     );
     writeFileSync(path.join(appRoot, 'app.js'), 'export const a = 1;');
     writeFileSync(path.join(appRoot, 'app.js.map'), '{"version":3}');

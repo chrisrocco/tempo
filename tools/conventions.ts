@@ -65,8 +65,27 @@
  *    templates: those are template syntax rather than a property write, bracket
  *    notation cannot express them, and the string scan below does not see inside
  *    a template literal anyway.
+ *
+ * 4. **The shell loads a classic script, and the bundle is built to match.** A
+ *    downstream build system consumes `dashboard/app/index.html` and does not
+ *    accept `type="module"`, so the shell carries a plain `<script defer>`.
+ *
+ *    That constrains the *bundle*, which is why this is two checks and not one.
+ *    esbuild's ESM output carries `import`/`export` statements as soon as the
+ *    entry exports something or a dependency is left external, and those are a
+ *    syntax error in a classic script — the page dies before rendering. Today's
+ *    entry does neither, so the formats differ only by the wrapper; the rule is
+ *    what stops the first export from turning the page blank. So the esbuild
+ *    invocation in `dashboard/package.json` must stay `--format=iife`. Neither
+ *    file mentions the other and each looks perfectly correct on its own, which
+ *    is the shape of coupling worth having a checker for.
+ *
+ *    HTML comments are stripped before the scan, so the comment in `index.html`
+ *    explaining the rule does not trip it.
  */
 
+import {readFileSync} from 'node:fs';
+import * as path from 'node:path';
 import {readSourceFiles, stripCommentsAndStrings} from './boundaries';
 import type {SourceFile} from './boundaries';
 
@@ -74,7 +93,12 @@ import type {SourceFile} from './boundaries';
 export interface ConventionViolation {
   path: string;
   line: number;
-  rule: 'namespace-import' | 'spec-harness-import' | 'dom-sink-bracket';
+  rule:
+    | 'namespace-import'
+    | 'spec-harness-import'
+    | 'dom-sink-bracket'
+    | 'classic-script'
+    | 'bundle-format';
   message: string;
 }
 
@@ -120,6 +144,12 @@ function isDashboardSpec(filePath: string): boolean {
 function isBrowserCode(filePath: string): boolean {
   return filePath.startsWith('dashboard/app/');
 }
+
+/**
+ * The manifest whose build command has to agree with the shell. Read as a file
+ * like everything else, so the rule stays a pure function of file contents.
+ */
+export const BUNDLE_MANIFEST = 'dashboard/package.json';
 
 /**
  * Blank the *bodies* of string and template literals, keeping the quotes and
@@ -202,13 +232,70 @@ function checkDomSinkBrackets(
 }
 
 /**
+ * A page's `<script>` tags must be classic. Comments are blanked first, so the
+ * note in `index.html` explaining this rule is not read as breaking it.
+ */
+function checkClassicScript(file: SourceFile): ConventionViolation[] {
+  const withoutComments = file.text.replace(/<!--[\s\S]*?-->/g, (match) =>
+    match.replace(/[^\n]/g, ' '),
+  );
+  const violations: ConventionViolation[] = [];
+  withoutComments.split('\n').forEach((lineText, index) => {
+    if (!/<script\b[^>]*\btype\s*=\s*["']module["']/.test(lineText)) return;
+    violations.push({
+      path: file.path,
+      line: index + 1,
+      rule: 'classic-script',
+      message:
+        'load this as a classic script — `<script defer src="…">`, no `type="module"`. A downstream build system consumes this shell and does not accept a module script. `defer` keeps the timing a module had: run after parsing, so the elements below are already in the document',
+    });
+  });
+  return violations;
+}
+
+/**
+ * The other half of rule 4: the bundle behind a classic script cannot be ESM.
+ *
+ * Checked against the build command rather than the built file, so it fails at
+ * lint time rather than in a browser, and so it fails *now* rather than on the
+ * day the entry grows an export — which is when an ESM bundle would start
+ * emitting the module syntax a classic script cannot parse.
+ */
+function checkBundleFormat(file: SourceFile): ConventionViolation[] {
+  const violations: ConventionViolation[] = [];
+  file.text.split('\n').forEach((lineText, index) => {
+    if (!/--format=(esm|es6|module)\b/.test(lineText)) return;
+    violations.push({
+      path: file.path,
+      line: index + 1,
+      rule: 'bundle-format',
+      message:
+        'build this bundle `--format=iife`: the shell loads it as a classic script (see dashboard/app/index.html), and esbuild ESM output carries `import`/`export` as soon as the entry exports something or a dependency goes external — a syntax error in a classic script, and a blank page with both files looking correct',
+    });
+  });
+  return violations;
+}
+
+/**
  * Check every supplied file against the conventions. Pure: it takes file
  * contents and returns violations, so the rules can be tested against
  * deliberately planted breakage rather than only against code that passes.
+ *
+ * Dispatched on what the file *is*: the TypeScript rules would read an HTML
+ * page or a manifest as source and report nonsense about both.
  */
 export function checkConventions(files: SourceFile[]): ConventionViolation[] {
   const violations: ConventionViolation[] = [];
   for (const file of files) {
+    if (file.path.endsWith('.html')) {
+      violations.push(...checkClassicScript(file));
+      continue;
+    }
+    if (file.path === BUNDLE_MANIFEST) {
+      violations.push(...checkBundleFormat(file));
+      continue;
+    }
+
     const stripped = stripCommentsAndStrings(file.text);
     const blanked = blankStringBodies(stripped);
 
@@ -221,9 +308,18 @@ export function checkConventions(files: SourceFile[]): ConventionViolation[] {
   return violations;
 }
 
-/** Read every directory the conventions cover. */
+/**
+ * Read every directory the conventions cover, plus the one manifest a rule is
+ * about. `.html` comes along because the shell is source too — it is written by
+ * hand and shipped as-is.
+ */
 export function readCheckedFiles(root: string): SourceFile[] {
-  return readSourceFiles(root, [...CHECKED_DIRS]);
+  const files = readSourceFiles(root, [...CHECKED_DIRS], ['.ts', '.html']);
+  files.push({
+    path: BUNDLE_MANIFEST,
+    text: readFileSync(path.join(root, BUNDLE_MANIFEST), 'utf8'),
+  });
+  return files;
 }
 
 /** Format violations for a terminal, grouped so the output is scannable. */
