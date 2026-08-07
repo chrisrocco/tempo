@@ -222,6 +222,7 @@ src/
   tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
 bin/              server-main (the server process) · tempo (the CLI)
 examples/         greeter.ts — the reference deployable worker
+                  launch/ — a long-running pipeline: reconcile, ramp, approve
 spec/             the executable documentation
 ```
 
@@ -267,6 +268,8 @@ Spec                                                                  | Covers
 --------------------------------------------------------------------- | ------
 [`integration/local`](spec/integration/local.spec.ts)                 | The whole programming model against `createLocalRuntime`
 [`core/replay`](spec/core/replay.spec.ts)                             | The live edge, command suppression, terminal outcomes
+[`core/coalesced_batch`](spec/core/coalesced_batch.spec.ts)           | An activation carrying several events: what must still be emitted
+[`integration/launch`](spec/integration/launch.spec.ts)               | A two-week pipeline end to end — reconcile, ramp, approve, roll back
 [`core/apply_event`](spec/core/apply_event.spec.ts)                   | Event routing, markers, buffering, the nondeterminism check
 [`core/condition`](spec/core/condition.spec.ts)                       | Parking, the unblock fixpoint, the condSeq invariant
 [`core/workflow_api`](spec/core/workflow_api.spec.ts)                 | seq allocation and command payloads
