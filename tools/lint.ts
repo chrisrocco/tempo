@@ -28,9 +28,11 @@ import {
 } from './dependencies';
 import {checkStyle, formatStyleViolations, programFor} from './style';
 
-// Resolved from the working directory: `import.meta` is banned repo-wide (see
-// tools/style.ts), and npm scripts always run from the repo root.
-const root = path.resolve('.');
+// Resolved from this file rather than from the working directory, so the same
+// answer comes back under `npm run lint`, under an editor task, and under a
+// build system that picks its own cwd. `import.meta` is banned repo-wide (see
+// tools/style.ts); `__dirname` is what CommonJS gives instead.
+const root = path.resolve(__dirname, '..');
 
 const files = readSourceFiles(root, ['src', 'examples']);
 const boundaryViolations = checkBoundaries(files);

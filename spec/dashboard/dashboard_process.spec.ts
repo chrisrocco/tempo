@@ -24,12 +24,12 @@
 import 'jasmine';
 import {spawn, type ChildProcess} from 'node:child_process';
 import type {AddressInfo} from 'node:net';
-import * as path from 'node:path';
 import {Script} from 'node:vm';
 import {createRpcServer, createServerHost} from '../../src/services';
 import type {ServerHost} from '../../src/services';
+import {repoPath} from '../support/repo_root';
 
-const DASHBOARD_MAIN = path.resolve('dashboard/server/main.ts');
+const DASHBOARD_MAIN = repoPath('dashboard/server/main.ts');
 
 function waitForLine(
   proc: ChildProcess,

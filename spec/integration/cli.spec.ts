@@ -8,16 +8,21 @@
 
 import {spawn, type ChildProcess} from 'node:child_process';
 import {forwardOutput, stopChild, waitForLine} from '../../src/cli/process';
+import {repoPath} from '../support/repo_root';
 
-const WORKER = 'examples/greeter.ts';
+const WORKER = repoPath('examples/greeter.ts');
 /** A worker whose workflow settles as failed; see its @fileoverview for why. */
 const FAILING_WORKER = 'spec/support/failing_worker.ts';
 
 function tempo(args: string[]): ChildProcess {
-  return spawn(process.execPath, ['--import', 'tsx', 'bin/tempo.ts', ...args], {
-    env: {...process.env},
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  return spawn(
+    process.execPath,
+    ['--import', 'tsx', repoPath('bin/tempo.ts'), ...args],
+    {
+      env: {...process.env},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
 }
 
 function wait(ms: number): Promise<void> {

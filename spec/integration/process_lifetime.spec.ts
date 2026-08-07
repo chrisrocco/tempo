@@ -24,7 +24,7 @@
  */
 
 import {spawn} from 'node:child_process';
-import * as path from 'node:path';
+import {repoPath} from '../support/repo_root';
 
 interface Run {
   stdout: string;
@@ -46,7 +46,7 @@ function run(script: string, timeoutMs = 10_000): Promise<Run> {
     const started = Date.now();
     const child = spawn(
       process.execPath,
-      ['--import', 'tsx', path.resolve(script)],
+      ['--import', 'tsx', repoPath(script)],
       {stdio: ['ignore', 'pipe', 'pipe']},
     );
     let stdout = '';

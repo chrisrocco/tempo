@@ -28,9 +28,10 @@ import {
 } from '../../src/services';
 import {startWorker, resolveRuntime} from '../../src/tempo';
 import {proxyActivities} from '../../src/workflow';
+import {repoPath} from '../support/repo_root';
 
 /** The reference deployable binary, run as a deployment would run it. */
-const WORKER_ENTRY = 'examples/greeter.ts';
+const WORKER_ENTRY = repoPath('examples/greeter.ts');
 
 /** Run a worker binary to completion, capturing what it printed. */
 function runToCompletion(

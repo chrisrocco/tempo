@@ -11,16 +11,16 @@
  * pinned down.
  */
 
-import * as path from 'node:path';
 import {
   CHECKED_DIRS,
   checkConventions,
   readCheckedFiles,
 } from '../tools/conventions';
 import type {SourceFile} from '../tools/boundaries';
+import {REPO_ROOT} from './support/repo_root';
 
-// See tools/lint.ts — resolved from the working directory, not the module URL.
-const repoRoot = path.resolve('.');
+// See spec/support/repo_root.ts — fixed to this file, not to the caller's cwd.
+const repoRoot = REPO_ROOT;
 
 /** One synthetic file, so a rule can be tested without touching the real tree. */
 function file(filePath: string, text: string): SourceFile {

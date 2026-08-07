@@ -29,13 +29,22 @@ import {forwardOutput, spawnEntry, stopChild, waitForLine} from './process';
 /**
  * The framework's own server main — shipped with the CLI, never user-built.
  *
- * Resolved against the working directory rather than the module's own URL:
- * `import.meta` is not available under every module target this has to build
- * for, so it is banned repo-wide (`tools/style.ts`). The trade is real — this
- * now assumes the CLI runs from the repo root, which `npm run tempo` does. A
- * CLI installed elsewhere would need its entry passed in explicitly.
+ * Resolved from this module's own directory, so the CLI finds its server
+ * wherever it is run from. It used to resolve against the *working directory*,
+ * which assumed `npm run tempo` from the repo root and broke anywhere else —
+ * a trade the comment here admitted to, taken because `import.meta` is banned
+ * (`tools/style.ts`) and ESM left nothing else to use. CommonJS has
+ * `__dirname`, so the trade is off.
+ *
+ * Two levels up from `src/cli/` is the package root; `bin/` sits beside `src/`.
  */
-const SERVER_ENTRY = path.resolve('bin/server-main.ts');
+const SERVER_ENTRY = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  'bin',
+  'server-main.ts',
+);
 
 /** One workflow to run to completion, for `up`'s one-shot mode. */
 export interface RunRequest {
