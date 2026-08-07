@@ -192,19 +192,28 @@ describe('core replay — the live edge', () => {
 });
 
 /**
- * An activation is a *batch* of new events, and every case above applies exactly
- * one — which is what hid issue #39. Give the batch a trailing event and the
- * workflow can reach genuinely new work while there is still history left to
- * consume, so a rule keyed on position drops it: the command is never dispatched,
- * history never records it, and the next replay drops it for the same reason.
- * Nothing throws, so the execution simply parks forever.
+ * What history has no record of must be emitted, *whenever* the workflow reaches
+ * it — issue #39. Suppression is a question about content, and the cases above
+ * only ever ask it at a moment when position happens to answer it correctly.
  *
- * The shape is ordinary rather than exotic — `ports/workflow_task_queue` coalesces
- * a wake landing mid-task into one more task, so a signal arriving while an
- * activity completion is in flight produces exactly `[…, activityCompleted,
- * signal]`.
+ * Two triggers reach a genuinely new command while history remains, and they are
+ * worth separating because they fail at different points in the driver:
+ *
+ * 1. **Mid-batch.** An activation is a *batch*, and every case above applies
+ *    exactly one event. Give the batch a trailing event and settling an earlier
+ *    completion carries the workflow onward while events remain. Ordinary rather
+ *    than exotic: `ports/workflow_task_queue` coalesces a wake landing mid-task
+ *    into one more task, so a signal arriving while an activity completion is in
+ *    flight produces exactly `[…, activityCompleted, signal]`.
+ * 2. **A first task that already has history.** A signal landing between the
+ *    start and the worker's first poll gives task one a history of `[signal]`, so
+ *    the workflow's initial synchronous run — before any event is applied —
+ *    reaches new work with nothing consumed yet.
+ *
+ * Both drop the command, so history never records it and the next replay drops it
+ * for the same reason. Nothing throws; the execution simply parks forever.
  */
-describe('core replay — activations carrying more than one event', () => {
+describe('core replay — new work reached while history remains', () => {
   const ping = defineSignal('ping');
 
   it('emits a command the workflow reaches before the batch is exhausted', async () => {
@@ -245,6 +254,28 @@ describe('core replay — activations carrying more than one event', () => {
     });
 
     expect(ctx.commands).toEqual([]);
+  });
+
+  /**
+   * The second trigger, and the one a driver change cannot reach: this happens in
+   * the initial run, before the event loop has consumed anything. `isLive` starts
+   * false whenever history is non-empty, so the first command the workflow ever
+   * issues is suppressed despite nothing having dispatched it.
+   */
+  it('emits the first command when the first task already has history', async () => {
+    const events: HistoryEvent[] = [
+      {type: 'signal', name: 'ping', payload: 'early'},
+    ];
+    const ctx = createContext([], events);
+
+    await replay(ctx, async () => {
+      setHandler(ping, () => {});
+      await runActivity('work');
+    });
+
+    expect(ctx.commands).toEqual([
+      {type: 'scheduleActivity', name: 'work', args: [], options: {}, seq: 0},
+    ]);
   });
 
   it('delivers a trailing signal to its handler as well as emitting the new command', async () => {

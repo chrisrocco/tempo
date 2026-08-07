@@ -30,17 +30,27 @@
  * workflow. That holds when an activation applies exactly one new event, which
  * used to be the only shape the specs covered.
  *
- * It breaks the moment a batch has a trailing event, and that batch is ordinary:
- * `ports/workflow_task_queue` coalesces a wake landing mid-task into exactly one
- * more, so a signal arriving while an activity completion is in flight produces
- * `[…, activityCompleted, signal]` — which any workflow with a signal-driven
- * branch beside a main line generates continuously. Settling the earlier
- * completion carries the workflow to a genuinely new command while `isLive` is
- * still false. Keyed on the flag, that command was recorded in `requested` and
- * never pushed: the worker responded without it, history never got its marker, so
- * the next replay dropped it for the same reason, forever. Nothing threw, the
- * execution stayed `running` with no task failures, and it was parked on work the
- * server had no record of — a permanent, silent wedge (issue #39).
+ * Two ordinary situations break it, and they fail at different points here:
+ *
+ * - **A batch with a trailing event.** `ports/workflow_task_queue` coalesces a
+ *   wake landing mid-task into exactly one more, so a signal arriving while an
+ *   activity completion is in flight produces `[…, activityCompleted, signal]` —
+ *   which any workflow with a signal-driven branch beside a main line generates
+ *   continuously. Settling the earlier completion carries the workflow to a
+ *   genuinely new command while `isLive` is still false.
+ * - **A first task that already has history.** `isLive` starts false whenever
+ *   history is non-empty, and a signal landing between the start and the worker's
+ *   first poll gives task one a history of `[signal]`. The workflow's initial
+ *   run — in the `settle` below, before the loop has consumed anything — then
+ *   reaches its *first* command with the flag already false. Note this one is
+ *   not about the loop at all, so no change to how the loop batches events can
+ *   reach it.
+ *
+ * Keyed on the flag, such a command was recorded in `requested` and never pushed:
+ * the worker responded without it, history never got its marker, so the next
+ * replay dropped it for the same reason, forever. Nothing threw, the execution
+ * stayed `running` with no task failures, and it was parked on work the server had
+ * no record of — a permanent, silent wedge (issue #39).
  *
  * ## `settle`: drain + condition unblock
  *

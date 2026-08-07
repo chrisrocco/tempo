@@ -291,6 +291,29 @@ describe('local runtime — signals and condition', () => {
     await expectAsync(handle.result()).toBeResolvedTo(42);
   });
 
+  /**
+   * The signal lands between the start and the worker's first poll, so task one
+   * has a history of `[signal]` — and the workflow's first activity is reached
+   * before any of it is consumed. Suppressing that activity leaves the run parked
+   * on work nobody was asked to do, with nothing raised: `status` stays `running`
+   * forever. Issue #39, at the layer an author would meet it.
+   */
+  it('runs its first activity when a signal arrives before the first task', async () => {
+    const rt = createLocalRuntime()
+      .registerActivity('work', () => 'done')
+      .registerWorkflow('greeter', async () => {
+        const seen: string[] = [];
+        setHandler(defineSignal('ping'), (p: string) => seen.push(p));
+        const result = await runActivity<string>('work');
+        return `${result}/${seen.join(',')}`;
+      });
+
+    const handle = rt.start<string>('greeter');
+    await handle.signal('ping', 'early');
+
+    await expectAsync(handle.result()).toBeResolvedTo('done/early');
+  });
+
   it('accumulates repeated signals before the condition is satisfied', async () => {
     const rt = createLocalRuntime().registerWorkflow('adder', async () => {
       let total = 0;
