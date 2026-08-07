@@ -22,11 +22,12 @@ import {
   type WorkerLoop,
 } from '../../src/worker';
 import {runActivity} from '../../src/workflow';
+import {repoPath} from '../support/repo_root';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
-const WORKER = 'examples/greeter.ts';
+const WORKER = repoPath('examples/greeter.ts');
 
 function spawnMain(
   script: string,
@@ -106,7 +107,7 @@ async function pollUntil<T>(
 async function spawnServer(
   env: Record<string, string> = {},
 ): Promise<{url: string; proc: ChildProcess}> {
-  const proc = spawnMain('bin/server-main.ts', env);
+  const proc = spawnMain(repoPath('bin/server-main.ts'), env);
   const m = await waitForLine(proc, /LISTENING (\d+)/);
   return {url: `http://127.0.0.1:${m[1]}`, proc};
 }

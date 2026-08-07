@@ -7,14 +7,15 @@
  * from './activities'`). The export name is the registered name, so there is no
  * registration boilerplate.
  *
- * The worker binary's full input surface, each environment variable winning over
- * the option of the same name in code:
+ * **The configuration is `StartWorkerOptions`** — see "The options object is the
+ * configuration" below. Everything else is what can reach a worker from outside
+ * that object, and there is deliberately little of it:
  *
- *   TEMPO_SERVER_URL  server to connect to (else `serverUrl`, else 127.0.0.1:7233)
- *   TEMPO_ROLE        `workflow` | `activity` | unset (unset runs both loops)
- *   TEMPO_TASK_QUEUE  which pool to serve (else `taskQueue`, else `default`)
+ *   TEMPO_SERVER_URL  overrides `serverUrl` (else 127.0.0.1:7233)
+ *   TEMPO_TASK_QUEUE  overrides `taskQueue` (else `default`)
+ *   TEMPO_ROLE        overrides `role` — unset runs every role it can
+ *   --runtime=MODE    overrides `runtime` — `remote` (default) or `local`
  *   --describe        print {name, workflows, activities} as JSON and exit
- *   --runtime=MODE    `remote` (default) or `local` — see below
  *
  * Running the *same* binary twice with a different `TEMPO_ROLE` is how the two
  * worker tiers are deployed: workflow workers replay workflow code, activity
@@ -74,15 +75,38 @@
  * will ever run. That is a hang, not a failure, so it is worth the startup
  * error.
  *
- * ## Config in code, with the environment still authoritative
+ * ## The options object is the configuration
  *
- * `serverUrl` and `taskQueue` may be supplied in code — the shape Temporal's own
- * client takes, where the address is a connection argument rather than ambient
- * state — and the environment still wins over both. So what code supplies is the
- * *default the app ships with*, not the deployment: the same artifact still
- * redeploys against a different server by changing `TEMPO_SERVER_URL`, with no
- * rebuild. That is the property the older "config is never passed in code" rule
- * was protecting, and overriding is what preserves it.
+ * `StartWorkerOptions` carries the whole of it — identity, where to connect,
+ * which pool, which role, what to call itself, how hard to poll. Reading that
+ * one object is reading the deployment, in a file that is type-checked, diffed,
+ * and reviewed. It is the config file; it just happens to be TypeScript.
+ *
+ * **Three values can be overridden from the environment, and that is the
+ * exception rather than the pattern**:
+ *
+ *   TEMPO_SERVER_URL  which server
+ *   TEMPO_TASK_QUEUE  which pool
+ *   TEMPO_ROLE        which half of the worker pair
+ *
+ * Those three are what a *deployment* changes about an artifact it did not
+ * build: the same binary rolled into staging, into a second pool, or into the
+ * two-tier split. An override wins when it is set — that is what makes it an
+ * override — so code supplies the default the application ships with and the
+ * environment supplies the deviation.
+ *
+ * Everything else is code only, deliberately. A value that changes only when the
+ * code changes has no business being ambient, where it is invisible at the call
+ * site and inherited by every child process. `identity` is the case that looks
+ * like it wants an environment variable and does not: a container already has
+ * its name in the environment, so write `identity: process.env['HOSTNAME']` in
+ * the options object, where a reader can see where it came from, rather than
+ * growing a second ambient surface that only some deployments set.
+ *
+ * The shape follows Temporal's client, where the address is a connection
+ * argument rather than ambient state — and it is what the older "deployment
+ * config is never passed in code" rule was really protecting, since the
+ * environment still overrides the three values a redeploy needs.
  */
 
 import type {WorkflowFn} from './core';
@@ -99,6 +123,7 @@ import {
   runWorkflowWorker,
   type ActivityFn,
   type WorkerLoop,
+  type WorkerLoopOptions,
 } from './worker';
 
 /** Where a worker looks for its server when `TEMPO_SERVER_URL` is unset. */
@@ -143,6 +168,36 @@ export interface StartWorkerOptions {
    * decides whether the task can run at all.
    */
   taskQueue?: string;
+  /**
+   * Which poll loop to run. `TEMPO_ROLE` overrides it, which is how the same
+   * artifact is deployed twice — one service per role, scaled independently.
+   *
+   * Omitted runs every role the binary has definitions for, which is what a
+   * hand-run binary and `tempo up` want. Naming a role the binary cannot serve
+   * is a startup error rather than a process that polls forever for work it
+   * could never complete.
+   */
+  role?: WorkerRole;
+  /**
+   * What this worker calls itself on every poll, so `tempo queues` can count and
+   * name the fleet. Defaults to `${pid}@${hostname}`.
+   *
+   * Worth setting wherever the process is not where an operator would look: a
+   * container id or a deployment name beats a pid on a host nobody can ssh to.
+   * In a container that value is already in the environment, so pass
+   * `process.env['HOSTNAME']` here rather than reaching for an ambient
+   * `TEMPO_IDENTITY` that would only be set in some deployments.
+   *
+   * Not verified and not unique by construction — two processes claiming one
+   * identity are counted once. See `WorkerInfo`.
+   */
+  identity?: string;
+  /** Backoff when a poll comes back with no task. */
+  pollIntervalMs?: number;
+  /** Delay after the first failed poll; doubles per consecutive failure. */
+  errorBackoffMs?: number;
+  /** Ceiling for that doubling. */
+  maxErrorBackoffMs?: number;
   /** Module namespace of workflow functions, keyed by export name. */
   workflows?: object;
   /** Module namespace of activity functions, keyed by export name. */
@@ -221,30 +276,51 @@ function resolveServerUrl(option: string | undefined): string {
   return process.env['TEMPO_SERVER_URL'] ?? option ?? DEFAULT_SERVER_URL;
 }
 
+/** A configured role and where it came from, so an error can name its source. */
+interface RequestedRole {
+  value: string;
+  source: 'TEMPO_ROLE' | 'role';
+}
+
 /**
- * An explicit `TEMPO_ROLE` is authoritative and must be satisfiable — a worker
- * deployed into a role it cannot serve should fail loudly at startup rather than
- * poll forever for tasks it can never complete. With it unset we run every role
- * the binary has definitions for, so an activities-only worker is legal.
+ * The role the deployment asked for: the environment if it overrode, else the
+ * options object, else none. Trimmed and returned with its origin, because "you
+ * asked for a role this binary cannot serve" is only actionable if it says
+ * *where* the ask was written.
+ */
+function requestedRole(
+  option: WorkerRole | undefined,
+): RequestedRole | undefined {
+  const fromEnvironment = process.env['TEMPO_ROLE']?.trim();
+  if (fromEnvironment) return {value: fromEnvironment, source: 'TEMPO_ROLE'};
+  if (option) return {value: option, source: 'role'};
+  return undefined;
+}
+
+/**
+ * An explicit role is authoritative and must be satisfiable — a worker deployed
+ * into a role it cannot serve should fail loudly at startup rather than poll
+ * forever for tasks it can never complete. With none we run every role the
+ * binary has definitions for, so an activities-only worker is legal.
  */
 function resolveRoles(
-  raw: string | undefined,
+  requested: RequestedRole | undefined,
   name: string,
   hasWorkflows: boolean,
   hasActivities: boolean,
 ): WorkerRole[] {
-  const requested = raw?.trim();
   if (requested) {
-    if (requested !== 'workflow' && requested !== 'activity')
+    const {value, source} = requested;
+    if (value !== 'workflow' && value !== 'activity')
       throw new Error(
-        `TEMPO_ROLE must be "workflow" or "activity" (got "${requested}")`,
+        `${source} must be "workflow" or "activity" (got "${value}")`,
       );
-    const satisfiable = requested === 'workflow' ? hasWorkflows : hasActivities;
+    const satisfiable = value === 'workflow' ? hasWorkflows : hasActivities;
     if (!satisfiable)
       throw new Error(
-        `worker "${name}" started as TEMPO_ROLE=${requested} but registers no ${requested === 'workflow' ? 'workflows' : 'activities'}`,
+        `worker "${name}" started as ${source}=${value} but registers no ${value === 'workflow' ? 'workflows' : 'activities'}`,
       );
-    return [requested];
+    return [value];
   }
 
   const roles: WorkerRole[] = [];
@@ -254,6 +330,16 @@ function resolveRoles(
     throw new Error(`worker "${name}" registers no workflows or activities`);
   return roles;
 }
+
+/**
+ * The pass-through half of the configuration: what the poll loops take and this
+ * entrypoint has no opinion about. Named rather than spread inline so adding a
+ * knob to `WorkerLoopOptions` is one edit here, not three.
+ */
+type WorkerLoopTuning = Pick<
+  WorkerLoopOptions,
+  'identity' | 'pollIntervalMs' | 'errorBackoffMs' | 'maxErrorBackoffMs'
+>;
 
 /** What a runtime mode has to supply: something to stop, and maybe a way in. */
 interface Composition {
@@ -270,6 +356,7 @@ function composeRemote(args: {
   serverUrl: string;
   taskQueue: string;
   roles: readonly WorkerRole[];
+  loop: WorkerLoopTuning;
   workflows: readonly [string, AnyFn][];
   activities: readonly [string, AnyFn][];
 }): Composition {
@@ -295,6 +382,7 @@ function composeRemote(args: {
       registry.set(exported, fn as WorkflowFn);
     loops.push(
       runWorkflowWorker(service, createWorkflowWorker(registry), {
+        ...args.loop,
         onError,
         taskQueue: args.taskQueue,
       }),
@@ -306,6 +394,7 @@ function composeRemote(args: {
       registry.set(exported, fn as ActivityFn);
     loops.push(
       runActivityWorker(service, createActivityWorker(registry), {
+        ...args.loop,
         onError,
         taskQueue: args.taskQueue,
       }),
@@ -366,14 +455,14 @@ export function startWorker(options: StartWorkerOptions): Worker {
   }
 
   const runtime = resolveRuntime(process.argv, options.runtime);
-  const requestedRole = process.env['TEMPO_ROLE']?.trim();
-  if (runtime === 'local' && requestedRole)
+  const role = requestedRole(options.role);
+  if (runtime === 'local' && role)
     throw new Error(
-      `worker "${options.name}" cannot serve TEMPO_ROLE=${requestedRole} under --runtime=local — the local runtime has no poll loops to split, and half of one parks every execution it starts on work nothing will claim`,
+      `worker "${options.name}" cannot serve ${role.source}=${role.value} under --runtime=local — the local runtime has no poll loops to split, and half of one parks every execution it starts on work nothing will claim`,
     );
 
   const roles = resolveRoles(
-    requestedRole,
+    role,
     options.name,
     workflows.length > 0,
     activities.length > 0,
@@ -392,6 +481,13 @@ export function startWorker(options: StartWorkerOptions): Worker {
           serverUrl: resolveServerUrl(options.serverUrl),
           taskQueue,
           roles,
+          // Straight through: what the poll loops take, this entrypoint passes.
+          loop: {
+            identity: options.identity,
+            pollIntervalMs: options.pollIntervalMs,
+            errorBackoffMs: options.errorBackoffMs,
+            maxErrorBackoffMs: options.maxErrorBackoffMs,
+          },
           workflows,
           activities,
         });

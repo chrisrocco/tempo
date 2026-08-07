@@ -296,11 +296,11 @@ about types and "is this await top-level?" is a question about scope. Its
     server to one. Writing `void` is how a deliberate fire-and-forget is
     distinguished from a forgotten `await` — a distinction only the author can
     make, so each `void` here carries a comment saying why.
--   **No top-level `await` in `bin/`, and no `import.meta` anywhere.** Both
-    constrain which module targets the project can compile under (TS1378; and
-    `import.meta` is a *syntax* error under CommonJS, not a diagnostic).
-    Entrypoints use `void run().then(…)`, and paths resolve via `path.resolve()`
-    from the working directory.
+-   **No top-level `await` anywhere, and no `import.meta`.** The Node half of
+    the repo is CommonJS, which has neither: top-level `await` is TS1378 and a
+    module using it does not run, and `import.meta` is a *syntax* error rather
+    than a diagnostic. Use `void run().then(…)`, and resolve paths from
+    `__dirname`. `tsconfig.json` says why the module system is what it is.
 -   **No unqualified browser global in `dashboard/app/`.** The `window.` rule
     above, and the clearest case for needing a program rather than a regex:
     `routes.ts` declares a local named `history`, and the bare word appears over

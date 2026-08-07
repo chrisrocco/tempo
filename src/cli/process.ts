@@ -8,6 +8,19 @@
 
 import {spawn, type ChildProcess} from 'node:child_process';
 
+/**
+ * The `tsx` loader, resolved from *this* module to an absolute path.
+ *
+ * `--import tsx` would make the **child** resolve the bare specifier from its
+ * own working directory, which is not necessarily ours and need not contain a
+ * `node_modules` at all — `tempo up` run from anywhere but the package root
+ * died on `Cannot find package 'tsx'`, in the child, with the parent reporting
+ * only a non-zero exit. `require.resolve` answers from this file's location
+ * instead, which is the same reason `up.ts` resolves its server entry from
+ * `__dirname`.
+ */
+const TSX_LOADER = require.resolve('tsx');
+
 export interface SpawnEntryOptions {
   args?: string[];
   env?: Record<string, string | undefined>;
@@ -28,7 +41,7 @@ export function spawnEntry(
   let commandArgs: string[];
   if (entry.endsWith('.ts') || entry.endsWith('.mts')) {
     command = process.execPath;
-    commandArgs = ['--import', 'tsx', entry, ...args];
+    commandArgs = ['--import', TSX_LOADER, entry, ...args];
   } else if (entry.endsWith('.js') || entry.endsWith('.mjs')) {
     command = process.execPath;
     commandArgs = [entry, ...args];

@@ -1,8 +1,29 @@
 {
+  // The Node half of the repo is **CommonJS**, and that is a requirement rather
+  // than a preference: a downstream build system consumes this code and accepts
+  // `__dirname` but not `import.meta`. Under CommonJS `import.meta` is a syntax
+  // error rather than a diagnostic — which is why it was already banned
+  // repo-wide (`tools/style.ts`) while this was still ESM, and why the ban now
+  // describes what the compiler would do anyway.
+  //
+  // Two consequences worth knowing before writing code here:
+  //
+  //   - `__dirname` and `__filename` exist. Paths resolve from them rather than
+  //     from the working directory or `process.argv[1]`.
+  //   - **Top-level `await` is illegal everywhere**, not just in `bin/`. The
+  //     style checker enforces that; entrypoints use `void run().then(…)`.
+  //
+  // `Node16` rather than plain `CommonJS` because the module resolver has to
+  // read `exports` maps — the dashboard imports `workflow-engine/protocol`, a
+  // subpath this package declares, and the older resolver cannot see it.
+  //
+  // The dashboard's *browser* half stays ESM under its own config
+  // (`dashboard/app/tsconfig.json`); esbuild bundles it to an IIFE, so no module
+  // system survives into what a browser loads.
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "module": "Node16",
+    "moduleResolution": "Node16",
     "lib": ["ES2022"],
     "strict": true,
     "noPropertyAccessFromIndexSignature": true,
