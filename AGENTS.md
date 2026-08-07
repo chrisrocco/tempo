@@ -260,18 +260,6 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
     comment at the assignment. The export anchor in
     `dashboard/app/execution_detail.ts` is the worked example. **Checked** — see
     below.
--   **The dashboard's shell loads a classic script**, and the bundle is built to
-    match. `dashboard/app/index.html` carries `<script defer src="/app.js">` —
-    never `type="module"` — because a downstream build system consumes that
-    shell and will not take a module script. That constrains the bundle too:
-    `dashboard/package.json` builds `--format=iife`, because esbuild's ESM
-    output carries `import`/`export` as soon as the entry exports something or a
-    dependency is left external — a syntax error in a classic script, and a
-    blank page. Today's entry does neither, so the rule is what stops the first
-    export from breaking the page rather than a fix for a current crash. Neither
-    file mentions the other and each looks correct alone, so **both halves are
-    checked** — see below. `defer` is not optional either: it restores the
-    after-parsing timing a module script had by default.
 -   **Browser globals are qualified with `window.`** in `dashboard/app/`:
     `window.localStorage`, `window.location.hash`, `window.document`,
     `window.setTimeout`, `window.fetch`. Bare, each of these is
@@ -296,8 +284,9 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
 ### The rules that are checked
 
 `npm run lint` runs [`tools/boundaries.ts`](tools/boundaries.ts) for layering,
-[`tools/conventions.ts`](tools/conventions.ts) for the four written-shape rules
-above, and [`tools/style.ts`](tools/style.ts) for four rules a regex cannot decide —
+[`tools/conventions.ts`](tools/conventions.ts) for the written-shape rules — the
+ones above, plus a few that are documented in the files they constrain rather
+than here — and [`tools/style.ts`](tools/style.ts) for four a regex cannot decide —
 it builds a real TypeScript program, because "is this a promise?" is a question
 about types and "is this await top-level?" is a question about scope. Its
 `@fileoverview` explains each rule and the failure it prevents; in short:
@@ -320,9 +309,8 @@ about types and "is this await top-level?" is a question about scope. Its
 
 The conventions checker is the one that reads the **whole tree** rather than a
 compiler's view of it — `tools/` and `spec/` are in no tsconfig, the first
-default import it found was in `tools/`, and two of its rules are about files no
-compiler reads at all (`index.html` and `dashboard/package.json`). Its rules are
-pure functions over file contents, so
+default import it found was in `tools/`, and some of its rules are about files no
+compiler reads at all. Its rules are pure functions over file contents, so
 [`spec/conventions.spec.ts`](spec/conventions.spec.ts) can feed them planted
 breakage; the suite runs them, the same way it runs the boundary and dependency
 rules.
