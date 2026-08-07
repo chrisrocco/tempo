@@ -109,6 +109,24 @@ function restore(name: string, value: string | undefined): void {
   else process.env[name] = value;
 }
 
+/**
+ * Retry until a value appears. A worker's first poll is what registers it, so
+ * anything asking the server "who is out there" has to wait for one to land.
+ */
+async function pollUntil<T>(
+  read: () => Promise<T | undefined>,
+  timeoutMs = 5000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const value = await read();
+    if (value !== undefined) return value;
+    if (Date.now() > deadline)
+      throw new Error('timed out waiting for a worker');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 describe('worker entrypoint — choosing a runtime', () => {
   it('runs a workflow end to end in local mode, with no server anywhere', async () => {
     const worker = startWorker({
@@ -348,5 +366,135 @@ describe('worker entrypoint — what it refuses', () => {
     expect(() => startWorker({name: 'empty'})).toThrowError(
       /registers no workflows or activities/,
     );
+  });
+
+  // The error has to name where the ask was written, because "this binary
+  // cannot serve that role" is only actionable if you know which file to open.
+  it('names the environment or the options object, whichever asked', () => {
+    expect(() =>
+      startWorker({name: 'workflows-only', role: 'activity', workflows}),
+    ).toThrowError(/started as role=activity/);
+
+    process.env['TEMPO_ROLE'] = 'activity';
+    expect(() => startWorker({name: 'workflows-only', workflows})).toThrowError(
+      /started as TEMPO_ROLE=activity/,
+    );
+  });
+});
+
+describe('worker entrypoint — the options object is the configuration', () => {
+  it('takes the role from code, with no environment variable in sight', () => {
+    const worker = startWorker({
+      name: 'greeter',
+      role: 'workflow',
+      serverUrl: 'http://127.0.0.1:1', // never reached: nothing is started
+      workflows,
+      activities,
+    });
+
+    expect(worker.roles).toEqual(['workflow']);
+    void worker.stop();
+  });
+
+  // The exception, and the only reason it exists: one artifact, two services.
+  it('lets the environment override the role the code shipped with', () => {
+    process.env['TEMPO_ROLE'] = 'activity';
+
+    const worker = startWorker({
+      name: 'greeter',
+      role: 'workflow',
+      serverUrl: 'http://127.0.0.1:1',
+      workflows,
+      activities,
+    });
+
+    expect(worker.roles).toEqual(['activity']);
+    void worker.stop();
+  });
+
+  /**
+   * `identity` is the config that has no environment variable on purpose — a
+   * container passes `process.env['HOSTNAME']` through the options object
+   * instead. So the thing worth proving is that it travels: the name a
+   * deployment chooses is the name an operator reads back out of `tempo
+   * queues`, which is the whole point of setting it.
+   */
+  it('sends the identity it was configured with to the server', async () => {
+    const server = await startServer();
+    const worker = startWorker({
+      name: 'greeter',
+      serverUrl: server.url,
+      identity: 'greeter-7f3a@cluster-b',
+      workflows,
+      activities,
+    });
+
+    try {
+      const identities = await pollUntil(async () => {
+        const queues = await server.service.listQueues();
+        const names = queues.flatMap((queue) =>
+          queue.workers.map((seen) => seen.identity),
+        );
+        return names.includes('greeter-7f3a@cluster-b') ? names : undefined;
+      });
+
+      expect(identities).toContain('greeter-7f3a@cluster-b');
+    } finally {
+      await worker.stop();
+      await server.teardown();
+    }
+  });
+
+  it('defaults the identity to something an operator can act on', async () => {
+    const server = await startServer();
+    const worker = startWorker({
+      name: 'greeter',
+      serverUrl: server.url,
+      workflows,
+      activities,
+    });
+
+    try {
+      const identities = await pollUntil(async () => {
+        const queues = await server.service.listQueues();
+        const names = queues.flatMap((queue) =>
+          queue.workers.map((seen) => seen.identity),
+        );
+        return names.length > 0 ? names : undefined;
+      });
+
+      // `${pid}@${hostname}` — the convention Temporal uses, and a string that
+      // leads somewhere rather than an opaque handle.
+      expect(identities[0]).toMatch(/^\d+@.+/);
+    } finally {
+      await worker.stop();
+      await server.teardown();
+    }
+  });
+
+  // Pass-through, so what is worth pinning is that the entrypoint accepts them
+  // at all — a knob that exists on the loop and not here is one a deployment
+  // cannot reach without editing the engine.
+  it('accepts the poll timings the loops understand', async () => {
+    const server = await startServer();
+    const worker = startWorker({
+      name: 'greeter',
+      serverUrl: server.url,
+      pollIntervalMs: 5,
+      errorBackoffMs: 10,
+      maxErrorBackoffMs: 100,
+      workflows,
+      activities,
+    });
+
+    try {
+      const {workflowId} = server.service.start('greeter', ['world']);
+      await expectAsync(server.service.getResult(workflowId)).toBeResolvedTo(
+        'Hello, world!',
+      );
+    } finally {
+      await worker.stop();
+      await server.teardown();
+    }
   });
 });
