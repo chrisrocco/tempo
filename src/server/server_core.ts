@@ -51,15 +51,36 @@
  * one place its fix could not see (issue #50). `childCancelRequested` is what
  * closes it.
  *
- * **When the marker is written relative to the dispatch is not uniform**, and the
- * rule is: write it first only where `resume` can re-drive the work from it.
- * `scheduleActivity` and `startTimer` qualify — resume re-enqueues and re-arms
- * from their markers — so they get a write-ahead record, which is what "scheduled
- * before running" above means. `startChild` and `cancelChild` do not: resume
- * correlates a pending child but never launches one, and does not re-drive cancels
- * at all. Theirs go last, and replay re-emitting the command is the recovery
- * instead — safe because both dispatches are idempotent. The `cancelChild` branch
- * of `applyCommand` spells it out.
+ * ## Where the marker is written, and how little of that is forced
+ *
+ * Two branches of `applyCommand` write the marker before dispatching and two
+ * write it after, which looks like an inconsistency and mostly is not one. Every
+ * marker records the same fact — *this command was dispatched* — so the ordering
+ * is not a difference in what is being recorded. It is a difference in **what can
+ * rebuild the work afterwards if the process dies between the two writes.**
+ *
+ * `startChild` and `cancelChild` write theirs **last, and must.** `resume`
+ * re-enqueues a pending `activityScheduled` and re-arms a pending `timerStarted`,
+ * but it never *launches* a child, and does not re-drive cancels at all. So a
+ * marker written before the dispatch and then lost to a crash leaves a marker for
+ * work nothing will ever create: the command suppressed on the next replay, the
+ * parent waiting forever, nothing raised. Their recovery is replay re-emitting the
+ * command, which is safe because both dispatches are idempotent — an id claim
+ * correlates to the existing execution, and `requestCancel` short-circuits on an
+ * existing `cancelRequested`. A marker written first is exactly what would
+ * suppress that recovery.
+ *
+ * `scheduleActivity` and `startTimer` write theirs **first, and that is
+ * precautionary rather than forced.** It keeps the property `resume` reads —
+ * nothing is dispatched that history does not already record as intended, the
+ * "scheduled before running" phrasing above. But the window it closes was not
+ * reachable when tried: moving the append after the enqueue, and then after
+ * `kickActivityWorker` as well, left the suite green, and a completion could not
+ * be made to land before its own marker under either store. The reason it is
+ * unreachable is that the worker's poll path happens to yield more than the write
+ * does, which is an accident of this implementation rather than a guarantee — so
+ * the ordering stays, as cheap insurance against that changing. Do not read it as
+ * load-bearing the way the two above are.
  *
  * ## `continueAsNew` is a terminal disposition here, not in the core
  *
@@ -570,29 +591,16 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     } else if (cmd.type === 'cancelChild') {
       const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
       if (childId) await requestCancel(childId);
-      // Marker last, following `startChild` above, and the rule is mechanical
-      // rather than aesthetic: **write the marker first only if `resume` can
-      // re-drive the work from it.**
+      // Marker last, like `startChild` above and for the same reason — nothing
+      // re-drives a cancel, so replay re-emitting the command is its only
+      // recovery, and a marker written first is what would suppress it. The
+      // header section on write ordering owns the argument.
       //
-      // It can for the two above. `resumeFromHistory` re-enqueues every pending
-      // `activityScheduled` and re-arms every pending `timerStarted`, so those
-      // get a write-ahead record — marker first, then act, and a crash in
-      // between is recovered from the marker. That is what "scheduled before
-      // running" in this file's header means.
-      //
-      // It cannot for children. Resume correlates a pending `childStarted` but
-      // never *launches* one, so a marker written before `launch` and then lost
-      // to a crash leaves a marker for a child nothing will ever create — the
-      // command suppressed, the parent waiting forever. Same for a cancel, which
-      // resume does not re-drive at all. Their recovery is replay re-emitting
-      // the command, which is safe because both dispatches are idempotent: an id
-      // claim correlates, and `requestCancel` short-circuits on an existing
-      // `cancelRequested`. A marker written first would suppress exactly that.
-      //
-      // The crash window is narrow and is the whole of the argument — on the
-      // happy path both orderings finish with both effects done. What makes it
-      // worth ordering deliberately is that the failure is silent: a cancel
-      // suppressed by its own marker never happens and never reports.
+      // Worth knowing while reading it: on the happy path both orderings finish
+      // with both effects done and are indistinguishable. The crash window is
+      // the entire argument. What makes it worth ordering deliberately anyway is
+      // that the failure is silent — a cancel suppressed by its own marker never
+      // happens and never reports.
       //
       // Recorded even when no child was found. The marker is the record of
       // *dispatch*, not of effect: a cancel naming a seq this parent never

@@ -153,11 +153,11 @@ export interface ChildStartedEvent extends HistoryEventBase {
  * silently and forever — the wedge of issue #39, in the one place the fix for it
  * could not reach (issue #50).
  *
- * Written **after** the cancel is dispatched, as `childStarted` is — the two
- * markers whose dispatch is idempotent are the two written last, and `applyCommand`
- * owns why. In short: a marker written first is what stops a second dispatch, and
- * is only safe for work `resume` can re-drive from it; a cancel is neither, so
- * writing it first would suppress the re-emission that is its only recovery.
+ * Written **after** the cancel is dispatched, as `childStarted` is. Nothing
+ * re-drives a cancel on restart, so replay re-emitting the command is its only
+ * recovery, and a marker written first is precisely what would suppress it.
+ * `server_core`'s header owns that argument and is honest about how much of the
+ * marker-ordering split is actually forced.
  */
 export interface ChildCancelRequestedEvent extends HistoryEventBase {
   type: 'childCancelRequested';
