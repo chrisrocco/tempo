@@ -57,8 +57,8 @@
  * a deployment's environment — or exported in a shell that later launches a real
  * worker — turns a production worker into a process that serves nobody while
  * still printing `WORKER_READY` and looking healthy to its supervisor. That is
- * the failure `planning/tickets/02` is about, arrived at from a different
- * direction. A flag has to be typed at the launch site and does not propagate to
+ * the same failure the poll-failure reporting in `worker/worker_loops.ts` exists
+ * for, arrived at from a different direction. A flag has to be typed at the launch site and does not propagate to
  * children, which is the property that matters for a testing affordance.
  *
  * ### What local mode ignores, and the one thing it refuses
@@ -365,7 +365,7 @@ function composeRemote(args: {
   // The worker's own lifecycle log, in the same JSON Lines shape the server
   // emits, so one pipeline reads both. A poll failure is the fault most likely
   // to matter here — an unreachable server makes a worker look healthy to its
-  // supervisor while doing nothing (planning/tickets/02).
+  // supervisor while doing nothing.
   const log = createJsonLogger();
   const onError = (error: unknown, consecutive: number): void => {
     log('worker.poll_failed', {

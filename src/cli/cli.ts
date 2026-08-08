@@ -10,7 +10,7 @@
  * `describe` / `queues`.
  *
  * The deployment half of the surface is designed but not built (tracked in
- * planning/sprints/01-deployment-api.md). The target:
+ * issue #41). The target:
  *
  *   tempo build <entry>              build an entrypoint into a binary
  *   tempo server install             install + start the server

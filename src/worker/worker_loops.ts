@@ -9,7 +9,7 @@
  * reach its server is the single most likely deployment fault, and it used to be
  * invisible: the loop caught everything, retried on the 5ms idle interval, and
  * printed nothing — so a misconfigured worker looked healthy to its supervisor
- * while doing no work and hammering a dead endpoint. See planning/tickets/02.
+ * while doing no work and hammering a dead endpoint.
  */
 
 import * as os from 'node:os';

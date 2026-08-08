@@ -138,18 +138,20 @@ tells them when reopening it *would* be right.
     is a note. "No sort control, because the cursor *is* the sort key, so a
     second ordering silently resolves old links into a differently-ordered set"
     is a decision — it survives someone who disagrees.
--   **A ticket in `planning/` that lands gets a `> **Status:** …` blockquote at
-    the top**, naming what shipped, any deviation from the shape it proposed,
-    and what was deliberately left undone. The ticket keeps the problem
-    statement, the code keeps the rationale, and the block is the link between
-    them. See `planning/tickets/04-validate-markers-against-commands.md`.
--   **A decision *not* to build something still lands** — same block, same
-    place, with the reasoning that made waiting the cheap option. Nothing was
-    built, so no module can host it, which makes the ticket its only home. See
-    ticket 07.
--   **When a decision outgrows a fileoverview, open a GitHub issue** and link it
-    from the ticket, rather than growing a design document that no code change
-    will ever force someone to revisit. See ticket 05.
+-   **An issue that lands says what shipped**, including any deviation from the
+    shape it proposed and what was deliberately left undone. The issue keeps the
+    problem statement, the code keeps the rationale, and the closing note is the
+    link between them. See
+    [#50](https://github.com/chrisrocco/tempo/issues/50).
+-   **A decision *not* to build something still lands**, with the reasoning that
+    made waiting the cheap option. Nothing was built, so no module can host it —
+    which makes the issue its only home, and a reason to close it as
+    `not_planned` rather than delete the thinking. See
+    [#51](https://github.com/chrisrocco/tempo/issues/51) and
+    [#48](https://github.com/chrisrocco/tempo/issues/48).
+-   **When a decision outgrows a fileoverview, it belongs in the issue**, not in
+    a design document that no code change will ever force someone to revisit.
+    See [#33](https://github.com/chrisrocco/tempo/issues/33).
 
 The forcing function is the one the rest of this section relies on: a decision
 recorded beside the code it governs is in the diff when that code changes, so
@@ -166,9 +168,8 @@ one of the few places that legitimately sit outside the code:
     nothing.
 -   **[`ROADMAP.md`](ROADMAP.md)** — what is not built yet, and the invariants
     that hold while building it.
--   **[`planning/`](planning/)** — in-flight design work, sprints, and tickets:
-    proposals for code that doesn't exist yet, so there's no module to host
-    them.
+-   **GitHub issues** — in-flight design work: proposals, scoping, and decisions
+    about code that doesn't exist yet, so there's no module to host them.
 -   **This file** — contributor conventions: process, not implementation.
 
 ### Keeping it honest

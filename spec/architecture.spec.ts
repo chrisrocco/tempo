@@ -324,7 +324,7 @@ describe('architecture — dependencies', () => {
 
     expect(violations.length).toBe(1);
     expect(violations[0].message).toContain('labs');
-    expect(violations[0].message).toContain('planning/sprints/06-dashboard.md');
+    expect(violations[0].message).toContain('AGENTS.md');
   });
 
   // "Part of Lit" means the `lit` package — not everything under the org.

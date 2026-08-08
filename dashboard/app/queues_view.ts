@@ -2,7 +2,7 @@
  * @fileoverview
  * `<queues-view>` — which pools and which workflow types are in trouble.
  *
- * The last of the planned views (planning/sprints/06-dashboard.md). It answers
+ * The last of the planned views. It answers
  * a question the executions list cannot: that list shows one page of individual
  * executions, and no amount of scrolling turns that into "the `email` queue has
  * forty failures and nothing polling it".

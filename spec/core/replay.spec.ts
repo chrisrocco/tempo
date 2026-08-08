@@ -345,7 +345,8 @@ describe('core replay — new work reached while history remains', () => {
 });
 
 /**
- * The branch-order divergence these checks exist for (planning/tickets/04). Seqs
+ * The branch-order divergence these checks exist for; `apply_event.ts` owns the
+ * reasoning and the coverage table. Seqs
  * are assigned in call order, so two concurrent branches that swap order produce
  * seqs whose meanings have swapped — and both are parked, so both resolve, each
  * with the other's result. The completion-side check cannot see that; comparing

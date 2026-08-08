@@ -11,7 +11,7 @@
  * almost always a code bug, and workflow code is redeployable — retrying forever
  * with backoff keeps the execution alive until someone fixes it, where giving up
  * would destroy recoverable work. Hence a backoff schedule with no attempt limit
- * (see planning/sprints/05-phase-6-scope.md).
+ * (see `server_core.failWorkflowTask`, which owns the policy).
  */
 
 import type {RetryPolicy} from '../protocol';
