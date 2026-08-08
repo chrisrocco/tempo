@@ -57,6 +57,49 @@
  * `settle` is the atomic "advance as far as possible on the information
  * currently available" step.
  *
+ * ## One event per settle, and that is a decision
+ *
+ * Temporal settles once per *workflow task*: its SDK applies a task's whole batch
+ * of events and only then runs the workflow. tempo settles after every single
+ * event, and the difference is visible to workflow code — a signal recorded before
+ * a task began is not seen by code that same task resumes from an earlier
+ * completion. Batching was scoped in detail and **declined**; the full case, the
+ * measurements, and the design that was not built are in issue #51.
+ *
+ * The reason is a property batching gives up. Here, behaviour is a function of the
+ * event *sequence* alone:
+ *
+ *     behaviour = f(events)
+ *
+ * Batched, it is a function of the sequence **and** of how the events were grouped
+ * into tasks:
+ *
+ *     behaviour = f(events, grouping)
+ *
+ * and that grouping is decided by wall-clock arrival timing, worker availability
+ * and queue depth — none of which the author controls, predicts, or can see in the
+ * code. Batching keeps *replay* determinism (a recorded run reproduces) but gives
+ * up *behavioural* determinism (the same events behave the same way). Settling per
+ * event keeps both, and buys one flat rule with no exceptions: **a `condition`
+ * after a completion is evaluated immediately after that completion, whatever else
+ * arrived.**
+ *
+ * What it costs, stated honestly: a signal is seen one step later than it might
+ * be, so a workflow can dispatch one more operation before noticing a directive
+ * the server had already recorded. Bounded by how many events precede the signal,
+ * not unbounded, and it self-corrects on the next activation. The
+ * `signalStream`/`background` shape in `patterns/` is unaffected either way —
+ * measured — because its body parks on the operation it awaits.
+ *
+ * What would reopen it: replay cost at scale (this settles once per event, and
+ * every task is a cold replay, so a long history is a long chain of macrotask
+ * hops), or a real case where one-step-late cancellation is not survivable.
+ *
+ * **Do not adopt batching without also recording task boundaries in history.**
+ * That combination is worse than either option: once grouping varies it becomes a
+ * hidden input to replay, and history has no way to record what it was, so replay
+ * cannot reproduce the run it is replaying. Issue #51 has the proof.
+ *
  * ## Observe, don't await, the workflow's own promise
  *
  * A task must conclude while the workflow function is still suspended mid-flight
