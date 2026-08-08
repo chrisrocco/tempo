@@ -169,41 +169,8 @@ one of the few places that legitimately sit outside the code:
 -   **[`ROADMAP.md`](ROADMAP.md)** — what is not built yet, and the invariants
     that hold while building it.
 -   **GitHub issues** — in-flight design work: proposals, scoping, and decisions
-    about code that doesn't exist yet, so there's no module to host them. See
-    below.
+    about code that doesn't exist yet, so there's no module to host them.
 -   **This file** — contributor conventions: process, not implementation.
-
-### Design work lives in issues, not in the tree
-
-There used to be a `planning/` directory of sprints and tickets. It is gone, and
-adding it back is not the answer to "where does this proposal go" — open an
-issue.
-
-The reason is the one this whole section is built on. A proposal is **living
-state**: it has a status, it accumulates a progress log, it gets superseded, and
-it ends up associated with a pull request. A markdown file in the tree can
-represent none of that, so it represents it by convention — a `Status:`
-blockquote somebody has to remember to update — and the convention is exactly
-what rots. Every other rule here works because a diff forces the update. Nothing
-forces a ticket.
-
-Issues have that state natively: open/closed, `not_planned` for a decision
-against, labels, cross-references, and a link to the PR that closed them. They
-are also where the reader already is.
-
-Two failure modes this avoids, both of which happened:
-
--   **A ticket that describes a design the code no longer has.** Ticket 10 was
-    written, corrected twice inside a day, and deleted the same week — while a
-    GitHub issue tracked the same work correctly throughout, because it was the
-    thing being edited rather than a copy of it.
--   **Two copies of one argument, drifting.** A ticket and an issue covering the
-    same decision will diverge, and the reader has no way to tell which is
-    current.
-
-What stays in the tree is what a diff can keep honest: the rationale that lives
-beside the code it constrains, `ROADMAP.md` for what is not built yet, and this
-file.
 
 ### Keeping it honest
 
