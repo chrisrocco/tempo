@@ -138,18 +138,20 @@ tells them when reopening it *would* be right.
     is a note. "No sort control, because the cursor *is* the sort key, so a
     second ordering silently resolves old links into a differently-ordered set"
     is a decision — it survives someone who disagrees.
--   **A ticket in `planning/` that lands gets a `> **Status:** …` blockquote at
-    the top**, naming what shipped, any deviation from the shape it proposed,
-    and what was deliberately left undone. The ticket keeps the problem
-    statement, the code keeps the rationale, and the block is the link between
-    them. See `planning/tickets/04-validate-markers-against-commands.md`.
--   **A decision *not* to build something still lands** — same block, same
-    place, with the reasoning that made waiting the cheap option. Nothing was
-    built, so no module can host it, which makes the ticket its only home. See
-    ticket 07.
--   **When a decision outgrows a fileoverview, open a GitHub issue** and link it
-    from the ticket, rather than growing a design document that no code change
-    will ever force someone to revisit. See ticket 05.
+-   **An issue that lands says what shipped**, including any deviation from the
+    shape it proposed and what was deliberately left undone. The issue keeps the
+    problem statement, the code keeps the rationale, and the closing note is the
+    link between them. See
+    [#50](https://github.com/chrisrocco/tempo/issues/50).
+-   **A decision *not* to build something still lands**, with the reasoning that
+    made waiting the cheap option. Nothing was built, so no module can host it —
+    which makes the issue its only home, and a reason to close it as
+    `not_planned` rather than delete the thinking. See
+    [#51](https://github.com/chrisrocco/tempo/issues/51) and
+    [#48](https://github.com/chrisrocco/tempo/issues/48).
+-   **When a decision outgrows a fileoverview, it belongs in the issue**, not in
+    a design document that no code change will ever force someone to revisit.
+    See [#33](https://github.com/chrisrocco/tempo/issues/33).
 
 The forcing function is the one the rest of this section relies on: a decision
 recorded beside the code it governs is in the diff when that code changes, so
@@ -166,10 +168,42 @@ one of the few places that legitimately sit outside the code:
     nothing.
 -   **[`ROADMAP.md`](ROADMAP.md)** — what is not built yet, and the invariants
     that hold while building it.
--   **[`planning/`](planning/)** — in-flight design work, sprints, and tickets:
-    proposals for code that doesn't exist yet, so there's no module to host
-    them.
+-   **GitHub issues** — in-flight design work: proposals, scoping, and decisions
+    about code that doesn't exist yet, so there's no module to host them. See
+    below.
 -   **This file** — contributor conventions: process, not implementation.
+
+### Design work lives in issues, not in the tree
+
+There used to be a `planning/` directory of sprints and tickets. It is gone, and
+adding it back is not the answer to "where does this proposal go" — open an
+issue.
+
+The reason is the one this whole section is built on. A proposal is **living
+state**: it has a status, it accumulates a progress log, it gets superseded, and
+it ends up associated with a pull request. A markdown file in the tree can
+represent none of that, so it represents it by convention — a `Status:`
+blockquote somebody has to remember to update — and the convention is exactly
+what rots. Every other rule here works because a diff forces the update. Nothing
+forces a ticket.
+
+Issues have that state natively: open/closed, `not_planned` for a decision
+against, labels, cross-references, and a link to the PR that closed them. They
+are also where the reader already is.
+
+Two failure modes this avoids, both of which happened:
+
+-   **A ticket that describes a design the code no longer has.** Ticket 10 was
+    written, corrected twice inside a day, and deleted the same week — while a
+    GitHub issue tracked the same work correctly throughout, because it was the
+    thing being edited rather than a copy of it.
+-   **Two copies of one argument, drifting.** A ticket and an issue covering the
+    same decision will diverge, and the reader has no way to tell which is
+    current.
+
+What stays in the tree is what a diff can keep honest: the rationale that lives
+beside the code it constrains, `ROADMAP.md` for what is not built yet, and this
+file.
 
 ### Keeping it honest
 

@@ -4,7 +4,7 @@
  * test is deliberate and easy to "fix" into something worse: the execution keeps
  * running and the task is retried forever, because workflow code is redeployable
  * and settling the execution would destroy work a corrected deploy recovers
- * (planning/sprints/05-phase-6-scope.md). The recovery test at the end is the
+ * (see `server_core.failWorkflowTask`). The recovery test at the end is the
  * justification for that policy, so it is pinned rather than assumed.
  */
 

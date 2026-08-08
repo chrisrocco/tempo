@@ -1,7 +1,8 @@
 # Roadmap
 
 What's left to build. For what already works, see [`README.md`](README.md); for
-in-flight design work, [`planning/`](planning/).
+in-flight design work,
+[GitHub issues](https://github.com/chrisrocco/tempo/issues).
 
 The guiding strategy, which still applies to everything below: **introduce every
 seam as an interface with an in-memory implementation first, keep the suite green,
@@ -58,9 +59,7 @@ alerts on it yet.
 ## Phases 6–9
 
 What used to be one "production" phase is four, sequenced by what each one
-depends on. The decomposition and the evidence behind it are in
-[`planning/sprints/05-phase-6-scope.md`](planning/sprints/05-phase-6-scope.md);
-this is the schedule that came out of it. Two things it changed:
+depends on. Two things that sequencing changed:
 
 - **Phases are scoped by mechanism, not by symptom.** Activity timeouts used to
   sit in "finishing distribution" and poison-task handling in "production", but
@@ -86,8 +85,9 @@ happen today (a poison task, a hung activity) present identically as silence.
   **The execution is never auto-terminated.** A workflow-task failure is nearly
   always a code bug, and workflow code is redeployable — fix it, roll the workers,
   and the execution replays past the throw and carries on. Terminating would
-  destroy recoverable work. This follows Temporal, and the reasoning is in
-  [sprint 05](planning/sprints/05-phase-6-scope.md#the-dead-letter-question-settled).
+  destroy recoverable work. This follows Temporal; the full reasoning, and the
+  two things that fall out of it, are on `failWorkflowTask` in
+  [`src/server/server_core.ts`](src/server/server_core.ts).
 
 - ~~**`tempo terminate <id>`**~~ — **landed.** Settles the execution _without_
   replaying it, which is exactly why `cancel` could not serve: cancellation is
@@ -237,8 +237,8 @@ phase.
   child, so "one planner per calendar event" is expressible in the workflow
   rather than reconstructed from its own bookkeeping.
 - **The deployment CLI** — `server install`, `deploy`, `status`, `logs`,
-  `rollback`. Surface designed in [`src/cli/cli.ts`](src/cli/cli.ts) and
-  [`planning/sprints/01-deployment-api.md`](planning/sprints/01-deployment-api.md).
+  `rollback`. Surface designed in [`src/cli/cli.ts`](src/cli/cli.ts); tracked in
+  [#41](https://github.com/chrisrocco/tempo/issues/41).
 - **Sticky cache** in the workflow worker — keep warm suspended executions to skip
   cold replay ([`src/worker/workflow_worker.ts`](src/worker/workflow_worker.ts)).
   Pure performance; correctness never depends on it, which is the point.

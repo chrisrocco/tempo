@@ -3,8 +3,8 @@
  * Binding the routes in `routes.ts` to the browser — the whole router, against
  * the platform.
  *
- * A router library was considered and rejected (see
- * planning/sprints/06-dashboard.md): `@lit-labs/router` is pre-release, this app
+ * A router library was considered and rejected (AGENTS.md owns the dependency
+ * rule): `@lit-labs/router` is pre-release, this app
  * has three routes, and the platform already fires an event when the hash
  * changes.
  *

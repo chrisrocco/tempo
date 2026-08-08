@@ -17,8 +17,7 @@
  * means the `lit` package. Labs packages are explicitly pre-release and change
  * shape; the things they offer here (routing, virtualization, context) are each
  * a few dozen lines against the platform, and writing them is cheaper than
- * carrying an unstable dependency. See `planning/sprints/06-dashboard.md` for
- * what replaces each one.
+ * carrying an unstable dependency. AGENTS.md's dependency section owns the rule.
  *
  * The dev toolchain is a separate list, deliberately short: TypeScript, its
  * runner, the test runner, the formatter, and one bundler.
@@ -94,7 +93,7 @@ const ALLOWED_DEV = [
  */
 function refusal(name: string, field: string): string {
   if (name.startsWith('@lit-labs/'))
-    return `${name} is a Lit *labs* package — pre-release by definition, and off the list. Whatever it offers (routing, virtualization, context) is a few dozen lines against the platform here; see planning/sprints/06-dashboard.md`;
+    return `${name} is a Lit *labs* package — pre-release by definition, and off the list. Whatever it offers (routing, virtualization, context) is a few dozen lines against the platform here; see AGENTS.md on dependencies`;
   if (name.startsWith('@lit/'))
     return `${name} is adjacent to Lit but not Lit — "part of Lit" means the \`lit\` package itself`;
   return `${name} is not on the ${field} allowlist in tools/dependencies.ts. Adding a dependency is a decision to make out loud: put it on the list in the same commit that uses it, with a reason`;

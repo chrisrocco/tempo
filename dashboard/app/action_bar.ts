@@ -9,7 +9,7 @@
  * **There is no auth behind this.** Anyone who can reach the port can terminate
  * any execution, which is a pre-existing property of the RPC rather than
  * something the UI introduces — but a button makes it easier to forget than a
- * CLI flag does. See planning/sprints/06-dashboard.md, decision 2.
+ * CLI flag does.
  *
  * ## Why each action opens a form
  *

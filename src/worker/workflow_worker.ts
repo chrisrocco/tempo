@@ -112,7 +112,7 @@ export function createWorkflowWorker(
       //
       // A genuine typo now wedges rather than settling. That is the poison-task
       // policy applied consistently: retry and surface, never give up on the
-      // author's behalf (planning/sprints/05).
+      // author's behalf — see `server_core.failWorkflowTask`.
       if (!fn) throw new Error(`no workflow registered as ${name}`);
       const ctx = createContext(
         args,

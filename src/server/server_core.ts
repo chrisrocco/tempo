@@ -307,9 +307,30 @@ export interface ServerCore {
   /**
    * A worker could not replay this task at all — a bug in the workflow, or a
    * nondeterminism error. Counts the failure durably and re-queues the execution
-   * after a backoff. The execution is **never** settled here: workflow code is
-   * redeployable, so a fix lets a wedged execution carry on from where it stopped
-   * (see planning/sprints/05-phase-6-scope.md).
+   * after a backoff.
+   *
+   * **The execution is never settled here, and that is a decision.** The original
+   * plan was to dead-letter a poison execution past some threshold. Temporal's
+   * design won instead: a failing workflow task retries indefinitely with backoff,
+   * the execution stays open, and the failure is made impossible to miss rather
+   * than fatal.
+   *
+   * What decided it: a workflow-task failure is almost always a *code* bug, and
+   * workflow code is redeployable. Fix it, roll the workers, and the execution
+   * replays past the throw and carries on — work auto-termination would have
+   * destroyed. Loud and recoverable beats terminal and diagnosable.
+   *
+   * That trade only holds while the loudness is real, which is what makes the
+   * attempt count, the retained reason, and `describe` load-bearing rather than
+   * nice-to-have. Two things follow and are not optional:
+   *
+   * - **`terminate` is mandatory**, not a convenience. Retrying forever with no
+   *   way out is worse than the bug.
+   * - **No per-attempt history events.** The counter lives on `ExecutionRecord`;
+   *   history records the *first* failure so the log shows something went wrong,
+   *   not one event per attempt. Temporal keeps attempt counts in mutable state
+   *   for the same reason — history bloat — and it applies here with more force,
+   *   since every task replays the whole history.
    */
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   /** Claim the next activity task; `identity` names the worker (see above). */

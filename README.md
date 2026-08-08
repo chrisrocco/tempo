@@ -315,4 +315,5 @@ lifecycle log, the workflow-worker sticky cache, cross-process timer-sweep
 failover, and the deployment half of the CLI. The RPC has no auth or TLS and
 binds loopback. [`ROADMAP.md`](ROADMAP.md) ranks these by how likely each is to
 bite a real deployment ("Adoption blockers") and tracks what's planned;
-[`planning/`](planning/) holds in-flight design work.
+in-flight design work lives in
+[GitHub issues](https://github.com/chrisrocco/tempo/issues).

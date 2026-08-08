@@ -3,7 +3,7 @@
  * The worker poll loops' failure handling: a worker that cannot reach its server
  * must say so and back off, rather than retry silently at the idle interval. This
  * is the fault that used to be invisible — the process stayed "active" under its
- * supervisor while doing no work at all (planning/tickets/02).
+ * supervisor while doing no work at all.
  */
 
 import type {WorkflowService} from '../../src/protocol';
