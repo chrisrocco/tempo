@@ -49,8 +49,17 @@
  * cancel that reached the workflow mid-batch was dropped and never re-issued, with
  * not even a gap in the seqs to notice — the wedge of issue #39, surviving in the
  * one place its fix could not see (issue #50). `childCancelRequested` is what
- * closes it, and its write ordering is the one thing about it that differs from
- * the markers above; see the `cancelChild` branch of `applyCommand`.
+ * closes it.
+ *
+ * **When the marker is written relative to the dispatch is not uniform, and the
+ * split is by idempotency.** A marker written *first* is what stops a second
+ * dispatch, so it is what `scheduleActivity` and `startTimer` need — and a crash
+ * between the two is recovered by `resume` re-driving pending work off that
+ * marker. `startChild` and `cancelChild` write theirs *last*, because their
+ * dispatch is already idempotent (an id claim correlates; `requestCancel`
+ * short-circuits) and their recovery is replay re-emitting the command — which a
+ * marker written first would suppress. The `cancelChild` branch of `applyCommand`
+ * spells this out.
  *
  * ## `continueAsNew` is a terminal disposition here, not in the core
  *
@@ -561,13 +570,24 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     } else if (cmd.type === 'cancelChild') {
       const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
       if (childId) await requestCancel(childId);
-      // Marker last, which is the opposite of every branch above, and deliberate.
-      // Theirs go first because the work they dispatch reports back and `resume`
-      // re-drives it from the marker; a cancel does neither. So a marker written
-      // first and then lost to a crash would suppress the only recovery a cancel
-      // has — the next replay re-issuing it. Written last, a crash costs the
-      // marker, the command is re-emitted, and `requestCancel` short-circuits if
-      // it already landed.
+      // Marker last, following `startChild` above — the two commands whose
+      // dispatch is idempotent are the two that write it last, and that is the
+      // rule rather than a coincidence:
+      //
+      //   marker FIRST when dispatch is not idempotent (activity, timer). The
+      //   marker is what stops a second dispatch, and a crash between the two is
+      //   recovered by `resume` re-driving pending work off that marker.
+      //
+      //   marker LAST when dispatch is idempotent (child, cancel). Recovery is
+      //   replay re-emitting the command — `startChild` correlates to the
+      //   existing id, `requestCancel` short-circuits on an existing
+      //   `cancelRequested` — and a marker written first would suppress the only
+      //   recovery either one has.
+      //
+      // The window is narrow either way, and it is the whole of the argument:
+      // on the happy path both orderings end with both effects done. What makes
+      // it worth ordering deliberately is that the failure is silent — a cancel
+      // suppressed by its own marker never happens and never reports.
       //
       // Recorded even when no child was found. The marker is the record of
       // *dispatch*, not of effect: a cancel naming a seq this parent never

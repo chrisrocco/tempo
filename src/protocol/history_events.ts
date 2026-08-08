@@ -153,12 +153,11 @@ export interface ChildStartedEvent extends HistoryEventBase {
  * silently and forever — the wedge of issue #39, in the one place the fix for it
  * could not reach (issue #50).
  *
- * Written **after** the cancel is dispatched, unlike every other marker, and the
- * order is load-bearing. The others are written first because their work reports
- * back and `resume` re-drives them from the marker; a cancel does neither, so a
- * marker written first and then lost to a crash would suppress the re-emission
- * that is its only recovery. Written last, a crash costs the marker and the next
- * replay re-issues the command — which is exactly the idempotent path above.
+ * Written **after** the cancel is dispatched, as `childStarted` is — the two
+ * markers whose dispatch is idempotent are the two written last, and `applyCommand`
+ * owns why. In short: a marker written first is what stops a second dispatch, and
+ * is only safe for work `resume` can re-drive from it; a cancel is neither, so
+ * writing it first would suppress the re-emission that is its only recovery.
  */
 export interface ChildCancelRequestedEvent extends HistoryEventBase {
   type: 'childCancelRequested';
