@@ -51,15 +51,15 @@
  * one place its fix could not see (issue #50). `childCancelRequested` is what
  * closes it.
  *
- * **When the marker is written relative to the dispatch is not uniform, and the
- * split is by idempotency.** A marker written *first* is what stops a second
- * dispatch, so it is what `scheduleActivity` and `startTimer` need — and a crash
- * between the two is recovered by `resume` re-driving pending work off that
- * marker. `startChild` and `cancelChild` write theirs *last*, because their
- * dispatch is already idempotent (an id claim correlates; `requestCancel`
- * short-circuits) and their recovery is replay re-emitting the command — which a
- * marker written first would suppress. The `cancelChild` branch of `applyCommand`
- * spells this out.
+ * **When the marker is written relative to the dispatch is not uniform**, and the
+ * rule is: write it first only where `resume` can re-drive the work from it.
+ * `scheduleActivity` and `startTimer` qualify — resume re-enqueues and re-arms
+ * from their markers — so they get a write-ahead record, which is what "scheduled
+ * before running" above means. `startChild` and `cancelChild` do not: resume
+ * correlates a pending child but never launches one, and does not re-drive cancels
+ * at all. Theirs go last, and replay re-emitting the command is the recovery
+ * instead — safe because both dispatches are idempotent. The `cancelChild` branch
+ * of `applyCommand` spells it out.
  *
  * ## `continueAsNew` is a terminal disposition here, not in the core
  *
@@ -570,23 +570,28 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     } else if (cmd.type === 'cancelChild') {
       const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
       if (childId) await requestCancel(childId);
-      // Marker last, following `startChild` above — the two commands whose
-      // dispatch is idempotent are the two that write it last, and that is the
-      // rule rather than a coincidence:
+      // Marker last, following `startChild` above, and the rule is mechanical
+      // rather than aesthetic: **write the marker first only if `resume` can
+      // re-drive the work from it.**
       //
-      //   marker FIRST when dispatch is not idempotent (activity, timer). The
-      //   marker is what stops a second dispatch, and a crash between the two is
-      //   recovered by `resume` re-driving pending work off that marker.
+      // It can for the two above. `resumeFromHistory` re-enqueues every pending
+      // `activityScheduled` and re-arms every pending `timerStarted`, so those
+      // get a write-ahead record — marker first, then act, and a crash in
+      // between is recovered from the marker. That is what "scheduled before
+      // running" in this file's header means.
       //
-      //   marker LAST when dispatch is idempotent (child, cancel). Recovery is
-      //   replay re-emitting the command — `startChild` correlates to the
-      //   existing id, `requestCancel` short-circuits on an existing
-      //   `cancelRequested` — and a marker written first would suppress the only
-      //   recovery either one has.
+      // It cannot for children. Resume correlates a pending `childStarted` but
+      // never *launches* one, so a marker written before `launch` and then lost
+      // to a crash leaves a marker for a child nothing will ever create — the
+      // command suppressed, the parent waiting forever. Same for a cancel, which
+      // resume does not re-drive at all. Their recovery is replay re-emitting
+      // the command, which is safe because both dispatches are idempotent: an id
+      // claim correlates, and `requestCancel` short-circuits on an existing
+      // `cancelRequested`. A marker written first would suppress exactly that.
       //
-      // The window is narrow either way, and it is the whole of the argument:
-      // on the happy path both orderings end with both effects done. What makes
-      // it worth ordering deliberately is that the failure is silent — a cancel
+      // The crash window is narrow and is the whole of the argument — on the
+      // happy path both orderings finish with both effects done. What makes it
+      // worth ordering deliberately is that the failure is silent: a cancel
       // suppressed by its own marker never happens and never reports.
       //
       // Recorded even when no child was found. The marker is the record of
