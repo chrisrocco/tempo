@@ -19,6 +19,14 @@
  * the distinction, because a detached child never reports back and must not have
  * a completion synthesized for it — so filtering is the caller's job, not this
  * module's.
+ *
+ * `childCancelRequested` is a marker and is deliberately **not** pending work.
+ * The others record work that is still owed something — a result, a firing — and
+ * a cancel is owed nothing: it is dispatched and finished in the same breath. It
+ * exists so replay can tell a cancel it already sent from one it has not (see
+ * `core/workflow_api`), which is a different question from what this module
+ * answers. Reporting it here would tell an operator the execution is waiting on
+ * something it is not, and would have `resume` re-request a cancel that landed.
  */
 
 import type {

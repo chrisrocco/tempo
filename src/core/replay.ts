@@ -15,42 +15,40 @@
  * absent a sticky cache, is every task today. Because any activation might land
  * cold, every suspension point must be reconstructible identically from history.
  *
- * ## The live edge, and what actually suppresses a command
+ * ## What suppresses a command
  *
  * Each primitive call allocates a `seq`, registers a completion promise, and
  * pushes a command **unless history already holds an event at that seq**. A
  * marker or a completion is proof the command was dispatched and is durable, so
- * re-emitting it would double-dispatch; anything history has no seq for is
- * genuinely new work. That rule lives in `workflow_api.issue`, which also owns
- * the two commands leaving no trace.
+ * re-emitting it would double-dispatch; a seq history has never seen is work the
+ * server has never done. The rule lives in `workflow_api.issue`; this loop does
+ * not participate in it at all.
  *
- * `isLive` — set as the last recorded event is taken — reads like the same rule
- * and is not. It is a *positional* answer to a question about *content*, and the
- * two agree only when the batch's last event is the one that unblocks the
- * workflow. That holds when an activation applies exactly one new event, which
- * used to be the only shape the specs covered.
- *
- * Two ordinary situations break it, and they fail at different points here:
+ * That last part is the design, not an accident. There used to be an `isLive`
+ * flag here, set as the last recorded event was taken, and commands were emitted
+ * only past it — the **live edge**. It reads like the same rule and is not: it
+ * answers a question about *position* that is really about *content*, and the two
+ * agree only when the batch's final event is the one that unblocks the workflow.
+ * Two ordinary situations break that, and they broke it in different places:
  *
  * - **A batch with a trailing event.** `ports/workflow_task_queue` coalesces a
  *   wake landing mid-task into exactly one more, so a signal arriving while an
  *   activity completion is in flight produces `[…, activityCompleted, signal]` —
  *   which any workflow with a signal-driven branch beside a main line generates
  *   continuously. Settling the earlier completion carries the workflow to a
- *   genuinely new command while `isLive` is still false.
- * - **A first task that already has history.** `isLive` starts false whenever
- *   history is non-empty, and a signal landing between the start and the worker's
- *   first poll gives task one a history of `[signal]`. The workflow's initial
- *   run — in the `settle` below, before the loop has consumed anything — then
- *   reaches its *first* command with the flag already false. Note this one is
- *   not about the loop at all, so no change to how the loop batches events can
- *   reach it.
+ *   genuinely new command while the flag is still false.
+ * - **A first task that already has history**, which is not about this loop at
+ *   all. The flag started false whenever history was non-empty, and a signal
+ *   landing between the start and the worker's first poll gives task one a
+ *   history of `[signal]` — so the initial `settle` below reached the workflow's
+ *   *first* command with the flag already false.
  *
- * Keyed on the flag, such a command was recorded in `requested` and never pushed:
- * the worker responded without it, history never got its marker, so the next
- * replay dropped it for the same reason, forever. Nothing threw, the execution
- * stayed `running` with no task failures, and it was parked on work the server had
- * no record of — a permanent, silent wedge (issue #39).
+ * Either way the command was recorded in `requested` and never pushed: the worker
+ * responded without it, history never got its marker, and the next replay dropped
+ * it for the same reason, forever. Nothing threw, the execution stayed `running`
+ * with no task failures, and it was parked on work the server had no record of —
+ * a permanent, silent wedge (issue #39). Keying on history instead is what makes
+ * this loop's only job applying events.
  *
  * ## `settle`: drain + condition unblock
  *
@@ -58,6 +56,49 @@
  * to a fixpoint — resolving one condition can run code that makes another true.
  * `settle` is the atomic "advance as far as possible on the information
  * currently available" step.
+ *
+ * ## One event per settle, and that is a decision
+ *
+ * Temporal settles once per *workflow task*: its SDK applies a task's whole batch
+ * of events and only then runs the workflow. tempo settles after every single
+ * event, and the difference is visible to workflow code — a signal recorded before
+ * a task began is not seen by code that same task resumes from an earlier
+ * completion. Batching was scoped in detail and **declined**; the full case, the
+ * measurements, and the design that was not built are in issue #51.
+ *
+ * The reason is a property batching gives up. Here, behaviour is a function of the
+ * event *sequence* alone:
+ *
+ *     behaviour = f(events)
+ *
+ * Batched, it is a function of the sequence **and** of how the events were grouped
+ * into tasks:
+ *
+ *     behaviour = f(events, grouping)
+ *
+ * and that grouping is decided by wall-clock arrival timing, worker availability
+ * and queue depth — none of which the author controls, predicts, or can see in the
+ * code. Batching keeps *replay* determinism (a recorded run reproduces) but gives
+ * up *behavioural* determinism (the same events behave the same way). Settling per
+ * event keeps both, and buys one flat rule with no exceptions: **a `condition`
+ * after a completion is evaluated immediately after that completion, whatever else
+ * arrived.**
+ *
+ * What it costs, stated honestly: a signal is seen one step later than it might
+ * be, so a workflow can dispatch one more operation before noticing a directive
+ * the server had already recorded. Bounded by how many events precede the signal,
+ * not unbounded, and it self-corrects on the next activation. The
+ * `signalStream`/`background` shape in `patterns/` is unaffected either way —
+ * measured — because its body parks on the operation it awaits.
+ *
+ * What would reopen it: replay cost at scale (this settles once per event, and
+ * every task is a cold replay, so a long history is a long chain of macrotask
+ * hops), or a real case where one-step-late cancellation is not survivable.
+ *
+ * **Do not adopt batching without also recording task boundaries in history.**
+ * That combination is worse than either option: once grouping varies it becomes a
+ * hidden input to replay, and history has no way to record what it was, so replay
+ * cannot reproduce the run it is replaying. Issue #51 has the proof.
  *
  * ## Observe, don't await, the workflow's own promise
  *
@@ -111,9 +152,6 @@ export async function replay(
   await settle(ctx);
   while (!ctx.done && !ctx.failed && ctx.idx < ctx.events.length) {
     const ev = ctx.events[ctx.idx++];
-    // Kept for `cancelChild`, which history cannot answer for; every other
-    // command is suppressed on its seq rather than on this flag.
-    if (ctx.idx === ctx.events.length) ctx.isLive = true;
     applyEvent(ctx, ev);
     await settle(ctx);
   }

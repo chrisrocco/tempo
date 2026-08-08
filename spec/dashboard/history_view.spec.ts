@@ -145,6 +145,19 @@ describe('dashboard history — grouping events into families', () => {
     expect(eventCategory({type: 'cancelRequested'})).toBe('cancellation');
   });
 
+  /**
+   * Both are cancellation and they belong to different families, which reads as
+   * a contradiction until you ask whose. `cancelRequested` is this execution
+   * being cancelled; `childCancelRequested` is this execution cancelling someone
+   * else, and it names only a `targetSeq` — unreadable away from the
+   * `childStarted` it points at.
+   */
+  it('files a cancel aimed at a child with the children, not with cancellation', () => {
+    expect(
+      eventCategory({type: 'childCancelRequested', seq: 1, targetSeq: 0}),
+    ).toBe('child');
+  });
+
   it('offers every family it can return, so none is unreachable', () => {
     const every: HistoryEvent[] = [
       {type: 'activityCompleted', seq: 1, result: 1},

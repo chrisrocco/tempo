@@ -20,18 +20,22 @@
  *
  * Coverage is deliberately partial, and worth knowing precisely:
  *
- * | Command            | Marker              | Checked                            |
- * | ------------------ | ------------------- | ---------------------------------- |
- * | `scheduleActivity` | `activityScheduled` | type + **name**                    |
- * | `startTimer`       | `timerStarted`      | type only (`fireAt` is absolute)   |
- * | `startChild`       | `childStarted`      | type + **`detached`**              |
- * | `cancelChild`      | none, by design     | nothing                            |
+ * | Command            | Marker                  | Checked                        |
+ * | ------------------ | ----------------------- | ------------------------------ |
+ * | `scheduleActivity` | `activityScheduled`     | type + **name**                |
+ * | `startTimer`       | `timerStarted`          | type only (`fireAt` absolute)  |
+ * | `startChild`       | `childStarted`          | type + **`detached`**          |
+ * | `cancelChild`      | `childCancelRequested`  | type + **`targetSeq`**         |
  *
  * So a swap between two same-named activities with different arguments still
  * slips through; argument comparison is expensive on large payloads and risks
  * false positives on serialization differences, so it is deliberately out.
- * `cancelChild` writes no marker on purpose — its effect is already a durable
- * record on the child (see `server_core`) — so its seq is simply not covered.
+ *
+ * Every command now leaves a marker. `cancelChild` was the exception until issue
+ * #50, on the grounds that its effect is already durable on the child — true, and
+ * beside the point once replay began deciding suppression by asking whether
+ * history holds a seq. A command with no marker cannot answer that question, which
+ * is what left it silently droppable.
  *
  * **Absence is not divergence.** A marker whose seq the workflow never issued is
  * skipped rather than rejected. The check is about *disagreement*; treating
@@ -48,6 +52,7 @@ function describeCommand(cmd: Command): string {
   if (cmd.type === 'scheduleActivity') return `scheduleActivity ${cmd.name}`;
   if (cmd.type === 'startChild')
     return `startChild${cmd.detached ? ' (detached)' : ''}`;
+  if (cmd.type === 'cancelChild') return `cancelChild of seq ${cmd.targetSeq}`;
   return cmd.type;
 }
 
@@ -67,6 +72,15 @@ function markerMismatch(
   }
   if (ev.type === 'timerStarted')
     return cmd.type === 'startTimer' ? undefined : describeCommand(cmd);
+  if (ev.type === 'childCancelRequested') {
+    // `targetSeq` is the whole content of a cancel, and it is a claim about the
+    // workflow's own logic: which spawn this call meant. A different one on this
+    // replay means that logic has moved, and the parent would cancel a child it
+    // never meant to while the intended one runs on.
+    if (cmd.type !== 'cancelChild' || cmd.targetSeq !== ev.targetSeq)
+      return describeCommand(cmd);
+    return undefined;
+  }
   if (ev.type === 'childStarted') {
     if (cmd.type !== 'startChild' || cmd.detached !== ev.detached)
       return describeCommand(cmd);
@@ -86,6 +100,8 @@ function describeMarker(ev: HistoryEvent): string {
   if (ev.type === 'activityScheduled') return `activityScheduled ${ev.name}`;
   if (ev.type === 'childStarted')
     return `childStarted ${ev.childId}${ev.detached ? ' (detached)' : ''}`;
+  if (ev.type === 'childCancelRequested')
+    return `childCancelRequested of seq ${ev.targetSeq}`;
   return ev.type;
 }
 
@@ -99,7 +115,8 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
   if (
     ev.type === 'activityScheduled' ||
     ev.type === 'timerStarted' ||
-    ev.type === 'childStarted'
+    ev.type === 'childStarted' ||
+    ev.type === 'childCancelRequested'
   ) {
     // Markers resolve nothing — their presence in history is what keeps replay
     // from re-dispatching the command. They are, however, the record of what was

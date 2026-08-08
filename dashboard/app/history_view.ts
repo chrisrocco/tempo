@@ -105,6 +105,11 @@ export function describeEvent(event: HistoryEvent): EventView {
         tone: 'accent',
         payload: event.payload,
       };
+    case 'childCancelRequested':
+      return {
+        label: `cancel requested for child at seq ${event.targetSeq}`,
+        tone: 'danger',
+      };
     case 'cancelRequested':
       return {label: 'cancellation requested', tone: 'danger'};
     default:
@@ -152,6 +157,12 @@ export function eventCategory(event: HistoryEvent): EventCategory {
     case 'childStarted':
     case 'childCompleted':
     case 'childFailed':
+    // A cancel names a `targetSeq` and nothing else, so it is unreadable away
+    // from the `childStarted` it points at — the same "a dispatch is only
+    // legible next to its outcome" argument that keeps the three above together.
+    // It is not `cancellation`: that family is this execution being cancelled,
+    // which is a different thing happening to a different workflow.
+    case 'childCancelRequested':
       return 'child';
     case 'signal':
       return 'signal';

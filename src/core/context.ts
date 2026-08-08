@@ -56,25 +56,18 @@ export interface WorkflowContext {
   seq: number; // command id counter (activities, timers, children) — recorded in history
   condSeq: number; // condition id counter — NOT recorded; must not perturb command seqs
   /**
-   * Set once the last recorded event has been taken off `events` — "there is no
-   * more history to catch up on".
-   *
-   * A statement about *position*, and it is no longer what decides whether a
-   * command is emitted; `dispatchedSeqs` is. It still decides for `cancelChild`,
-   * the one command history cannot answer for. See `workflow_api.issue`.
-   */
-  isLive: boolean;
-  /**
    * Every `seq` history already holds an event for — a marker
-   * (`activityScheduled`, `timerStarted`, `childStarted`) or a completion. Either
-   * one is proof that the command at that seq was dispatched and made durable, so
-   * this is the set of commands replay must **not** emit again.
+   * (`activityScheduled`, `timerStarted`, `childStarted`, `childCancelRequested`)
+   * or a completion. Either one is proof that the command at that seq was
+   * dispatched and made durable, so this is the set of commands replay must
+   * **not** emit again. It is the whole of the suppression rule; see
+   * `workflow_api.issue`.
    *
    * Derived from `events` once, up front, rather than accumulated as they are
    * applied. The question is whether history holds the seq *at all*, and a
    * workflow can reach a command before the event proving it durable has been
-   * taken off the batch — which is exactly what a positional answer got wrong
-   * (issue #39).
+   * taken off the batch — which is exactly what the positional answer this
+   * replaced got wrong (issue #39).
    */
   dispatchedSeqs: Set<number>;
   commands: Command[];
@@ -157,7 +150,6 @@ export function createContext(
     idx: 0,
     seq: 0,
     condSeq: 0,
-    isLive: events.length === 0,
     dispatchedSeqs: seqsInHistory(events),
     commands: [],
     requested: new Map(),
