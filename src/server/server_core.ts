@@ -674,6 +674,33 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // continue-as-new instead, which is where a new run legitimately begins.
     // Nothing is lost by waiting: the value is a function of the seed and the
     // history, so each replay recomputes it.
+    const caN = result.commands.find(
+      (c): c is ContinueAsNewCommand => c.type === 'continueAsNew',
+    );
+    // Dispatch before settling, not instead of it. A task can both issue
+    // commands and finish the workflow — `startChild(worker); return 'done';` is
+    // one activation — and the dispositions below all return early, so a batch
+    // reaching them used to be discarded. Nothing raised: the execution completed
+    // normally, having silently not done what its last line said. Every command
+    // has this shape, and the fire-and-forget ones have it worst, since they are
+    // the ones with no promise whose absence would be noticed.
+    //
+    // Safe for a settling execution because a dispatch outliving it is already
+    // the rule elsewhere: children survive a close, a timer that fires against a
+    // settled record is dropped by `timerService.onFire`, and a late activity
+    // completion is dropped by `reportActivityResult`. The work is done, its
+    // result goes nowhere, and that is what "the workflow asked for it and then
+    // returned" should mean.
+    //
+    // **Except on continue-as-new**, which is why this is guarded. A rollover
+    // empties history, so a marker written a moment earlier is erased — and an
+    // armed timer whose `timerStarted` went with it fires into a fresh run that
+    // never issued that seq, which is a nondeterminism error and a wedged
+    // execution. Dropping a command there is wrong too, but it is wrong in a way
+    // that needs its own design rather than a reordering.
+    if (!caN)
+      for (const cmd of result.commands)
+        await applyCommand(workflowId, rec.runId, rec.taskQueue, cmd);
     if (result.done) {
       await historyStore.setStatus(workflowId, 'completed', {
         result: result.result,
@@ -704,9 +731,6 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       await notifyParentOfTerminal(workflowId);
       return;
     }
-    const caN = result.commands.find(
-      (c): c is ContinueAsNewCommand => c.type === 'continueAsNew',
-    );
     if (caN) {
       // Adopt the run's writes first: the new run must be built from them, and
       // this is the one moment where changing the seed cannot split a run.
@@ -716,9 +740,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       wake(workflowId); // drive the fresh run
       return;
     }
-    // Dispatch this batch; the execution then parks until a completion wakes it.
-    for (const cmd of result.commands)
-      await applyCommand(workflowId, rec.runId, rec.taskQueue, cmd);
+    // Nothing left to do: the batch was dispatched above, and the execution now
+    // parks until one of those dispatches wakes it.
   }
 
   /**
