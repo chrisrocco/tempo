@@ -461,6 +461,83 @@ describe('local runtime — child workflows', () => {
   });
 });
 
+describe('local runtime — parent close policy', () => {
+  /**
+   * The default, and the leak it closes: a child started to serve its parent is
+   * garbage the moment the parent is gone, and nothing used to stop it.
+   */
+  it('terminates a child when its parent closes', async () => {
+    const rt = createLocalRuntime()
+      .registerWorkflow('ticker', async () => {
+        await condition(() => false);
+        return 'unreachable';
+      })
+      .registerWorkflow('parent', async () => {
+        startChild('ticker', {workflowId: 'served-1'});
+        await sleep(5);
+        return 'done';
+      });
+
+    await expectAsync(rt.start<string>('parent').result()).toBeResolvedTo(
+      'done',
+    );
+    await wait(30);
+    expect(rt.getHandle('served-1').status()).toBe('terminated');
+  });
+
+  it('leaves a child running when it is started to outlive its parent', async () => {
+    const rt = createLocalRuntime()
+      .registerWorkflow('ticker', async () => {
+        await condition(() => false);
+        return 'unreachable';
+      })
+      .registerWorkflow('parent', async () => {
+        startChild('ticker', {
+          workflowId: 'outliving-1',
+          parentClosePolicy: 'abandon',
+        });
+        await sleep(5);
+        return 'done';
+      });
+
+    await expectAsync(rt.start<string>('parent').result()).toBeResolvedTo(
+      'done',
+    );
+    await wait(30);
+    expect(rt.getHandle('outliving-1').status()).toBe('running');
+  });
+
+  /**
+   * `cancel` when the child has cleanup to do. It is the cooperative one, so a
+   * child that declines to unwind keeps running — which is why it is not the
+   * default.
+   */
+  it('lets a child unwind through its own cleanup when asked to cancel', async () => {
+    const cleaned: string[] = [];
+    const rt = createLocalRuntime()
+      .registerWorkflow('ticker', async () => {
+        try {
+          await condition(() => false);
+          return 'unreachable';
+        } finally {
+          cleaned.push('ticker');
+        }
+      })
+      .registerWorkflow('parent', async () => {
+        startChild('ticker', {
+          workflowId: 'unwinding-1',
+          parentClosePolicy: 'cancel',
+        });
+        await sleep(5);
+        return 'done';
+      });
+
+    await rt.start('parent').result();
+    await wait(50);
+    expect(cleaned).toEqual(['ticker']);
+  });
+});
+
 describe('local runtime — cancellation', () => {
   it('cancels a workflow parked on a condition', async () => {
     const rt = createLocalRuntime().registerWorkflow('waiter', async () => {

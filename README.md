@@ -36,7 +36,9 @@ on npm and makes no stability promises — clone it, read it, run it.
     workflow can `signalWorkflow` another one, so a child poller can feed items
     to a waiting parent without leaving the engine
 -   **Child workflows**, blocking or fire-and-forget, optionally keyed by a
-    `workflowId` you choose — claim the same id twice and you get one child
+    `workflowId` you choose — claim the same id twice and you get one child, and
+    a per-child **parent-close policy** decides whether it is terminated, asked
+    to unwind, or left running when its parent finishes
 -   **Cancellation**, cascading to children, surfacing as a catchable failure —
     plus `terminate` for when cooperative cancellation cannot land
 -   **`continueAsNew`** to bound history on long-lived workflows

@@ -117,24 +117,27 @@
  * Because this threads through the service seam, local mode gets it for free:
  * `LocalService` runs the same close-and-restart against the in-memory store.
  *
- * ## Nothing cascades on a close — there is no parent-close policy
+ * ## What a closing execution does to its children
  *
- * Worth stating plainly, because the bullet above used to imply the opposite by
- * contrasting a rollover with "a genuine completion or termination". It reads as
- * though closing cascades and only continue-as-new is exempt. It does not.
+ * Two different questions, easily conflated, answered in two different places.
  *
- * **Cancellation is the only thing that walks downward.** `requestCancel` recurses
- * through `childrenByParent`; `applyWorkflowTaskResult`'s `done` and `failed`
- * branches settle the record and notify the execution's own *parent*, going
- * nowhere near its children; `terminate` says so in its own comment. So a parent
- * that completes leaves every child running, including the infinite poller it
- * started, and no per-child option exists to say otherwise.
+ * **Cancelling** a parent cascades to every child unconditionally, in
+ * `requestCancel`. Cancelling says *stop this work*, and a subtree of it is still
+ * that work.
  *
- * That is a default rather than a decision — Temporal makes it a per-child
- * `ParentClosePolicy` and defaults to the opposite one — and issue #58 owns the
- * design. Until it lands, the exemption continue-as-new needs is an exemption from
- * nothing, and this comment is here so the next reader does not go looking for the
- * cascade it was told about.
+ * **Closing** — completing, failing, or being terminated — applies each child's
+ * own `parentClosePolicy` in `closeChildren`, recorded on its `childStarted`
+ * marker when it was dispatched. `terminate` ends it, `cancel` asks it to unwind,
+ * `abandon` leaves it running. `protocol/parent_close_policy.ts` owns the choice
+ * of the three, the default, and why the two questions are kept apart.
+ *
+ * Both are the same three call sites the parent's own outcome flows through, so
+ * `closeChildren` sits beside `notifyParentOfTerminal`: one tells the generation
+ * above, the other deals with the one below. It recurses for free — the `terminate`
+ * it calls itself closes, so a whole subtree comes down — and terminates on
+ * cycles, because `terminate` returns early on an execution that is not running.
+ *
+ * Continue-as-new is not a close and fires nothing, which is the bullet above.
  */
 
 import type {
@@ -144,6 +147,8 @@ import type {
   ContinueAsNewCommand,
   HistoryEvent,
   LeasedActivityTask,
+  ExecutionStatus,
+  ParentClosePolicy,
   ParkedCondition,
   QueueWorkers,
   SignalSource,
@@ -217,6 +222,20 @@ export function childExecutionId(
   return `${parentId}.${runId}.${seq}`;
 }
 
+/**
+ * One child, as its parent remembers it: which execution, and what to do with it
+ * when the parent closes.
+ *
+ * In memory rather than derived from history on demand, because the two callers
+ * that need it — `cancelChild` and `closeChildren` — both run at moments where a
+ * history scan per child would be the wrong shape. It is rebuilt from the
+ * `childStarted` markers on restart, which is why the policy has to be on them.
+ */
+interface ChildLink {
+  childId: string;
+  parentClosePolicy: ParentClosePolicy;
+}
+
 export interface ServerCoreDeps {
   historyStore: HistoryStore;
   workflowTaskQueue: WorkflowTaskQueue;
@@ -239,6 +258,31 @@ export interface ServerCoreDeps {
   kickWorkflowWorker(): void;
   /** Nudge the (async, in-proc) activity worker to drain the activity-task queue. */
   kickActivityWorker(): void;
+  /**
+   * An execution reached a terminal state, however it got there.
+   *
+   * Exists because not every settle follows a workflow task. `LocalService`
+   * learns an execution's outcome by watching its own drain loop — it applies a
+   * task, re-reads the record, and settles the caller's `getResult` — and
+   * `terminate` produces no task at all, so it used to patch its bookkeeping by
+   * hand from the client side.
+   *
+   * That stopped being enough when the server acquired a reason of its own to
+   * terminate an execution nobody asked about: a child whose parent closed under
+   * a `terminate` policy (see `closeChildren`). Without this the child would be
+   * `terminated` on the record while local mode still reported it `running`, and
+   * anyone holding its `getResult` promise would wait forever for an outcome
+   * that had already happened.
+   *
+   * Called at every terminal transition rather than only that one, so there is
+   * no rule to remember about which settles are observable. Optional because a
+   * host that reads the store — the RPC server does — needs none of it.
+   */
+  onSettled?(
+    workflowId: string,
+    status: ExecutionStatus,
+    outcome: {result?: unknown; failure?: unknown},
+  ): void;
   /** Where lifecycle events go. Defaults to silence — see `ports/logger`. */
   log?: Logger;
   /**
@@ -395,11 +439,15 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     launch,
     kickWorkflowWorker,
     kickActivityWorker,
+    onSettled = () => {},
     log = silentLogger,
     continueAsNewSuggestThreshold = DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
   } = deps;
 
-  const childrenByParent = new Map<string, Map<number, string>>();
+  // Keyed by the `startChild` seq that spawned each child, so `cancelChild` can
+  // resolve a target the workflow named by seq. The policy rides along because
+  // this map is also what a closing parent is applied against — see `closeChildren`.
+  const childrenByParent = new Map<string, Map<number, ChildLink>>();
   const parentOfChild = new Map<string, {parentId: string; seq: number}>();
   // Not injected and not persisted: worker liveness is an observation this
   // process made, and must not outlive it. See `worker_registry.ts`.
@@ -452,13 +500,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   // without another trip to history.
   const heartbeatTasks = new Map<TaskToken, LeasedActivityTask>();
 
-  function recordChild(parentId: string, seq: number, childId: string): void {
+  function recordChild(
+    parentId: string,
+    seq: number,
+    childId: string,
+    parentClosePolicy: ParentClosePolicy,
+  ): void {
     let kids = childrenByParent.get(parentId);
     if (!kids) {
       kids = new Map();
       childrenByParent.set(parentId, kids);
     }
-    kids.set(seq, childId);
+    kids.set(seq, {childId, parentClosePolicy});
   }
 
   function errorMessage(e: unknown): string {
@@ -546,6 +599,46 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     wake(link.parentId);
   }
 
+  /**
+   * Apply each child's parent-close policy, now that this execution has closed.
+   *
+   * Called from all three terminal paths — completed, failed, terminated — and
+   * from none of the others. A rollover is not a close (`continueAsNew` keeps its
+   * children by design) and a cancel is not one either: cancellation cascades
+   * unconditionally in `requestCancel`, and the policy is deliberately not
+   * consulted there. `parent_close_policy.ts` owns that distinction.
+   *
+   * Recursion falls out of the shape rather than being written: `terminate` is
+   * itself a close, so terminating a child closes *its* children in turn, and a
+   * whole subtree comes down. A cycle — reachable only by a workflow claiming an
+   * ancestor's id — cannot spin, because `terminate` and `requestCancel` both
+   * return early on an execution that is no longer running.
+   *
+   * **`terminate` does not overrule a cancel already in flight.** A child holding
+   * a `cancelRequested` is already tearing itself down through its own
+   * `try`/`finally`, and the common way to reach that state is the parent being
+   * cancelled — whose own failure then arrives here a moment later. Killing the
+   * child at that point would cut short the cleanup the cascade just asked it to
+   * do, and would quietly turn "cancel a parent" into "terminate its children".
+   * The escape hatch stays available: an operator terminating a wedged child
+   * still terminates it.
+   */
+  async function closeChildren(workflowId: string): Promise<void> {
+    const kids = childrenByParent.get(workflowId);
+    if (!kids) return;
+    for (const child of [...kids.values()]) {
+      if (child.parentClosePolicy === 'abandon') continue;
+      if (child.parentClosePolicy === 'cancel') {
+        await requestCancel(child.childId);
+        continue;
+      }
+      const rec = await historyStore.get(child.childId);
+      if (!rec || rec.status !== 'running') continue;
+      if (rec.history.some((e) => e.type === 'cancelRequested')) continue;
+      await terminate(child.childId, `parent ${workflowId} closed`);
+    }
+  }
+
   timerService.onFire(async (workflowId, seq) => {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
@@ -625,7 +718,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           {workflowId, seq: cmd.seq},
         );
       }
-      recordChild(workflowId, cmd.seq, childId);
+      recordChild(workflowId, cmd.seq, childId, cmd.parentClosePolicy);
       // Both kinds leave the marker — it is what stops replay re-launching the
       // child, and detached children need that as much as blocking ones do.
       await appendEvent(workflowId, {
@@ -650,7 +743,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         }
       }
     } else if (cmd.type === 'cancelChild') {
-      const childId = childrenByParent.get(workflowId)?.get(cmd.targetSeq);
+      const childId = childrenByParent
+        .get(workflowId)
+        ?.get(cmd.targetSeq)?.childId;
       if (childId) await requestCancel(childId);
       // Marker last, like `startChild` above and for the same reason — nothing
       // re-drives a cancel, so replay re-emitting the command is its only
@@ -786,6 +881,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         status: 'completed',
         historyLength: rec.history.length,
       });
+      onSettled(workflowId, 'completed', {result: result.result});
+      // Children before the parent: by the time the generation above is woken by
+      // this outcome, the generation below has already been dealt with, so an
+      // execution reading its child's result never sees a subtree mid-teardown.
+      await closeChildren(workflowId);
       await notifyParentOfTerminal(workflowId);
       return;
     }
@@ -804,6 +904,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         historyLength: rec.history.length,
         failure: errorMessage(result.failure),
       });
+      onSettled(workflowId, 'failed', {failure: result.failure});
+      await closeChildren(workflowId);
       await notifyParentOfTerminal(workflowId);
       return;
     }
@@ -1033,7 +1135,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (rec.history.some((e) => e.type === 'cancelRequested')) return;
     await appendEvent(workflowId, {type: 'cancelRequested'});
     const kids = childrenByParent.get(workflowId);
-    if (kids) for (const childId of kids.values()) await requestCancel(childId);
+    // Every child, whatever its parent-close policy: cancelling says *stop this
+    // work*, and a subtree of it is still that work. The policy answers the
+    // different question of what happens when a parent finishes — see
+    // `parent_close_policy.ts`, which owns that distinction.
+    if (kids)
+      for (const child of kids.values()) await requestCancel(child.childId);
     wake(workflowId);
   }
 
@@ -1041,8 +1148,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return; // already settled — idempotent
     // No replay, no commands, no history event: the whole point is that this
-    // works on an execution whose replay throws. Children survive, matching what
-    // an ordinary close does today.
+    // works on an execution whose replay throws. Children are dealt with below,
+    // by their own parent-close policies, the same as for any other close.
     await historyStore.setStatus(workflowId, 'terminated', {
       failure: new Error(reason),
     });
@@ -1053,6 +1160,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       reason,
       taskFailures: rec.taskFailures,
     });
+    onSettled(workflowId, 'terminated', {failure: new Error(reason)});
+    await closeChildren(workflowId);
     await notifyParentOfTerminal(workflowId);
     // Any backoff timer still pending is harmless: the wake it produces finds a
     // non-running execution, and `pollWorkflowTask` discards the task.
@@ -1163,7 +1272,14 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     for (const rec of records) {
       for (const ev of rec.history) {
         if (ev.type === 'childStarted')
-          recordChild(rec.workflowId, ev.seq, ev.childId);
+          recordChild(
+            rec.workflowId,
+            ev.seq,
+            ev.childId,
+            // Absent means a child dispatched before policies existed, when the
+            // engine left children running unconditionally. See `ChildStartedEvent`.
+            ev.parentClosePolicy ?? 'abandon',
+          );
       }
     }
     let anyActivity = false;
