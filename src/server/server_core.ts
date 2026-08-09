@@ -17,7 +17,10 @@
  * No operation holds an orchestration frame while it runs. Dispatching an
  * activity, timer, or child writes a **marker event** (`activityScheduled` /
  * `timerStarted` / `childStarted`) and parks the workflow; the completion arrives
- * later as its own event and wakes it via a fresh task.
+ * later as its own event and wakes it via a fresh task. `cancelChild` and
+ * `signalWorkflow` write markers too and park nothing — they are dispatched and
+ * finished in the same breath, which is a difference in what is *owed back*, not
+ * in whether the dispatch is recorded.
  *
  * **Every dispatched op must leave its marker** — this is the invariant to
  * respect when adding a command type. Markers do double duty: on replay their
@@ -53,22 +56,29 @@
  *
  * ## Where the marker is written, and how little of that is forced
  *
- * Two branches of `applyCommand` write the marker before dispatching and two
+ * Two branches of `applyCommand` write the marker before dispatching and three
  * write it after, which looks like an inconsistency and mostly is not one. Every
  * marker records the same fact — *this command was dispatched* — so the ordering
  * is not a difference in what is being recorded. It is a difference in **what can
  * rebuild the work afterwards if the process dies between the two writes.**
  *
- * `startChild` and `cancelChild` write theirs **last, and must.** `resume`
- * re-enqueues a pending `activityScheduled` and re-arms a pending `timerStarted`,
- * but it never *launches* a child, and does not re-drive cancels at all. So a
- * marker written before the dispatch and then lost to a crash leaves a marker for
- * work nothing will ever create: the command suppressed on the next replay, the
- * parent waiting forever, nothing raised. Their recovery is replay re-emitting the
- * command, which is safe because both dispatches are idempotent — an id claim
- * correlates to the existing execution, and `requestCancel` short-circuits on an
- * existing `cancelRequested`. A marker written first is exactly what would
- * suppress that recovery.
+ * `startChild`, `cancelChild` and `signalWorkflow` write theirs **last, and
+ * must.** `resume` re-enqueues a pending `activityScheduled` and re-arms a pending
+ * `timerStarted`, but it never *launches* a child, and does not re-drive cancels
+ * or signals at all. So a marker written before the dispatch and then lost to a
+ * crash leaves a marker for work nothing will ever create: the command suppressed
+ * on the next replay, the parent waiting forever, nothing raised. Their recovery
+ * is replay re-emitting the command, which is safe because all three dispatches
+ * are idempotent — an id claim correlates to the existing execution,
+ * `requestCancel` short-circuits on an existing `cancelRequested`, and a re-sent
+ * signal is recognized by its `SignalSource` and dropped. A marker written first
+ * is exactly what would suppress that recovery.
+ *
+ * Note which way that argument runs for the newest of the three. Idempotence was
+ * a property `startChild` and `cancelChild` already had; `signalWorkflow` was
+ * *given* one, because without it neither ordering is right — marker-first loses
+ * the signal silently, marker-last duplicates it silently. "Which write goes
+ * first" is answerable only once the dispatch can survive being repeated.
  *
  * `scheduleActivity` and `startTimer` write theirs **first, and that is
  * precautionary rather than forced.** It keeps the property `resume` reads —
@@ -116,6 +126,7 @@ import type {
   LeasedActivityTask,
   ParkedCondition,
   QueueWorkers,
+  SignalSource,
   TaskToken,
   WorkflowTask,
   WorkflowTaskResult,
@@ -633,6 +644,38 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         seq: cmd.seq,
         targetSeq: cmd.targetSeq,
       });
+    } else if (cmd.type === 'signalWorkflow') {
+      const delivered = await deliverSignal(
+        cmd.targetId,
+        cmd.signalName,
+        cmd.payload,
+        {workflowId, runId, seq: cmd.seq},
+      );
+      if (!delivered)
+        // Logged rather than thrown, and logged even though the marker records
+        // it too: the sender cannot see the marker (nothing parks on a signal it
+        // sent), and an operator watching a poller relay items has no reason to
+        // be reading its history until something has already gone wrong.
+        log('signal.undelivered', {
+          workflowId,
+          seq: cmd.seq,
+          targetId: cmd.targetId,
+          name: cmd.signalName,
+        });
+      // Marker last, like `startChild` and `cancelChild`, and forced for the same
+      // reason: nothing re-drives a signal on restart, so replay re-emitting the
+      // command is its only recovery, and a marker written first would suppress
+      // it. What makes that safe here is that the delivery is idempotent —
+      // `deliverSignal` recognizes its own re-send by `SignalSource`. Without
+      // that dedup neither ordering would be right: marker-first silently loses
+      // the signal, marker-last silently duplicates it.
+      await appendEvent(workflowId, {
+        type: 'workflowSignaled',
+        seq: cmd.seq,
+        targetId: cmd.targetId,
+        signalName: cmd.signalName,
+        delivered,
+      });
     }
   }
 
@@ -650,6 +693,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       continueAsNewSuggested:
         rec.history.length >= continueAsNewSuggestThreshold,
       carryover: {...rec.carryover},
+      // Straight off the record: a child's parentage is durable and unchanging,
+      // so this is the same value on every task of every run.
+      parent: rec.parent && {...rec.parent},
     };
   }
 
@@ -678,12 +724,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       (c): c is ContinueAsNewCommand => c.type === 'continueAsNew',
     );
     // Dispatch before settling, not instead of it. A task can both issue
-    // commands and finish the workflow — `startChild(worker); return 'done';` is
-    // one activation — and the dispositions below all return early, so a batch
-    // reaching them used to be discarded. Nothing raised: the execution completed
-    // normally, having silently not done what its last line said. Every command
-    // has this shape, and the fire-and-forget ones have it worst, since they are
-    // the ones with no promise whose absence would be noticed.
+    // commands and finish the workflow — `signalWorkflow(parent, done); return
+    // result;` is one activation — and the dispositions below all return early,
+    // so a batch reaching them used to be discarded. Nothing raised: the
+    // execution completed normally, having silently not done what its last line
+    // said. Every command has this shape, and the fire-and-forget ones have it
+    // worst, since they are the ones with no promise whose absence would be
+    // noticed.
     //
     // Safe for a settling execution because a dispatch outliving it is already
     // the rule elsewhere: children survive a close, a timer that fires against a
@@ -903,6 +950,52 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       payload,
     });
     wake(workflowId);
+  }
+
+  /**
+   * Deliver a signal a *workflow* sent, and say whether it landed.
+   *
+   * Separate from `appendSignal` — the client path above — because it knows two
+   * things that path does not. It has a sender to attribute the signal to, and it
+   * owes an answer: `signalWorkflow` records `delivered` in the sender's history,
+   * so "there is no such execution" stops being silent.
+   *
+   * The `source` check is what lets the marker be written last. Replay re-emits a
+   * `signalWorkflow` whose marker was lost to a crash, and this recognizes the
+   * re-send as the delivery it already made rather than handing the target a
+   * second copy. It reports `true`: the signal *was* delivered, by the dispatch
+   * this one repeats. The scan is over the target's history, which is bounded by
+   * the same continue-as-new threshold everything else here is — and is the same
+   * cost `reportActivityResult` already pays per completion.
+   */
+  async function deliverSignal(
+    targetId: string,
+    signalName: string,
+    payload: unknown,
+    source: SignalSource,
+  ): Promise<boolean> {
+    const target = await historyStore.get(targetId);
+    // A settled target is as undeliverable as a missing one: nothing will replay
+    // it, so an appended signal would sit in history unread. Reporting that back
+    // is the whole reason this returns a boolean.
+    if (!target || target.status !== 'running') return false;
+    const already = target.history.some(
+      (e) =>
+        e.type === 'signal' &&
+        e.source !== undefined &&
+        e.source.workflowId === source.workflowId &&
+        e.source.runId === source.runId &&
+        e.source.seq === source.seq,
+    );
+    if (already) return true;
+    await appendEvent(targetId, {
+      type: 'signal',
+      name: signalName,
+      payload,
+      source,
+    });
+    wake(targetId);
+    return true;
   }
 
   async function requestCancel(workflowId: string): Promise<void> {
@@ -1152,6 +1245,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         carryover: {...rec.carryover},
         continueAsNewSuggested:
           rec.history.length >= continueAsNewSuggestThreshold,
+        parent: rec.parent && {...rec.parent},
       };
     }
   }

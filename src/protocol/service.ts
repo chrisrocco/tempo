@@ -755,6 +755,16 @@ export interface WorkflowTask {
   continueAsNewSuggested: boolean;
   /** What the previous task (or the previous run) left behind. */
   carryover: Carryover;
+  /**
+   * Which execution started this one; absent when a client did.
+   *
+   * The same projection the detail view carries, on the task because the workflow
+   * itself needs it: `workflowInfo().parent` is how a child addresses its parent
+   * without being handed the id. It is a fact about the execution rather than
+   * about this task — like `args`, and unlike `history` — so it is identical on
+   * every task of every run.
+   */
+  parent?: ExecutionParentView;
 }
 
 /** What a workflow worker returns after replaying one workflow task. */

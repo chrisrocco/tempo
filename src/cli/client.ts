@@ -174,11 +174,13 @@ function formatEvent(ev: HistoryEvent, index: number, first?: number): string {
           ? ` ${ev.childId}${ev.detached ? ' (detached)' : ''}`
           : ev.type === 'childCancelRequested'
             ? ` target=${ev.targetSeq}`
-            : ev.type === 'timerStarted'
-              ? ` fireAt=${new Date(ev.fireAt).toISOString()}`
-              : ev.type === 'activityFailed' || ev.type === 'childFailed'
-                ? ` ${ev.error}`
-                : '';
+            : ev.type === 'workflowSignaled'
+              ? ` ${ev.signalName} -> ${ev.targetId}${ev.delivered ? '' : ' (undelivered)'}`
+              : ev.type === 'timerStarted'
+                ? ` fireAt=${new Date(ev.fireAt).toISOString()}`
+                : ev.type === 'activityFailed' || ev.type === 'childFailed'
+                  ? ` ${ev.error}`
+                  : '';
   return `  ${at}${String(index).padStart(3)}  ${ev.type}${seq}${detail}`;
 }
 

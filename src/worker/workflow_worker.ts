@@ -114,6 +114,7 @@ export function createWorkflowWorker(
         task.history,
         task.continueAsNewSuggested,
         task.carryover,
+        task.parent,
       );
       await replay(ctx, fn);
       assertCarryoverFits(name, ctx.carryoverNext);

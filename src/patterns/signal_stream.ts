@@ -32,6 +32,13 @@
  * signals arriving in between would be silently dropped. So the plain function
  * registers; only the iteration is a generator.
  *
+ * ## Who feeds the stream
+ *
+ * Anything that can signal: a client, or another workflow via `signalWorkflow`.
+ * A stream cannot tell them apart and should not — the shape this was built for
+ * is a child poller relaying items to a parent parked on `for await`, and the
+ * consumer reads identically whether the producer is inside the engine or not.
+ *
  * ## One consumer per signal
  *
  * Only one handler exists per signal name, so two concurrent streams on the same

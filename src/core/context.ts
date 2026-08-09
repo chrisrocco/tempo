@@ -17,7 +17,13 @@
  */
 
 import {AsyncLocalStorage} from 'node:async_hooks';
-import type {Carryover, Command, HistoryEvent, SignalEvent} from '../protocol';
+import type {
+  Carryover,
+  Command,
+  ExecutionParentView,
+  HistoryEvent,
+  SignalEvent,
+} from '../protocol';
 
 interface Waiter {
   resolve: (v: unknown) => void;
@@ -57,8 +63,8 @@ export interface WorkflowContext {
   condSeq: number; // condition id counter — NOT recorded; must not perturb command seqs
   /**
    * Every `seq` history already holds an event for — a marker
-   * (`activityScheduled`, `timerStarted`, `childStarted`, `childCancelRequested`)
-   * or a completion. Either one is proof that the command at that seq was
+   * (`activityScheduled`, `timerStarted`, `childStarted`, `childCancelRequested`,
+   * `workflowSignaled`) or a completion. Either one is proof that the command at that seq was
    * dispatched and made durable, so this is the set of commands replay must
    * **not** emit again. It is the whole of the suppression rule; see
    * `workflow_api.issue`.
@@ -94,6 +100,19 @@ export interface WorkflowContext {
   cancelled: boolean;
   /** Server-provided hint: history has grown enough to consider continue-as-new. */
   continueAsNewSuggested: boolean;
+  /**
+   * Which execution started this one, when one did.
+   *
+   * A server-provided fact about the execution, in the same family as `args`:
+   * fixed for its whole life, carried on the task, and read through
+   * `workflowInfo`. It is what lets a child address its parent — `signalWorkflow`
+   * takes an id, and a child otherwise has no way to learn one it was not handed
+   * as an argument.
+   *
+   * Survives continue-as-new, unlike everything derived from history: a rollover
+   * is a new run of the same execution, and its parentage does not change.
+   */
+  parent?: ExecutionParentView;
   /**
    * What this **run** started with. Constant for the whole run: every task of it
    * is built from the same value, so a read cannot vary between replays. That is
@@ -133,11 +152,19 @@ function seqsInHistory(events: HistoryEvent[]): Set<number> {
   return seqs;
 }
 
+/**
+ * `parent` is optional where `carryover` is required, and the difference is what
+ * a caller that forgets it gets. A missing carryover starts the workflow from
+ * empty state, which is indistinguishable from a workflow that wrote none —
+ * silent. A missing parent makes `workflowInfo().parent` undefined, which any
+ * code that needs it must already handle, because a root execution has none.
+ */
 export function createContext(
   args: unknown[],
   events: HistoryEvent[],
   continueAsNewSuggested = false,
   carryover: Carryover = {},
+  parent?: ExecutionParentView,
 ): WorkflowContext {
   return {
     args,
@@ -163,5 +190,6 @@ export function createContext(
     failure: undefined,
     cancelled: false,
     continueAsNewSuggested,
+    parent,
   };
 }

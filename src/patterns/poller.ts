@@ -91,7 +91,12 @@ export interface PollForeverOptions<T, S, Q> {
   differ: Differ<T, S, Q>;
   /**
    * React to an item the differ reports as new — by issuing a **command**:
-   * `startChild`, `runActivity`, a signal.
+   * `startChild`, `runActivity`, `signalWorkflow`.
+   *
+   * `signalWorkflow` is what makes the poller-in-a-child shape work: the cycles
+   * land in this workflow's history, which it sheds by rolling over, and the
+   * consumer pays one event per *item* rather than four per cycle. Reach the
+   * consumer with `workflowInfo().parent`.
    *
    * Read "once" precisely. This is ordinary workflow code, so it is *invoked* on
    * every replay pass, the same as every other line in the workflow; what
