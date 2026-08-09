@@ -39,8 +39,9 @@ on npm and makes no stability promises — clone it, read it, run it.
     plus `terminate` for when cooperative cancellation cannot land
 -   **`continueAsNew`** to bound history on long-lived workflows
 -   **Crash recovery** — kill the server mid-workflow, restart, and it continues
--   **Inspection** — `tempo list`, and `tempo describe` for what an execution is
-    waiting on, derived from history rather than stored
+-   **Inspection** — an execution's status, history, and what it is currently
+    waiting on, derived from history rather than stored (the CLI that surfaced
+    this is being redesigned — see [`src/cli/README.md`](src/cli/README.md))
 -   **Structured lifecycle log** — JSON Lines on stderr, one event per fact, so
     a run can be aggregated without parsing prose
 -   **Task queues** — route work to a pool of workers, so several applications
@@ -88,18 +89,14 @@ console.log(await rt.start<string>('greeter', ['world']).result());
 rt.shutdown(); // stop background timers so the process exits
 ```
 
-Or run the whole topology — server plus a worker — in the foreground. Without
-`--port` the server takes any free port; pinning it to the default lets the
-client find it with no configuration:
+Or run the pieces separately — a server process and one or more workers. **The
+CLI that drove this is being redesigned and is not currently present**; see
+[`src/cli/README.md`](src/cli/README.md) for the shape it is coming back in.
+Until it lands, run the server and a worker directly:
 
 ```bash
-npm run tempo -- up examples/greeter.ts --port=7233
-```
-
-Then drive workflows through it from another terminal:
-
-```bash
-npm run tempo -- start greeter world --wait
+tsx bin/server-main.ts &            # PORT, HOST, DATA_DIR from the environment
+TEMPO_SERVER_URL=http://127.0.0.1:7233 tsx examples/greeter.ts
 ```
 
 Going distributed does not change the workflow code, only how it is hosted. See

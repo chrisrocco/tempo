@@ -3,7 +3,7 @@
  * The reference deployable worker, in one file: an activity, a workflow, and the
  * entrypoint that hands both to the library.
  *
- * Run it with `tempo up examples/greeter.ts`, or directly — `TEMPO_SERVER_URL`
+ * Run it directly against a server — `TEMPO_SERVER_URL`
  * picks the server, `TEMPO_ROLE` picks a single poll loop, `--runtime=local`
  * composes an in-process runtime instead of connecting to anything, and
  * `--describe` prints what the artifact contains (see src/tempo.ts for the full

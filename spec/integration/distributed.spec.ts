@@ -149,7 +149,7 @@ describe('distributed — real server process over RPC', () => {
   }, 30000);
 
   // The dev shape: TEMPO_ROLE unset, so one process serves both roles. This is
-  // what `tempo up` and a hand-run binary do.
+  // what a hand-run binary does.
   it('runs a workflow with one worker process serving both roles', async () => {
     const {url, proc: server} = await spawnServer();
     const worker = spawnMain(WORKER, {TEMPO_SERVER_URL: url});

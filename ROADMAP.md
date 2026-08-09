@@ -236,9 +236,10 @@ phase.
   explicit `workflowId` now, which is a _claim_: the same id twice yields one
   child, so "one planner per calendar event" is expressible in the workflow
   rather than reconstructed from its own bookkeeping.
-- **The deployment CLI** — `server install`, `deploy`, `status`, `logs`,
-  `rollback`. Surface designed in [`src/cli/cli.ts`](src/cli/cli.ts); tracked in
-  [#41](https://github.com/chrisrocco/tempo/issues/41).
+- **The CLI**, which was deleted rather than grown: the whole surface is being
+  redesigned from `tempo run` outwards, and the deployment half was never built.
+  Design in progress in [`src/cli/README.md`](src/cli/README.md); the deployment
+  half is [#41](https://github.com/chrisrocco/tempo/issues/41).
 - **Sticky cache** in the workflow worker — keep warm suspended executions to skip
   cold replay ([`src/worker/workflow_worker.ts`](src/worker/workflow_worker.ts)).
   Pure performance; correctness never depends on it, which is the point.

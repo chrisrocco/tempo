@@ -20,8 +20,7 @@ import 'jasmine';
 import type {ChildProcess} from 'node:child_process';
 import type {AddressInfo} from 'node:net';
 import type {Server} from 'node:http';
-import {spawnLaunchable} from '../../src/cli/process';
-import {createSourceToolchain} from '../../src/cli/source_toolchain';
+import {spawn} from 'node:child_process';
 import {
   createRemoteService,
   createRpcServer,
@@ -35,16 +34,30 @@ import {repoPath} from '../support/repo_root';
 const WORKER_ENTRY = repoPath('examples/greeter.ts');
 
 /**
- * Run a worker binary to completion, capturing what it printed. Resolved through
- * the source toolchain, which is how the CLI itself reaches a `.ts` entrypoint.
+ * The `tsx` loader as an absolute path. `--import tsx` would make the child
+ * resolve the bare specifier from its own working directory, which need not
+ * contain a `node_modules` at all.
+ */
+const TSX_LOADER = require.resolve('tsx');
+
+/**
+ * Run a worker binary to completion, capturing what it printed.
+ *
+ * Spawns the entrypoint directly rather than through a toolchain. This used to
+ * borrow the CLI's resolution so the spec ran a worker exactly as the CLI did;
+ * the CLI is being redesigned (see `src/cli/README.md`) and these specs are
+ * about `Tempo.startWorker`, not about how a target becomes a process.
  */
 async function runToCompletion(
   args: string[],
   env: Record<string, string> = {},
 ): Promise<{code: number | null; out: string; err: string}> {
-  const launchable = await createSourceToolchain().launch(WORKER_ENTRY);
   return new Promise((resolve) => {
-    const proc: ChildProcess = spawnLaunchable(launchable, {args, env});
+    const proc: ChildProcess = spawn(
+      process.execPath,
+      ['--import', TSX_LOADER, WORKER_ENTRY, ...args],
+      {env: {...process.env, ...env}, stdio: ['ignore', 'pipe', 'pipe']},
+    );
     let out = '';
     let err = '';
     proc.stdout?.on('data', (d: Buffer) => (out += d.toString()));
