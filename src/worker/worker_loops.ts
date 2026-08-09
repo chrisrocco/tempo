@@ -163,13 +163,7 @@ export function runWorkflowWorker(
     if (!task) return false;
     let result;
     try {
-      result = await worker.replayTask(
-        task.name,
-        task.args,
-        task.history,
-        task.continueAsNewSuggested,
-        task.carryover,
-      );
+      result = await worker.replayTask(task);
     } catch (e) {
       // Replay itself broke — a nondeterminism error, or a throw from outside the
       // workflow's own control flow. Report it instead of letting it escape to
