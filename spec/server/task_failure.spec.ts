@@ -190,12 +190,10 @@ describe('terminate — the escape hatch cancel cannot be', () => {
 
     // The workflow can never apply it, because replaying is what throws.
     const task = await core.pollWorkflowTask();
-    const reason = await worker
-      .replayTask(task!.name, task!.args, task!.history, false, {})
-      .then(
-        () => undefined,
-        (e: unknown) => (e instanceof Error ? e.message : String(e)),
-      );
+    const reason = await worker.replayTask(task!).then(
+      () => undefined,
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
     await core.failWorkflowTask(task!.token, reason!);
     expect((await historyStore.get('wf'))!.status).toBe('running'); // cancel did not land
 
@@ -255,12 +253,10 @@ describe('recovering a wedged execution', () => {
     // Captured rather than try/caught, so a replay that *doesn't* throw fails the
     // test instead of being swallowed by the handler meant for the throw.
     const first = await core.pollWorkflowTask();
-    const reason = await brokenWorker
-      .replayTask(first!.name, first!.args, first!.history, false, {})
-      .then(
-        () => undefined,
-        (e: unknown) => (e instanceof Error ? e.message : String(e)),
-      );
+    const reason = await brokenWorker.replayTask(first!).then(
+      () => undefined,
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
     expect(reason).toBe('nondeterminism at seq 0');
 
     await core.failWorkflowTask(first!.token, reason!);
@@ -269,13 +265,7 @@ describe('recovering a wedged execution', () => {
     // Roll the workers. The retry lands on corrected code.
     await wait(150);
     const retry = await core.pollWorkflowTask();
-    const result = await fixedWorker.replayTask(
-      retry!.name,
-      retry!.args,
-      retry!.history,
-      false,
-      {},
-    );
+    const result = await fixedWorker.replayTask(retry!);
     await core.completeWorkflowTask(retry!.token, result);
 
     const rec = await historyStore.get('wf');

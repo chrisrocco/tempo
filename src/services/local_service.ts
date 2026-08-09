@@ -133,13 +133,7 @@ export function createLocalService(
             if (!task) break;
             let result;
             try {
-              result = await workflowWorker.replayTask(
-                task.name,
-                task.args,
-                task.history,
-                task.continueAsNewSuggested,
-                task.carryover,
-              );
+              result = await workflowWorker.replayTask(task);
             } catch (e) {
               // Same contract as the out-of-process loop: report, do not throw.
               // Letting this escape would reject the drain's floating promise

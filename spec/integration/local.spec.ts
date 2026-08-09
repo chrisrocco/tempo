@@ -25,6 +25,7 @@ import {
   proxyActivities,
   runActivity,
   setHandler,
+  signalWorkflow,
   sleep,
   startChild,
   workflowInfo,
@@ -555,6 +556,78 @@ describe('local runtime — cancellation', () => {
     await wait(10); // let the children spawn and start ticking
     handle.cancel(); // cancels the parent; cascade cancels both children (else they tick forever)
     await expectAsync(handle.result()).toBeRejectedWithError(CancelledFailure);
+  });
+});
+
+describe('local runtime — signalling another workflow', () => {
+  it('sends a signal to another execution by workflow id', async () => {
+    const ping = defineSignal('ping');
+    const rt = createLocalRuntime()
+      .registerWorkflow('receiver', async () => {
+        let heard: string | undefined;
+        setHandler(ping, (word: string) => {
+          heard = word;
+        });
+        await condition(() => heard !== undefined);
+        return heard;
+      })
+      .registerWorkflow('sender', async () => {
+        signalWorkflow('receiver-1', ping, 'hello');
+        return 'sent';
+      });
+
+    const receiver = rt.start<string>('receiver', [], {
+      workflowId: 'receiver-1',
+    });
+    rt.start('sender');
+
+    await expectAsync(receiver.result()).toBeResolvedTo('hello');
+  });
+
+  /**
+   * The shape this exists for: a child does the polling, so the cycles land in
+   * *its* history and it sheds them by rolling over, while the parent pays one
+   * event per item and reads them as ordinary control flow.
+   */
+  it('lets a child feed its parent items as they are found', async () => {
+    const found = defineSignal('found');
+    const rt = createLocalRuntime()
+      .registerActivity('lookup', (from: number) => [from, from + 1])
+      .registerWorkflow('finder', async () => {
+        // `parent` is server-provided, so the child addresses an id it was never
+        // handed — the engine derived it from lineage.
+        const parent = workflowInfo().parent!.workflowId;
+        for (const item of await runActivity<number[]>('lookup', 1))
+          signalWorkflow(parent, found, item);
+        return 'fed';
+      })
+      .registerWorkflow('collector', async () => {
+        const items: number[] = [];
+        setHandler(found, (item: number) => items.push(item));
+        startChild('finder');
+        await condition(() => items.length === 2);
+        return items;
+      });
+
+    await expectAsync(rt.start<number[]>('collector').result()).toBeResolvedTo([
+      1, 2,
+    ]);
+  });
+
+  /**
+   * Nothing is awaited, so a target that is gone cannot be caught. It is
+   * recorded instead — `workflowSignaled` carries `delivered: false`, and the
+   * server logs `signal.undelivered`.
+   */
+  it('carries on when the target does not exist', async () => {
+    const rt = createLocalRuntime().registerWorkflow('shouter', async () => {
+      signalWorkflow('nobody-1', defineSignal('ping'), 'hello');
+      return 'shouted';
+    });
+
+    await expectAsync(rt.start<string>('shouter').result()).toBeResolvedTo(
+      'shouted',
+    );
   });
 });
 

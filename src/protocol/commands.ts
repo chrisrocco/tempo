@@ -2,8 +2,10 @@
  * @fileoverview
  * Commands are what workflow code produces during a task: a request for the
  * runtime to do something durable (run an activity, start a timer, start a
- * child). The framework stamps each command with a deterministic `seq` in call
- * order; that seq is how the matching completion event is later routed back.
+ * child, signal another execution). The framework stamps each command with a
+ * deterministic `seq` in call order; that seq is how the matching completion
+ * event is later routed back — and, for the commands that have no completion, how
+ * the marker proving the dispatch is keyed.
  *
  * Modeled as a `CommandBase` plus one named interface per variant rather than an
  * inline discriminated union: `CommandBase` documents the shared `seq` once, and
@@ -60,6 +62,32 @@ export interface CancelChildCommand extends CommandBase {
 }
 
 /**
+ * Send a signal to another execution, addressed by workflow id.
+ *
+ * The general form rather than a parent-only one, following Temporal's
+ * `SignalExternalWorkflowExecution`: the target is an id, and "signal my parent"
+ * is that call with `workflowInfo().parent.workflowId` in it. A parent-only
+ * primitive would have to be widened later, and widening an API is the change
+ * that breaks callers.
+ *
+ * `targetId` rather than `workflowId` because `applyCommand` already has a
+ * `workflowId` in scope — the *sender's* — and one of the two would be read as
+ * the other. It also reads as the counterpart of `cancelChild`'s `targetSeq`:
+ * addressed by id, not by the seq that spawned it.
+ *
+ * **Fire-and-forget: no completion event, nothing to await.** See
+ * `core/workflow_api.signalWorkflow` for what that costs and why the alternative
+ * was declined.
+ */
+export interface SignalWorkflowCommand extends CommandBase {
+  type: 'signalWorkflow';
+  /** Which execution to signal. Not required to exist — see `workflowSignaled.delivered`. */
+  targetId: string;
+  signalName: string;
+  payload: unknown;
+}
+
+/**
  * Terminal command: end the current run and start a fresh one carrying `args`.
  * The core only emits it and halts; the close-and-restart is a server disposition
  * (`server_core.applyWorkflowTaskResult`). Not something the core ever acts on
@@ -75,6 +103,7 @@ export type Command =
   | StartTimerCommand
   | StartChildCommand
   | CancelChildCommand
+  | SignalWorkflowCommand
   | ContinueAsNewCommand;
 
 /**
@@ -87,4 +116,5 @@ export type CommandSpec =
   | Omit<StartTimerCommand, 'seq'>
   | Omit<StartChildCommand, 'seq'>
   | Omit<CancelChildCommand, 'seq'>
+  | Omit<SignalWorkflowCommand, 'seq'>
   | Omit<ContinueAsNewCommand, 'seq'>;

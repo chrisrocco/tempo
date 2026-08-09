@@ -75,6 +75,7 @@ export {
   executeChild,
   proxyActivities,
   runActivity,
+  signalWorkflow,
   sleep,
   startChild,
   workflowInfo,

@@ -262,6 +262,79 @@ describe('core applyEvent — marker validation', () => {
     ).toThrowError(/plan-for-event-42/);
   });
 
+  /**
+   * A sent signal has no waiter — nothing parks on it — so a target that moved
+   * between replays produces no error of its own. The marker is the only place
+   * the divergence is visible, which is why both halves of it are checked.
+   */
+  it('rejects a sent-signal marker whose target disagrees', () => {
+    const ctx = createContext([], []);
+    requested(ctx, {
+      type: 'signalWorkflow',
+      seq: 0,
+      targetId: 'parent-1',
+      signalName: 'comment',
+      payload: {id: 7},
+    });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'workflowSignaled',
+        seq: 0,
+        targetId: 'parent-2',
+        signalName: 'comment',
+        delivered: true,
+      }),
+    ).toThrowError(/parent-1/);
+  });
+
+  it('rejects a sent-signal marker whose signal name disagrees', () => {
+    const ctx = createContext([], []);
+    requested(ctx, {
+      type: 'signalWorkflow',
+      seq: 0,
+      targetId: 'parent-1',
+      signalName: 'comment',
+      payload: undefined,
+    });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'workflowSignaled',
+        seq: 0,
+        targetId: 'parent-1',
+        signalName: 'approval',
+        delivered: true,
+      }),
+    ).toThrowError(NondeterminismError);
+  });
+
+  /**
+   * The payload is not compared, for the same reason activity arguments are not:
+   * it is arbitrarily large and serialization differences would raise on correct
+   * workflows. The marker does not even record it (see `WorkflowSignaledEvent`).
+   */
+  it('accepts a sent-signal marker for the right target and name', () => {
+    const ctx = createContext([], []);
+    requested(ctx, {
+      type: 'signalWorkflow',
+      seq: 0,
+      targetId: 'parent-1',
+      signalName: 'comment',
+      payload: {id: 7},
+    });
+
+    expect(() =>
+      applyEvent(ctx, {
+        type: 'workflowSignaled',
+        seq: 0,
+        targetId: 'parent-1',
+        signalName: 'comment',
+        delivered: false,
+      }),
+    ).not.toThrow();
+  });
+
   it('accepts a derived child id, which the workflow never claimed', () => {
     const ctx = createContext([], []);
     requested(ctx, {
