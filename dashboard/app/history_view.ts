@@ -82,7 +82,12 @@ export function describeEvent(event: HistoryEvent): EventView {
       return {label: 'timer fired', tone: 'accent'};
     case 'childStarted':
       return {
-        label: `${event.detached ? 'detached child' : 'child'} started`,
+        // The policy is on the label rather than hidden in the payload because
+        // it is the answer to "why did this child get terminated?", asked from
+        // the parent's history after the fact.
+        label:
+          `${event.detached ? 'detached child' : 'child'} started` +
+          ` (on close: ${event.parentClosePolicy ?? 'abandon'})`,
         tone: 'muted',
         childId: event.childId,
       };

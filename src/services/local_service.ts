@@ -109,6 +109,17 @@ export function createLocalService(
     },
     kickWorkflowWorker,
     kickActivityWorker,
+    // The drain loop below settles an execution it drove to a terminal state,
+    // which covers every outcome a workflow task produces. This covers the rest:
+    // a `terminate` — whether an operator asked for it or a parent's close policy
+    // did — settles the record directly and produces no task for the loop to see.
+    // Both paths funnel into `settleTerminal`, which is idempotent, so the
+    // overlap costs nothing and there is no rule about which one owns which
+    // outcome.
+    onSettled: (workflowId, status, outcome) => {
+      statusMirror.set(workflowId, status);
+      settleTerminal(workflowId, status, outcome.result, outcome.failure);
+    },
     continueAsNewSuggestThreshold,
   });
 
@@ -290,12 +301,11 @@ export function createLocalService(
     terminate(workflowId, reason) {
       if (!statusMirror.has(workflowId))
         throw new Error(`no execution ${workflowId}`);
-      void core.terminate(workflowId, reason).then(() => {
-        // No task follows a terminate — it settles the record directly — so the
-        // drain loop will never observe this one. Settle the local waiter here.
-        statusMirror.set(workflowId, 'terminated');
-        rejectWaiter(workflowId, new Error(reason));
-      });
+      // Voided: the settle is reported through `onSettled` above, which is what
+      // makes this work for a terminate the *server* initiated as well as one a
+      // client asked for. This used to patch the mirror and the waiter by hand
+      // here, which only ever covered the client's half.
+      void core.terminate(workflowId, reason);
     },
     reset(workflowId, keep) {
       if (!statusMirror.has(workflowId))

@@ -13,7 +13,13 @@
  * make replay irreproducible and belongs on the runtime/host side instead.
  */
 
-import type {ActivityOptions, Command, CommandSpec} from '../protocol';
+import {
+  DEFAULT_PARENT_CLOSE_POLICY,
+  type ActivityOptions,
+  type Command,
+  type CommandSpec,
+  type ParentClosePolicy,
+} from '../protocol';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
 
@@ -102,6 +108,23 @@ export interface ChildOptions {
    * to hand work to a different pool.
    */
   taskQueue?: string;
+  /**
+   * What becomes of this child when this workflow closes. Defaults to
+   * `'terminate'`; `'cancel'` lets the child unwind, `'abandon'` leaves it
+   * running. See `protocol/parent_close_policy.ts` for what each guarantees and
+   * why the default is the harsh one.
+   *
+   * Set `'abandon'` for a child deliberately started to outlive its parent — a
+   * follow-up job, a handoff. Leave it alone for anything started to serve this
+   * workflow, which is the case that used to leak: an infinite poller feeding a
+   * parent goes on polling forever once the parent is gone, and nothing reports
+   * that it has.
+   *
+   * It is read from history, not from this call, whenever the parent actually
+   * closes — so changing it in the source affects children started from then on,
+   * not ones already running.
+   */
+  parentClosePolicy?: ParentClosePolicy;
 }
 
 /**
@@ -125,6 +148,7 @@ export function executeChild<T = unknown>(
     detached: false,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
+    parentClosePolicy: options.parentClosePolicy ?? DEFAULT_PARENT_CLOSE_POLICY,
   }) as Promise<T>;
 }
 
@@ -161,6 +185,7 @@ export function startChild(
     detached: true,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
+    parentClosePolicy: options.parentClosePolicy ?? DEFAULT_PARENT_CLOSE_POLICY,
     seq: targetSeq,
   });
   return {

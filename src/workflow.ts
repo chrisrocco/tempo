@@ -84,4 +84,4 @@ export {
 } from './core/workflow_api';
 
 // author-facing option types (erased at runtime; safe on the deterministic surface)
-export type {ActivityOptions, RetryPolicy} from './protocol';
+export type {ActivityOptions, ParentClosePolicy, RetryPolicy} from './protocol';
