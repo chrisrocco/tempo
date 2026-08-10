@@ -1,6 +1,6 @@
 /**
  * @fileoverview
- * The derivation behind both crash recovery and `tempo describe`: given a
+ * The derivation behind both crash recovery and `Client.describe()`: given a
  * history, which dispatched operations are still outstanding. These are unit
  * specs because the two consumers must agree, and an integration test would only
  * catch a disagreement in whichever path it happened to exercise.

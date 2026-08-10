@@ -1,6 +1,6 @@
 /**
  * @fileoverview
- * The read model behind `tempo list` and `tempo describe`, and the one question
+ * The read model behind `Client.list()` and `Client.describe()`, and the one question
  * an operator asks of a listing: which of these is broken?
  *
  * The guarantee under test is that the *summary* can answer it. A wedged

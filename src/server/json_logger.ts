@@ -7,7 +7,7 @@
  * changing (ROADMAP Phase 7).
  *
  * Writes to **stderr**, deliberately. stdout carries the readiness lines that
- * `tempo up`, supervisors, and the integration specs parse (`LISTENING <port>`,
+ * supervisors and the integration specs parse (`LISTENING <port>`,
  * `WORKER_READY ...`); interleaving log objects there would break them.
  *
  * The timestamp is `Date.now()`-derived and the field order is fixed, so lines

@@ -18,7 +18,8 @@
  * Running the *same* binary twice with a different `--role` is how the two worker
  * tiers are deployed: workflow workers replay workflow code, activity workers run
  * activities (the only I/O in the system), and each scales independently against
- * one server. `tempo up` writes exactly that — one unit per role, one artifact.
+ * one server. A deployment is one worker artifact launched twice — two services,
+ * two `--role` values, one file.
  *
  * `--queue` is what lets more than one application share a server. A queue name
  * is a contract — every worker on it must register the same workflows and
@@ -37,9 +38,14 @@
  * without a port to pick or a child to wait on. It is gone, because running
  * locally and running deployed differ by more than a composition: a local run
  * needs no build and no deployment, and folding it in here made a *deployable
- * artifact's* startup path branch on which of the two it was. Local running is
- * its own thing now, unbuilt (see `src/deploy/README.md`), and this file is about
- * the deployed worker only.
+ * artifact's* startup path branch on which of the two it was. `createLocalRuntime`
+ * is the local shape and this file is about the deployed worker only.
+ *
+ * The server this worker dials has a matching entrypoint —
+ * [`startServer`](server_main.ts) — and the pair is the whole of what this
+ * library hands a deployment: two artifacts, one call each. Everything about
+ * installing, supervising, or restarting them belongs to whoever runs them (see
+ * `README.md`, "Running it yourself").
  *
  * `createLocalRuntime` itself is untouched and is still the fast in-process
  * runtime — see `local_runtime.ts` and `spec/integration/local.spec.ts`. What
@@ -121,7 +127,7 @@ export const DEFAULT_SERVER_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 export type WorkerRole = 'workflow' | 'activity';
 
 export interface StartWorkerOptions {
-  /** Service identity: the unit name, the `tempo status` row, the `tempo logs` target. */
+  /** Service identity: what the launcher calls this service, and what its logs are filed under. */
   name: string;
   /**
    * Which server to connect to. `--server` overrides it, so this is the default
@@ -141,7 +147,7 @@ export interface StartWorkerOptions {
   /**
    * Which poll loop to run. `--role` overrides it, which is how the same artifact
    * is deployed twice — one service per role, scaled independently, which is
-   * exactly what `tempo up` writes.
+   * the two-service shape a deployment installs.
    *
    * Omitted runs every role the binary has definitions for, which is what a
    * hand-run binary wants. Naming a role the binary cannot serve is a startup
@@ -150,8 +156,8 @@ export interface StartWorkerOptions {
    */
   role?: WorkerRole;
   /**
-   * What this worker calls itself on every poll, so `tempo queues` can count and
-   * name the fleet. Defaults to `${pid}@${hostname}`.
+   * What this worker calls itself on every poll, so `Client.queues()` can count
+   * and name the fleet. Defaults to `${pid}@${hostname}`.
    *
    * Worth setting wherever the process is not where an operator would look: a
    * container id or a deployment name beats a pid on a host nobody can ssh to.
@@ -397,7 +403,9 @@ export function startWorker(options: StartWorkerOptions): Worker {
     },
   };
 
-  // Readiness line — a supervisor, `tempo up`, or a test can wait on it.
+  // Readiness line for a human or a spawning test, not the readiness contract:
+  // `Client.queues()` is what answers "is this worker polling" from anywhere, at
+  // any time. See `server_main.ts`, which says the same about `LISTENING`.
   console.log(`WORKER_READY ${options.name} ${roles.join(',')} ${taskQueue}`);
 
   function shutdown(): void {

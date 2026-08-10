@@ -43,10 +43,10 @@ and the interim mitigation live here, so neither repeats the other.
 | #   | Blocker                              | Consequence                                                                                                                                                                                                                                                                                                                                                              | Mitigation today                                                                                           | Fix owned by                     |
 | --- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- | -------------------------------- |
 | 1   | ~~No activity heartbeat~~            | **Closed.** An attempt can now prove it is alive: `heartbeat()` renews the lease and resets a `heartbeatTimeoutMs` deadline, so unbounded work keeps its claim and a dead worker is caught in one heartbeat interval instead of one lease. An activity that sets neither timeout still redelivers on lease expiry, which remains the right default for a crashed worker. | Set `heartbeatTimeoutMs` for long work, `startToCloseTimeoutMs` for bounded work; keep effects idempotent. | Done (Phase 6)                   |
-| 2   | Nothing alerts on a wedged execution | A replay that throws no longer hides: the failure is counted, backed off, reported by `describe`, fixable by redeploy, and endable with `terminate`. But discovering it still requires someone to look — `getResult` waits indefinitely by design, and no alert fires.                                                                                                   | `tempo describe` / `list`; `terminate` to end one.                                                         | Phase 7 (handling landed)        |
+| 2   | Nothing alerts on a wedged execution | A replay that throws no longer hides: the failure is counted, backed off, reported by `describe`, fixable by redeploy, and endable with `terminate`. But discovering it still requires someone to look — `getResult` waits indefinitely by design, and no alert fires.                                                                                                   | `Client.describe()` / `list()`; `terminate` to end one.                                                    | Phase 7 (handling landed)        |
 | 3   | No workflow versioning               | Deploying changed workflow code while executions are in flight diverges replay from history, which lands in blocker 2.                                                                                                                                                                                                                                                   | Drain in-flight executions before deploying a changed workflow.                                            | Unphased (needs design)          |
 | 4   | No auth or TLS; single server        | The RPC starts, signals, and cancels arbitrary workflows unauthenticated; the loopback bind is the only thing containing it. The server is also a single point of failure and a single writer.                                                                                                                                                                           | Keep everything on one trusted host; do not widen the bind without a private network.                      | Unphased (auth) / Phase 9 (HA)   |
-| 5   | Nothing aggregates or alerts         | Per-execution state is inspectable (`tempo describe` / `list`) and the server emits structured lifecycle events, but nothing rolls them up or alerts: queue depth is not even measurable yet, since the queues expose no size.                                                                                                                                           | `tempo describe`; pipe the server's JSONL stderr somewhere you can query.                                  | Phase 7 (instrumentation landed) |
+| 5   | Nothing aggregates or alerts         | Per-execution state is inspectable (`Client.describe()` / `list()`) and the server emits structured lifecycle events, but nothing rolls them up or alerts: queue depth is not even measurable yet, since the queues expose no size.                                                                                                                                      | `Client.describe()`; pipe the server's JSONL stderr somewhere you can query.                               | Phase 7 (instrumentation landed) |
 | 6   | ~~Retry state is not durable~~       | **Closed.** Attempts are counted on the execution record and the server decides retries, so the budget holds across worker loss and server restarts, and is applied identically in local and distributed mode.                                                                                                                                                           | —                                                                                                          | Done (Phase 7)                   |
 | 7   | ~~Generated ids collide on restart~~ | **Closed.** Child ids are derived from lineage (`parent.run.seq`) instead of a counter, so they are stable across restarts and across continue-as-new; the root counter is seeded past existing ids on resume; and a duplicate id is logged rather than escaping as an unhandled rejection, which used to kill the server.                                               | —                                                                                                          | Done                             |
 
@@ -89,7 +89,7 @@ happen today (a poison task, a hung activity) present identically as silence.
   two things that fall out of it, are on `failWorkflowTask` in
   [`src/server/server_core.ts`](src/server/server_core.ts).
 
-- ~~**`tempo terminate <id>`**~~ — **landed.** Settles the execution _without_
+- ~~**Terminate a wedged execution**~~ — **landed** as `Client.terminate()`. Settles the execution _without_
   replaying it, which is exactly why `cancel` could not serve: cancellation is
   cooperative and delivered through replay, so on a wedged execution it is
   recorded and never applied. Confirmed against a real one — `cancel` left it
@@ -97,8 +97,8 @@ happen today (a poison task, a hung activity) present identically as silence.
   and `terminate` ended it. `terminated` is its own `ExecutionStatus` rather than
   a flavour of `failed`, so a postmortem can tell "an operator pulled the plug"
   from "your code raised".
-- ~~**Per-execution inspection**~~ — **landed.** `tempo describe <id>` and
-  `tempo list` over new `describeExecution`/`listExecutions` RPCs, reporting what
+- ~~**Per-execution inspection**~~ — **landed.** `Client.describe()` and
+  `Client.list()` over new `describeExecution`/`listExecutions` RPCs, reporting what
   an execution is parked on. Views are derived from history, never stored
   ([`src/server/execution_view.ts`](src/server/execution_view.ts)), over the same
   outstanding-work derivation crash recovery re-dispatches
@@ -219,7 +219,7 @@ phase.
 - **Auth and TLS on the RPC** (blocker 4). Triggered, not scheduled: worthless
   while everything is on one host behind the loopback bind, mandatory the moment
   that bind widens. The trigger is the first worker on another machine — see the
-  operational notes in [`bin/server-main.ts`](bin/server-main.ts).
+  operational notes in [`src/server_main.ts`](src/server_main.ts).
 - **Workflow versioning** (blocker 3). No `getVersion`/`patched` primitive, so
   editing a workflow with live executions diverges their replay from history and
   lands in blocker 2; the only safe deploy today is a drained one. This is an
@@ -236,16 +236,18 @@ phase.
   explicit `workflowId` now, which is a _claim_: the same id twice yields one
   child, so "one planner per calendar event" is expressible in the workflow
   rather than reconstructed from its own bookkeeping.
-- ~~**Deployment**~~ — **landed** as a library rather than a CLI:
-  [`src/deploy/`](src/deploy/index.ts) exports `up`, `down`, and `status` as
-  ordinary functions over a `Host` seam, so a consumer assembles the command-line
-  tool and no argv convention is baked in here. Installs a server and both worker
-  tiers as supervised systemd units. What it knowingly does not answer — version
-  skew across a worker fleet, deploying the dashboard, verifying a built artifact
-  — is in [`src/deploy/README.md`](src/deploy/README.md) and belongs in issues
-  ([#41](https://github.com/chrisrocco/tempo/issues/41) is the original).
-  Untested against real systemd: everything runs against a fake `Host`, because a
-  unit file cannot be installed from a spec.
+- ~~**Deployment**~~ — **out of scope, deliberately**
+  ([#64](https://github.com/chrisrocco/tempo/issues/64)). It was built twice here
+  — first as a CLI, then as a systemd library over a `Host` seam — and both had
+  the same defect: everything they knew was about a machine this repo has never
+  run on, so every assumption could only be falsified in the consumer's repo and
+  only fixed in this one. The `/usr/bin/node` in `ExecStart=` is the specimen.
+  What this library owes a deployment instead is that both artifacts are ordinary
+  library calls — [`startServer`](src/server_main.ts) and
+  [`Tempo.startWorker`](src/tempo.ts) — plus the client and the flag vocabulary,
+  all exported. Installing and supervising them is the consumer's, and README's
+  "Running it yourself" is the whole of what this repo says about it. Supersedes
+  [#41](https://github.com/chrisrocco/tempo/issues/41).
 - **Sticky cache** in the workflow worker — keep warm suspended executions to skip
   cold replay ([`src/worker/workflow_worker.ts`](src/worker/workflow_worker.ts)).
   Pure performance; correctness never depends on it, which is the point.
