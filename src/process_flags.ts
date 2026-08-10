@@ -7,11 +7,11 @@
  * systemd units from one set of values — a server reading `--port` while the
  * unit writes `--listen` is a deployment that starts and serves nobody.
  *
- * This is deliberately *not* `cli/args.ts`. That parses an interactive command
- * line — positionals, `--` separators, JSON-typed workflow arguments — for a tool
- * a human is typing at. This reads a handful of named values from a command line
- * a machine wrote, and a deployed artifact has no business carrying the CLI's
- * parsing along with it.
+ * This reads a handful of named values from a command line a machine wrote — the
+ * unit files `deploy/` renders. It is not a command-line parser: no positionals,
+ * no `--` separator, no notion of a command. Whoever assembles a CLI on top of
+ * this repo brings their own argv conventions, and a deployed artifact has no
+ * business carrying them.
  *
  * ## Why flags and not environment variables
  *

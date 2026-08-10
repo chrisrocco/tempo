@@ -44,8 +44,8 @@ on npm and makes no stability promises — clone it, read it, run it.
 -   **`continueAsNew`** to bound history on long-lived workflows
 -   **Crash recovery** — kill the server mid-workflow, restart, and it continues
 -   **Inspection** — an execution's status, history, and what it is currently
-    waiting on, derived from history rather than stored (the CLI that surfaced
-    this is being redesigned — see [`src/cli/README.md`](src/cli/README.md))
+    waiting on, derived from history rather than stored and reachable through
+    [`src/client/`](src/client/client.ts) or the dashboard
 -   **Structured lifecycle log** — JSON Lines on stderr, one event per fact, so
     a run can be aggregated without parsing prose
 -   **Task queues** — route work to a pool of workers, so several applications
@@ -93,19 +93,21 @@ console.log(await rt.start<string>('greeter', ['world']).result());
 rt.shutdown(); // stop background timers so the process exits
 ```
 
-Or run the pieces separately — a server process and one or more workers. **The
-CLI is being rebuilt**: `start` and `result` are back, and `up`, `down`, and
-`status` are on the way — see [`src/cli/README.md`](src/cli/README.md). Run the
-server and a worker directly, then drive them:
+Or run the pieces separately — a server process and one or more workers:
 
 ```bash
-tsx bin/server-main.ts &                                  # --port=7777 by default
-tsx examples/greeter.ts --server=http://127.0.0.1:7777 &  # --role= picks one loop
-npm run tempo -- start greeter world --wait
+tsx bin/server-main.ts &                                    # --port=7777 by default
+tsx examples/greeter.ts --server=http://127.0.0.1:7777 &    # --role= picks one loop
 ```
 
-Configuration is flags with defaults, never the environment — see
-[`src/process_flags.ts`](src/process_flags.ts) for why.
+then start a workflow through [`src/client/`](src/client/client.ts), the same
+seam an application uses. Configuration is flags with defaults, never the
+environment — see [`src/process_flags.ts`](src/process_flags.ts) for why.
+
+**There is no command-line tool.** There was, and it was deleted to be
+redesigned; what is being built in its place is
+[`src/deploy/`](src/deploy/README.md) — a library of functions that install and
+inspect a deployment, for a consumer to assemble a CLI from.
 
 Going distributed does not change the workflow code, only how it is hosted. See
 [`bin/server-main.ts`](bin/server-main.ts) for the server process and
@@ -226,7 +228,7 @@ src/
   activity.ts     ★ ACTIVITY ENTRYPOINT — heartbeat()
   index.ts        ★ HOST ENTRYPOINT — createLocalRuntime, types
   tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
-bin/              server-main (the server process) · tempo (the CLI)
+bin/              server-main.ts — the server process
 examples/         greeter.ts — the reference deployable worker
 spec/             the executable documentation
 ```
@@ -316,7 +318,7 @@ The full programming model runs in all three modes above.
 
 Not built: server HA, workflow versioning, metrics and alerting on top of the
 lifecycle log, the workflow-worker sticky cache, cross-process timer-sweep
-failover, and the deployment half of the CLI. The RPC has no auth or TLS and
+failover, and the deployment library in `src/deploy/`. The RPC has no auth or TLS and
 binds loopback. [`ROADMAP.md`](ROADMAP.md) ranks these by how likely each is to
 bite a real deployment ("Adoption blockers") and tracks what's planned;
 in-flight design work lives in

@@ -38,8 +38,8 @@
  * locally and running deployed differ by more than a composition: a local run
  * needs no build and no deployment, and folding it in here made a *deployable
  * artifact's* startup path branch on which of the two it was. Local running is
- * its own command now (see `src/cli/README.md`), and this file is about the
- * deployed worker only.
+ * its own thing now, unbuilt (see `src/deploy/README.md`), and this file is about
+ * the deployed worker only.
  *
  * `createLocalRuntime` itself is untouched and is still the fast in-process
  * runtime — see `local_runtime.ts` and `spec/integration/local.spec.ts`. What
