@@ -1,8 +1,8 @@
 /**
  * @fileoverview
  * How an execution looks to someone asking about it from outside — the read model
- * behind `describeExecution` / `listExecutions`, and so behind `tempo describe`
- * and `tempo list`.
+ * behind `describeExecution` / `listExecutions`, and so behind `Client.describe()`
+ * and `Client.list()`.
  *
  * It lives here, once, because both service implementations answer these
  * questions: `LocalService` in-process and `ServerHost` over RPC. Projecting in
@@ -35,7 +35,7 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** One line of `tempo list`. */
+/** One line of `Client.list()`. */
 export function summarizeExecution(rec: ExecutionRecord): ExecutionSummary {
   return {
     workflowId: rec.workflowId,

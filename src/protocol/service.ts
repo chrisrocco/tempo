@@ -83,7 +83,7 @@ export interface StartResult {
 // optimistic CAS and raw `failure` values that need not be serializable, and
 // neither belongs on the wire.
 
-/** One line of `tempo list`: enough to identify an execution and its state. */
+/** One line of `Client.list()`: enough to identify an execution and its state. */
 export interface ExecutionSummary {
   workflowId: string;
   /**
@@ -126,7 +126,7 @@ export interface ExecutionSummary {
  * Both halves matter. `taskFailures > 0` alone would flag a settled execution
  * that recovered or was terminated after a rough patch, and `running` alone is
  * the normal state of every healthy workflow that is merely waiting on a timer
- * or an activity. Defined here, beside the type, so `tempo list` and any other
+ * or an activity. Defined here, beside the type, so `Client.list()` and any other
  * client cannot drift into two different answers.
  */
 export function isStuck(execution: ExecutionSummary): boolean {
@@ -135,7 +135,7 @@ export function isStuck(execution: ExecutionSummary): boolean {
 
 /**
  * What to ask a listing for. Every field narrows; omitting all of them means
- * everything, which is what `tempo list` has always done.
+ * everything, which is what `Client.list()` has always done.
  *
  * `stuck` is not a status — it is the derived predicate above — but it belongs
  * here rather than in the caller, because filtering after the fact would mean
@@ -320,7 +320,7 @@ export interface ExecutionParentView {
   seq: number;
 }
 
-/** `tempo describe`: the summary, plus history and what the execution awaits. */
+/** `Client.describe()`: the summary, plus history and what the execution awaits. */
 export interface ExecutionDetail extends ExecutionSummary {
   args: unknown[];
   /**
@@ -828,7 +828,7 @@ export interface WorkflowTaskResult {
   /**
    * Carryover as it stands at the end of this task. Returned on **every** task,
    * not only on the one that rolls the run over: storing it per task is what
-   * makes it survive a crash and what makes `tempo describe` show the live value
+   * makes it survive a crash and what makes `Client.describe()` show the live value
    * rather than the one from the last rollover.
    */
   carryover?: Carryover;

@@ -9,7 +9,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./protocol": "./src/protocol/index.ts",
-    "./workflow": "./src/workflow.ts"
+    "./workflow": "./src/workflow.ts",
+    "./activity": "./src/activity.ts"
   },
   "scripts": {
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",

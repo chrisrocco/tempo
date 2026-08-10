@@ -63,7 +63,7 @@ export type ParentClosePolicy = 'terminate' | 'cancel' | 'abandon';
  * it, and the shape most likely to be abandoned is the infinite poller, which
  * goes on polling a source nobody reads while holding a claimed workflow id. A
  * wrongly terminated child, by contrast, is *loud* — it shows as `terminated` in
- * `tempo list` with the reason on the record.
+ * `Client.list()` with the reason on the record.
  *
  * Choosing the failure that announces itself over the one that accumulates
  * silently is the same trade the poison-task policy makes in `server_core`.
