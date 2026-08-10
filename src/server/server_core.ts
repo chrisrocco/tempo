@@ -107,14 +107,34 @@
  *
  * Two behaviors live specifically here:
  *
- * - **Children survive.** Continue-as-new is not a real close, so parent-close
- *   policy must not fire — child workflows carry into the new run. Teardown must
- *   not cascade cancellation the way a genuine completion or termination does.
+ * - **Children survive.** Continue-as-new is not a real close, so a rollover must
+ *   not tear down what the previous run started — child workflows carry into the
+ *   new run. That is load-bearing for the poller-in-a-child shape, whose whole
+ *   point is a child that outlives its parent's history.
  * - **History accounting resets.** The new run starts empty (the whole point), so
  *   `continueAsNewSuggested` goes back to false on it.
  *
  * Because this threads through the service seam, local mode gets it for free:
  * `LocalService` runs the same close-and-restart against the in-memory store.
+ *
+ * ## Nothing cascades on a close — there is no parent-close policy
+ *
+ * Worth stating plainly, because the bullet above used to imply the opposite by
+ * contrasting a rollover with "a genuine completion or termination". It reads as
+ * though closing cascades and only continue-as-new is exempt. It does not.
+ *
+ * **Cancellation is the only thing that walks downward.** `requestCancel` recurses
+ * through `childrenByParent`; `applyWorkflowTaskResult`'s `done` and `failed`
+ * branches settle the record and notify the execution's own *parent*, going
+ * nowhere near its children; `terminate` says so in its own comment. So a parent
+ * that completes leaves every child running, including the infinite poller it
+ * started, and no per-child option exists to say otherwise.
+ *
+ * That is a default rather than a decision — Temporal makes it a per-child
+ * `ParentClosePolicy` and defaults to the opposite one — and issue #58 owns the
+ * design. Until it lands, the exemption continue-as-new needs is an exemption from
+ * nothing, and this comment is here so the next reader does not go looking for the
+ * cascade it was told about.
  */
 
 import type {
@@ -256,7 +276,16 @@ export interface ServerCore {
     signalName: string,
     payload: unknown,
   ): Promise<void>;
-  /** Request cancellation, cascading to fire-and-forget children. */
+  /**
+   * Request cancellation, cascading to **every** child this execution started.
+   *
+   * Not only the fire-and-forget ones, which is what this used to say: both kinds
+   * go into `childrenByParent`, so a blocking child is cancelled alongside a
+   * detached one. That is the intended behaviour — a parent unwinding through a
+   * `CancelledFailure` is not going to consume the result it was awaiting — and
+   * cancellation remains the only thing that walks downward at all (see the
+   * header).
+   */
   requestCancel(workflowId: string): Promise<void>;
   /**
    * End an execution outright, without replaying it.

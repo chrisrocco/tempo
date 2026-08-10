@@ -557,6 +557,32 @@ describe('local runtime — cancellation', () => {
     handle.cancel(); // cancels the parent; cascade cancels both children (else they tick forever)
     await expectAsync(handle.result()).toBeRejectedWithError(CancelledFailure);
   });
+
+  /**
+   * Both kinds of child, not only the detached ones. A parent unwinding through
+   * a `CancelledFailure` is not going to consume the result it was awaiting, so
+   * leaving the blocking child running would strand it — and cancellation is the
+   * only thing that reaches a child at all (a parent that *completes* leaves
+   * every child running; see `server_core`).
+   */
+  it('cascades cancellation to a blocking child too', async () => {
+    const rt = createLocalRuntime()
+      .registerWorkflow('ticker', async () => {
+        await condition(() => false);
+        return 'unreachable';
+      })
+      .registerWorkflow('parent', async () =>
+        executeChild('ticker', {workflowId: 'kid-1'}),
+      );
+
+    const handle = rt.start('parent', [], {workflowId: 'par-1'});
+    await wait(10); // let the child start and park
+    handle.cancel();
+    await expectAsync(handle.result()).toBeRejectedWithError(CancelledFailure);
+
+    await wait(10); // the child unwinds on its own next task
+    expect(rt.getHandle('kid-1').status()).toBe('failed');
+  });
 });
 
 describe('local runtime — signalling another workflow', () => {
