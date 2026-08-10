@@ -22,6 +22,7 @@ import type {
   ExecutionGroups,
   ExecutionPage,
   QueueWorkers,
+  RemoteWorkflowService,
   ServerHealth,
   ExecutionStatus,
   LeasedActivityTask,
@@ -53,20 +54,12 @@ export interface RemoteServiceOptions {
   pollIntervalMs?: number;
 }
 
-/**
- * A `WorkflowService` that is talking to a server, plus the things only such a
- * client can ask.
- *
- * `health` is here rather than on `WorkflowService` because there is no server
- * in the local case: `LocalService` is the engine running in your own process,
- * and asking it for its uptime and data directory would be asking it to invent
- * answers about a tier that does not exist. The seam that both implement stays
- * the workflow operations; this is the extra reach a remote client has.
- */
-export interface RemoteWorkflowService extends WorkflowService {
-  /** Liveness and what the server is. See `ServerHealth`. */
-  health(): Promise<ServerHealth>;
-}
+// `RemoteWorkflowService` — the seam this module implements — is declared in
+// `protocol/service.ts` beside the `WorkflowService` it extends, so that `client/`
+// can name it without importing from here. Re-exported because this is where it is
+// implemented, and callers look for it next to `createRemoteService`. The reasoning
+// for `health` being remote-only is at the declaration.
+export type {RemoteWorkflowService};
 
 export function createRemoteService(
   baseUrl: string,

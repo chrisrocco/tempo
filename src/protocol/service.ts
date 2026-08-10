@@ -698,6 +698,25 @@ export interface WorkflowService {
   heartbeatActivityTask(token: TaskToken): Promise<void>;
 }
 
+/**
+ * A `WorkflowService` reached over a wire, plus the one thing only such a client
+ * can ask.
+ *
+ * **`health` is here rather than on `WorkflowService` because there is no server
+ * in the local case**: `LocalService` is the engine running in your own process,
+ * and asking it for its uptime and data directory would be asking it to invent
+ * answers about a tier that does not exist. The seam both implement stays the
+ * workflow operations; this is the extra reach a remote client has.
+ *
+ * The distinction lives here, beside `WorkflowService`, so that anything written
+ * against the seam can name it — `client/` builds a handle-shaped surface over one
+ * or the other and may not import from `services/`, where the implementation is.
+ */
+export interface RemoteWorkflowService extends WorkflowService {
+  /** Liveness and what the server is. See `ServerHealth`. */
+  health(): Promise<ServerHealth>;
+}
+
 // ── worker task contracts ───────────────────────────────────────────────
 /** A unit of activity work: which activity to run, for which execution/command. */
 export interface ActivityTask {

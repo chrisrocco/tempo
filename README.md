@@ -102,14 +102,14 @@ tsx examples/greeter.ts --server=http://127.0.0.1:7777 &    # --role= picks one 
 
 then drive them through [`src/client/`](src/client/client.ts), the same seam an
 application uses — `start`, `describe`, `signal`, `cancel`, `terminate`, `reset`,
-`list`, `queues`, `counts`, `ping`. Configuration is flags with defaults, never
+`list`, `queues`, `counts`, `health`. Configuration is flags with defaults, never
 the environment — see [`src/process_flags.ts`](src/process_flags.ts) for why.
 
 **There is no command-line tool, by design.** There was, and it was deleted; what
-replaced it is [`src/deploy/`](src/deploy/index.ts) — `up`, `down`, and `status`
-as ordinary functions, typed options in and typed values out, for a consumer to
-assemble a CLI from. Installing a server and its two worker tiers as supervised
-systemd services is one call:
+replaced it is [`src/deploy/`](src/deploy/index.ts) — `up`, `down`, `status`,
+`restart`, and `logs` as ordinary functions, typed options in and typed values
+out, for a consumer to assemble a CLI from. Installing a server and its two worker
+tiers as supervised systemd services is one call:
 
 ```ts
 import { up, systemHost } from './src/deploy';

@@ -197,6 +197,32 @@ describe('status — reading the fleet', () => {
     }
   }, 15000);
 
+  /**
+   * The catastrophic-and-invisible case, and the reason `status` asks for health
+   * at all. A server keeping history in memory completes workflows normally, reads
+   * `active` to systemd, and loses every execution on its next restart. It is what
+   * a server started without `--data-dir` looks like, and nothing else reports it.
+   */
+  it('reports a non-durable server, and refuses to call it healthy', async () => {
+    const server = await startServer();
+    const host = fakeHost({responses: [showing('active')]});
+
+    try {
+      const report = await status({serverUrl: server.url}, host);
+
+      expect(report.server.reachable).toBe(true);
+      if (report.server.reachable) {
+        // This spec's server is in-memory, which is exactly the condition.
+        expect(report.server.health.durable).toBe(false);
+        expect(report.server.health.uptimeMs).toBeGreaterThanOrEqual(0);
+      }
+      expect(report.units.every((u) => u.activeState === 'active')).toBe(true);
+      expect(report.healthy).toBe(false);
+    } finally {
+      await server.teardown();
+    }
+  }, 15000);
+
   // An idle pool nobody is using is not a problem, and reporting it as one trains
   // an operator to ignore the field that matters.
   it('does not call an idle queue unserved', async () => {

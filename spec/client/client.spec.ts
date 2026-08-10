@@ -15,21 +15,18 @@
 import 'jasmine';
 import type {AddressInfo} from 'node:net';
 import type {Server} from 'node:http';
-import {createClient, type Client} from '../../src/client';
+import {
+  createRemoteClient,
+  type Client,
+  type RemoteClient,
+} from '../../src/client';
 import {createLocalRuntime} from '../../src';
 import {
-  createLocalService,
   createRemoteService,
   createRpcServer,
   createServerHost,
 } from '../../src/services';
 import {startWorker} from '../../src/tempo';
-import {
-  createActivityRegistry,
-  createActivityWorker,
-  createWorkflowRegistry,
-  createWorkflowWorker,
-} from '../../src/worker';
 import {proxyActivities} from '../../src/workflow';
 
 const activities = {
@@ -46,6 +43,8 @@ const workflows = {greeter};
 
 interface Harness {
   client: Client;
+  /** The same client, typed as what an operator tool actually holds. */
+  remote: RemoteClient;
   teardown: () => Promise<void>;
 }
 
@@ -64,8 +63,11 @@ async function startDeployment(): Promise<Harness> {
     activities,
   });
 
+  const remote = createRemoteClient(createRemoteService(url));
+
   return {
-    client: createClient(createRemoteService(url)),
+    client: remote,
+    remote,
     teardown: async () => {
       await worker.stop();
       host.shutdown();
@@ -215,39 +217,52 @@ describe('client — reading the whole server', () => {
   }, 15000);
 });
 
-describe('client — is anything there', () => {
+describe('remote client — liveness and what the server is', () => {
   /**
-   * Worth its own call because every write on a handle is fire-and-forget:
-   * `signal`, `cancel`, and `terminate` all return `void`, so without a probe
-   * "sent" and "dropped into a closed port" are the same thing from here.
+   * `health` is also the reachability probe, which is why there is no separate
+   * `ping`: every write on a handle is fire-and-forget — `signal`, `cancel`, and
+   * `terminate` all return `void` — so without one, "sent" and "dropped into a
+   * closed port" are the same thing from here.
    */
-  it('answers true for a server that is listening', async () => {
-    const {client, teardown} = await startDeployment();
+  it('reports uptime and where state lives', async () => {
+    const {remote, teardown} = await startDeployment();
     try {
-      await expectAsync(client.ping()).toBeResolvedTo(true);
+      const health = await remote.health();
+
+      expect(health.uptimeMs).toBeGreaterThanOrEqual(0);
+      expect(typeof health.durable).toBe('boolean');
     } finally {
       await teardown();
     }
   }, 15000);
 
-  // Answers rather than throws, so the caller can name the address it tried and
-  // say what would fix it — neither of which the client can know.
-  it('answers false for a closed port instead of throwing', async () => {
-    const client = createClient(createRemoteService('http://127.0.0.1:1'));
+  /**
+   * The field to read first. An in-memory server loses every execution on its next
+   * restart while completing workflows normally and reading `active` to systemd —
+   * catastrophic and invisible, and exactly what a server started without
+   * `--data-dir` looks like.
+   */
+  it('says a server is not durable when it is keeping history in memory', async () => {
+    const {remote, teardown} = await startDeployment();
+    try {
+      const health = await remote.health();
 
-    await expectAsync(client.ping()).toBeResolvedTo(false);
+      expect(health.durable).toBe(false);
+      expect(health.dataLocation).toBeUndefined();
+    } finally {
+      await teardown();
+    }
   }, 15000);
 
-  // Not a special case: an in-process service has no port to miss.
-  it('answers true for an in-process service', async () => {
-    const service = createLocalService(
-      createWorkflowWorker(createWorkflowRegistry()),
-      createActivityWorker(createActivityRegistry()),
+  // Rejecting *is* the answer to "not reachable". A caller wanting a boolean
+  // catches; one wanting to name the address it tried has the error to do it with.
+  it('rejects for a closed port, which is what makes it a probe', async () => {
+    const remote = createRemoteClient(
+      createRemoteService('http://127.0.0.1:1'),
     );
 
-    await expectAsync(createClient(service).ping()).toBeResolvedTo(true);
-    service.shutdown();
-  });
+    await expectAsync(remote.health()).toBeRejected();
+  }, 15000);
 });
 
 /**

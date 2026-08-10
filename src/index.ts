@@ -14,7 +14,8 @@
  * it.
  */
 
-export type {Client, WorkflowHandle} from './client';
+export {createClient, createRemoteClient} from './client';
+export type {Client, RemoteClient, WorkflowHandle} from './client';
 export type {WorkflowContext, WorkflowFn} from './core';
 export {
   createLocalRuntime,
