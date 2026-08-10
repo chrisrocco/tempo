@@ -236,13 +236,16 @@ phase.
   explicit `workflowId` now, which is a _claim_: the same id twice yields one
   child, so "one planner per calendar event" is expressible in the workflow
   rather than reconstructed from its own bookkeeping.
-- **Deployment** — installing a server and its two worker tiers as supervised
-  systemd services, and reading back what a deployment is doing. The CLI that
-  half-did this was deleted rather than grown; what replaces it is a library of
-  functions (`up`, `down`, `status`) for a consumer to assemble a command-line
-  tool from, so no argv convention is baked in here. Design in progress in
-  [`src/deploy/README.md`](src/deploy/README.md); the deployment half is
-  [#41](https://github.com/chrisrocco/tempo/issues/41).
+- ~~**Deployment**~~ — **landed** as a library rather than a CLI:
+  [`src/deploy/`](src/deploy/index.ts) exports `up`, `down`, and `status` as
+  ordinary functions over a `Host` seam, so a consumer assembles the command-line
+  tool and no argv convention is baked in here. Installs a server and both worker
+  tiers as supervised systemd units. What it knowingly does not answer — version
+  skew across a worker fleet, deploying the dashboard, verifying a built artifact
+  — is in [`src/deploy/README.md`](src/deploy/README.md) and belongs in issues
+  ([#41](https://github.com/chrisrocco/tempo/issues/41) is the original).
+  Untested against real systemd: everything runs against a fake `Host`, because a
+  unit file cannot be installed from a spec.
 - **Sticky cache** in the workflow worker — keep warm suspended executions to skip
   cold replay ([`src/worker/workflow_worker.ts`](src/worker/workflow_worker.ts)).
   Pure performance; correctness never depends on it, which is the point.

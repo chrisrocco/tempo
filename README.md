@@ -104,10 +104,17 @@ then start a workflow through [`src/client/`](src/client/client.ts), the same
 seam an application uses. Configuration is flags with defaults, never the
 environment — see [`src/process_flags.ts`](src/process_flags.ts) for why.
 
-**There is no command-line tool.** There was, and it was deleted to be
-redesigned; what is being built in its place is
-[`src/deploy/`](src/deploy/README.md) — a library of functions that install and
-inspect a deployment, for a consumer to assemble a CLI from.
+**There is no command-line tool, by design.** There was, and it was deleted; what
+replaced it is [`src/deploy/`](src/deploy/index.ts) — `up`, `down`, and `status`
+as ordinary functions, typed options in and typed values out, for a consumer to
+assemble a CLI from. Installing a server and its two worker tiers as supervised
+systemd services is one call:
+
+```ts
+import { up, systemHost } from './src/deploy';
+
+await up({ server: 'out/server.js', worker: 'out/worker.js' }, systemHost());
+```
 
 Going distributed does not change the workflow code, only how it is hosted. See
 [`bin/server-main.ts`](bin/server-main.ts) for the server process and
@@ -223,11 +230,13 @@ src/
   services/       The WorkflowService implementations + HTTP transport
   worker/         Stateless workflow + activity workers
   client/         WorkflowService -> ergonomic handles
-  cli/            the `tempo` CLI
+  deploy/         up · down · status — install and inspect a deployment
+    ports/          host — the seam onto the machine being deployed to
   workflow.ts     ★ AUTHOR ENTRYPOINT — deterministic primitives only
   activity.ts     ★ ACTIVITY ENTRYPOINT — heartbeat()
   index.ts        ★ HOST ENTRYPOINT — createLocalRuntime, types
   tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
+  process_flags.ts  how a deployed process reads its own configuration
 bin/              server-main.ts — the server process
 examples/         greeter.ts — the reference deployable worker
 spec/             the executable documentation
