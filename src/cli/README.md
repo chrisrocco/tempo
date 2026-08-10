@@ -47,9 +47,28 @@ worker and a directory per name; nothing here forecloses it.
 tempo up --server=./dist/server.js --worker=./dist/worker.js
 ```
 
-Both artifacts are **built JavaScript** — see the open question about what that
-costs. The CLI copies them to a well-known location, writes systemd units, and
-starts them:
+**Both flags take a path to a final `.js` file.** The caller builds; `up` copies.
+That is the whole contract, and it means the CLI knows nothing about build
+systems — Blaze is two ordinary lines with no adapter anywhere:
+
+```
+blaze build //my:worker //third_party/tempo:server
+tempo up --server=blaze-bin/third_party/tempo/server.js \
+         --worker=blaze-bin/my/worker.js
+```
+
+The alternative — flags taking build _targets_ that `up` resolves through a
+toolchain, as the deleted CLI did — is more convenient per invocation and drags
+the build system back inside. `up` runs rarely and deliberately, so the extra
+line is cheap and worth it.
+
+**Copy dereferenced.** `blaze-bin/` is a symlink farm into the output base, so a
+naive copy installs links that dangle the next time someone builds with
+different flags — a deployment that breaks with no deploy having happened.
+
+That a _built_ artifact is the unit of deployment is itself a decision with a
+cost; see question 1. The CLI copies both to a well-known location, writes
+systemd units, and starts them:
 
 ```
 /opt/tempo/
@@ -165,29 +184,27 @@ An alternative worth considering: this is now the operator's problem by
 construction, since `up` is explicit. Defensible — but only if something,
 somewhere, can answer "what is deployed?"
 
-### 3. Does `up` build, or only install?
+### 3. `--local` is now the only build-system knowledge left
 
-`--server=./dist/server.js` says the caller builds and `up` copies. That keeps
-the CLI entirely out of the build business, which makes the Blaze story
-one line with no adapter at all:
+`up` taking built paths settles the question it was asked, and leaves an
+asymmetry worth deciding on purpose rather than discovering: **`--local` is the
+one flag that still names a source target**, so it is the one place the CLI has
+to know that `.ts` runs under `tsx` and `//my:worker` runs under `blaze run`.
 
-```
-blaze build //my:worker //third_party/tempo:server
-tempo up --server=blaze-bin/third_party/tempo/server.js \
-         --worker=blaze-bin/my/worker.js
-```
+Two ways out:
 
-The alternative is that the flags take _targets_ and `up` resolves them through
-a toolchain, as the deleted CLI did. More convenient, and it drags the build
-system back into the CLI.
+- **`--local` takes a built `.js` too.** The CLI becomes completely
+  build-system-free and the toolchain seam never comes back. It also puts a
+  build step in the dev loop, which is the one place a build step hurts most.
+- **`--local` keeps source targets.** The dev loop stays fast, and the CLI keeps
+  a small amount of build knowledge.
 
-Recommendation: take paths. `up` is run rarely and deliberately; the extra line
-is cheap, and "the CLI does not know what a build system is" is worth a lot.
-
-**If it takes paths, it must still copy dereferenced.** `blaze-bin/` is a
-symlink farm into the output base, so a naive copy installs links that dangle
-the next time someone builds with different flags — a deployment that breaks
-with no deploy having happened.
+The second looks right, with one caveat: keep it _small_. The rule is a switch —
+`.ts` under `tsx`, `.js` under `node`, a label under `blaze run`, anything else
+executed directly — not an interface. The deleted `ports/toolchain.ts` existed
+because `up` needed the same knowledge and the two had to agree; with `up` out
+of the build business there is one caller, and a `Toolchain` abstraction for one
+caller is a seam with nothing on the other side of it.
 
 ### 4. What is the dev loop now?
 
