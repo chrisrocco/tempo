@@ -20,34 +20,34 @@ process), and the whole engine. Only the command-line surface is gone.
 
 ## The shape
 
-Five commands to start, and **the four deployment-facing ones know nothing about
-a build system**.
+Five commands, and **none of them knows what a build system is**.
 
-| Command           | Does                                                     |
-| ----------------- | -------------------------------------------------------- |
-| `tempo up`        | Copies artifacts in, installs supervised units, starts.  |
-| `tempo down`      | Stops and disables those units. Touches no data.         |
-| `tempo run`       | Starts a workflow against a server. An RPC client.       |
-| `tempo result`    | Fetches the outcome of an execution that already exists. |
-| `tempo run-local` | Runs one workflow from source, in this process.          |
+| Command        | Does                                                        | State  |
+| -------------- | ----------------------------------------------------------- | ------ |
+| `tempo up`     | Copies artifacts in, installs supervised units, starts them | to do  |
+| `tempo down`   | Stops and disables those units. Touches no data             | to do  |
+| `tempo start`  | Starts a workflow against a server. An RPC client           | landed |
+| `tempo result` | Fetches the outcome of an execution that already exists     | landed |
+| `tempo status` | What a deployment is doing, in one screen                   | to do  |
 
-`result` is not optional: `run` without `--wait` prints an id and exits, so
+`result` is not optional: `start` without `--wait` prints an id and exits, so
 without `result` the id it printed leads nowhere.
 
 The build-system property is worth stating as a goal rather than noting as an
-accident, because two earlier drafts lost it. `run` was going to deploy on
+accident, because two earlier drafts lost it. `start` was going to deploy on
 demand, which put building binaries and installing systemd units behind a verb
 meaning "execute this workflow". Then `up` was going to take build _targets_ and
-resolve them through a toolchain. Both are gone: `up` copies files and `run`
-makes RPCs.
+resolve them through a toolchain. Both are gone: `up` copies files, and
+everything else makes RPCs or asks systemd.
 
-`run-local` is the deliberate exception and the reason the property is stated per
-command rather than for the CLI as a whole — running from source with nothing
-built is _defined_ by knowing how to get from source to a running workflow. See
-[run-local](#tempo-run-local--its-own-command-not-a-flag-on-run) for why that is
-a smaller concession than it looks.
+**Running a workflow locally is not here.** It was going to be `run-local`, on
+the reasoning that a from-source run needs no build and no deployment and so
+differs from `start` by more than a flag. That is still true and it is still not
+being built — it is the one command that would have to know how source becomes a
+process, and nothing else in the CLI does. It comes back as its own design when
+it comes back at all.
 
-The read and drive commands come back after these five — see
+The read and drive commands come after these five — see
 [what this does not cover yet](#what-this-does-not-cover-yet).
 
 ---
@@ -120,24 +120,55 @@ tempo up --server=blaze-bin/third_party/tempo/server.js \
 copies. That is the whole contract, and it is what keeps the build system out of
 the CLI: with Blaze the above is two ordinary lines and no adapter anywhere.
 
-Everything else has a default and can be overridden:
+Two more flags, both with defaults:
 
 ```
---port=7777                  what the server binds, and what workers dial
---host=127.0.0.1             the interface the server binds
---data-dir=/var/lib/tempo    the server's durable history
---queue=default              the pool the workers serve
---node=<path>                which node the units run
+--port=7777        what the server binds, and what workers dial
+--host=127.0.0.1   the interface the server binds
 ```
+
+### What is a constant, and why
+
+The install root, the state directory, and the interpreter are **not flags**:
+
+```
+/opt/tempo         the install root
+/var/lib/tempo     the server's durable history
+/usr/bin/node      the interpreter the units run
+```
+
+A flag with one correct value is a flag that only ever gets typed wrong. These
+can become flags the day a deployment needs them to differ; until then a constant
+is one fewer thing that can disagree between the unit `up` writes and the layout
+everything else assumes.
+
+`/usr/bin/node` is the honest weak point: a host with node somewhere else gets a
+unit that fails with `203/EXEC` on the first start. That is loud rather than
+silent — the deployment does not come up and `systemctl status` says exactly why
+— which is the property that makes a constant acceptable here.
+
+### `up` does not pass `--queue`, because the worker already knows
+
+**The queue is declared once, in `Tempo.startWorker`.** It is a property of the
+artifact — a queue name is a contract about which workflows and activities are
+registered, so it belongs with the code that registers them, not with the command
+that copies the file. Passing it from `up` as well would put one value in two
+places with nothing keeping them in step, and the failure when they disagree is
+an execution parked forever on a queue nothing serves.
+
+So the worker units carry `--role` and `--server` and nothing else about routing.
+`tempo start --queue` is a different question and keeps its flag: that is a
+_caller_ choosing which pool to run something on, not a worker declaring which
+pool it serves.
 
 ### Three services, because the worker roles are separate processes
 
 One server unit and **two worker units from the one artifact**:
 
 ```
-tempo-server.service            node /opt/tempo/server.js --port=7777 …
-tempo-worker-workflow.service   node /opt/tempo/worker.js --role=workflow …
-tempo-worker-activity.service   node /opt/tempo/worker.js --role=activity …
+tempo-server.service            --port=7777 --host=127.0.0.1 --data-dir=/var/lib/tempo
+tempo-worker-workflow.service   --role=workflow --server=http://127.0.0.1:7777
+tempo-worker-activity.service   --role=activity --server=http://127.0.0.1:7777
 ```
 
 The split is the deployed shape and always was — `src/tempo.ts` says why, and
@@ -172,8 +203,10 @@ naming.
 "replace the artifact, keep the history" a non-event.
 
 Neither artifact is self-contained — they are JavaScript, so the units run
-`node /opt/tempo/server.js`. Which `node` is a question the units answer
-explicitly rather than inherit from whoever ran `tempo up`.
+`/usr/bin/node /opt/tempo/server.js`. The interpreter is named explicitly rather
+than inherited from whoever ran `tempo up`, which is the one thing a constant and
+a flag agree about: a unit that resolves `node` from an operator's `PATH` runs a
+different interpreter depending on who deployed it.
 
 ### The two properties the units have to deliver
 
@@ -227,13 +260,13 @@ holds when someone deletes the directory between deploys.
 
 ---
 
-## `tempo run <name> [args...]`
+## `tempo start <name> [args...]` — landed
 
 Start a workflow. Talks to a server and does nothing else.
 
 ```
-tempo run greeter world           # start it, print the id, exit
-tempo run greeter world --wait    # start it, block, print the result
+tempo start greeter world           # start it, print the id, exit
+tempo start greeter world --wait    # start it, block, print the result
 ```
 
 ```
@@ -243,42 +276,46 @@ tempo run greeter world --wait    # start it, block, print the result
 ```
 
 **`--queue` is not optional to have.** A worker deployed onto a queue other than
-`default` and a `run` that always starts on `default` gives you an execution
+`default` and a `start` that always starts on `default` gives you an execution
 parked forever with nothing polling for it — which is precisely the failure
 `tempo queues` exists to explain, arrived at through the CLI's own front door.
-Since the server already knows what is being polled, `run` naming a queue
-nothing polls should say so rather than park.
+Since the server already knows what is being polled, `start` naming a queue
+nothing polls should say so rather than park. **Not built yet** — the flag routes
+correctly, but a queue nothing serves still parks silently.
+
+Note this is the _caller's_ queue flag and is a different question from the
+worker's: see
+[why `up` does not pass `--queue`](#up-does-not-pass---queue-because-the-worker-already-knows).
 
 **Arguments are parsed as JSON, falling back to the raw string.** That is what
-makes `run greeter world` pass a string and `run adder 1 2` pass numbers. It is
-a contract, not an implementation detail — the deleted `parseWorkflowArg` had
-exactly this rule and it should come back unchanged.
+makes `start greeter world` pass a string and `start adder 1 2` pass numbers. It
+is a contract, not an implementation detail.
 
 **`--wait` exits non-zero when the workflow fails.** A CI check is the main
-reason `--wait` exists, and it is worthless if a failed workflow exits 0. The
-old CLI got this for free by letting `getResult`'s rejection escape to a
-top-level handler; the new one should mean it on purpose.
+reason `--wait` exists, and it is worthless if a failed workflow exits 0. The old
+CLI got this for free by letting `getResult`'s rejection escape to a top-level
+handler; this one means it on purpose, and a spec says so.
 
 **`--`** separates the CLI's arguments from the workflow's, so a workflow
 argument starting with `-` is unambiguous:
 
 ```
-tempo run myWorkflow --wait -- --this-is-an-argument
+tempo start myWorkflow --wait -- --this-is-an-argument
 ```
 
-Note that the deleted argument parser had no concept of `--` and treated any
-`--x` anywhere as its own flag. This is new behaviour, not recovered behaviour.
+The deleted argument parser had no concept of `--` and treated any `--x` anywhere
+as its own flag. This is new behaviour, not recovered behaviour.
 
-With no server reachable, `run` fails with the `tempo up` line that would fix
+With no server reachable, `start` fails with the `tempo up` line that would fix
 it.
 
 ---
 
-## `tempo result <workflow-id>`
+## `tempo result <workflow-id>` — landed
 
 Print the outcome of an execution that already exists, blocking if it has not
-settled. Same output shaping and same exit-code rule as `run --wait`, which is
-the point of it: `run` prints an id, and this is what the id is for.
+settled. Same output shaping and same exit-code rule as `start --wait`, which is
+the point of it: `start` prints an id, and this is what the id is for.
 
 ---
 
@@ -294,61 +331,39 @@ explicit act with a name that says so.
 
 ---
 
-## `tempo run-local` — its own command, not a flag on `run`
+## `tempo status`
 
-A one-process, in-memory, no-server run of a workflow **straight from source**,
-with nothing built and nothing deployed.
+What a deployment is doing, in one screen. **Scope not settled** — it was not in
+the original design, and the shape depends on a decision nobody has made yet.
 
-```
-tempo run-local greeter world
-```
+There are two sources and they answer different questions:
 
-**It is a separate command rather than `run --local`, because the two share
-almost nothing.** `run` dials a server that something already deployed and makes
-one RPC; `run-local` composes a whole engine in this process, registers a
-worker's exports into it, runs one workflow, prints the result, and exits.
-Sharing a verb between those would mean a command whose prerequisites, failure
-modes, and output all depend on a flag — and the flag would be the only thing
-telling you whether "cannot reach a server" is a bug or irrelevant.
+- **systemd** — is each of the three units active, enabled, how many times has it
+  restarted. Available with no server running, which is when the question is most
+  urgent.
+- **the server's worker registry**, over RPC — who is polling which queue, per
+  role (`listQueues`, `groupExecutions`; see `server/worker_registry.ts`).
 
-**This is what `--runtime=local` on the worker entrypoint used to approximate,
-and it is why that flag is gone.** The flag made a _deployable artifact_ branch
-at startup on whether it was a deployment or a dev loop, which is a property no
-deployable artifact should have; and it could only ever run what its own binary
-already had compiled in, so it needed a build to demonstrate something whose
-whole point is needing no build. `createLocalRuntime` is untouched — that is the
-engine `run-local` composes.
+A worker can be the first without being the second: the process is up, systemd is
+satisfied, and it is not actually serving — which is the failure mode `queues`
+exists to explain and the one an operator most needs a single command to reveal.
+So `status` probably reports both, side by side, and **must degrade rather than
+fail when the server is unreachable**: "the units are up and nothing answers on
+7777" is the most useful thing it could ever print, and a command that errors out
+because it could not connect would print nothing at all.
 
-### What this means the CLI has to know, and why that is acceptable now
+Open: whether it also reports the artifact fingerprints from
+[question 2](#2-version-skew-relocated-but-not-solved), which is the other thing
+an operator cannot see and would come here looking for.
 
-`run-local` has to turn source into a running worker: find the entrypoint, run
-it under `tsx` or through a build system, and get its registrations. **That is
-exactly the knowledge `ports/toolchain.ts` and `source_toolchain.ts` carried,
-and #62 deleted them for a reason that no longer applies.** They existed because
-`up` _and_ `run` both needed it and had to agree on it — an abstraction serving
-two callers with different needs, which is why it grew a port. Here there is one
-caller, and `up` and `run` still know nothing about builds. So the knowledge
-comes back as one command's implementation detail rather than as a seam, and the
-next person to read #62 should not re-delete it on sight.
+### The smoke test that has no home
 
-Open, and worth settling before writing it: **whether `run-local` runs an
-entrypoint file or a workflow module.** Running the entrypoint means executing a
-file whose last statement is `Tempo.startWorker(...)`, which starts a _worker_,
-not a local runtime — so either the entrypoint gains a way to be imported
-without starting, or `run-local` takes the workflow and activity modules
-directly and never touches the entrypoint. The second is less magic and skips
-the artifact entirely; the first runs closer to what deploys.
-
-### The smoke test that lost its home
-
-`--runtime=local` had one use that was not about local development: booting the
-shipped artifact with no server anywhere, to prove every export actually
-registers. That check is gone with the flag, and `run-local` does not replace it
-— running from source proves nothing about a built artifact.
-
-Nothing verifies that today. It is worth an issue rather than a hole: the
-natural home is whatever builds the artifact, checking that the thing it just
-produced comes up.
+Worth recording here because it fell out of the entrypoint and has not landed
+anywhere: `--runtime=local` used to let you boot the shipped artifact with no
+server and prove every export actually registers. Nothing verifies that now.
+`status` is not the right home — it inspects a deployment rather than an artifact
+— and the natural one is whatever builds the artifact, checking that what it just
+produced comes up. It wants an issue.
 
 ---
 
@@ -375,8 +390,8 @@ thing than the `Toolchain` port that was deleted.
 
 ### 2. Version skew, relocated but not solved
 
-`run` no longer deploys, so it can no longer accidentally _fix_ a stale
-deployment either. A server and workers installed last week keep serving; `run`
+`start` no longer deploys, so it can no longer accidentally _fix_ a stale
+deployment either. A server and workers installed last week keep serving; `start`
 talks to them happily while the code in the tree has moved on.
 
 That is not a deployment inconvenience — it is a worker replaying a history
@@ -384,7 +399,7 @@ written by different code, which is the failure class of #39 and is invisible
 from the outside.
 
 An earlier draft proposed: `up` writes fingerprints to `VERSION`, the server
-reports its own, `run` warns on a mismatch. That catches a narrower failure than
+reports its own, `start` warns on a mismatch. That catches a narrower failure than
 the one described — "`up` copied the files but the restart did not happen" — and
 it asks the wrong process. The skew that corrupts a replay is a **worker's**,
 and an installed CLI on a production host has no source tree to compare against
@@ -452,20 +467,18 @@ recorded here because they were only ever written in a file that got deleted:
 
 ## Suggested order
 
-1. **`tempo run` and `tempo result`** — they depend on nothing open.
-   `src/client/` survives intact, so this is argument parsing plus calls that
-   already exist. It also re-establishes the CLI entrypoint and the
-   `package.json` script that the deletion removed.
-2. **Flags instead of the environment**, across `bin/server-main.ts` and
-   `src/tempo.ts`, with port 7777. `run` needs `--server` anyway, and doing the
-   server and worker in the same pass is what keeps one port from being written
-   in two places.
-3. **`tempo up` and `tempo down`** — copy, units, enable, restart. The hazards
-   are listed above and every one of them works in testing and fails later.
-4. **`tempo run-local`**, once the entrypoint-or-modules question above is
-   settled. Last of the five rather than first despite being the smallest: it is
-   the only one that needs a decision nobody has made yet, and the only one whose
-   implementation the other four do not touch.
+1. ~~**`tempo start` and `tempo result`**~~ — **landed.** They depended on
+   nothing open: `src/client/` survived intact, so this was argument parsing plus
+   calls that already existed, plus the entrypoint and `package.json` script that
+   the deletion removed.
+2. ~~**Flags instead of the environment**~~ — **landed**, across
+   `bin/server-main.ts` and `src/tempo.ts`, with port 7777. See
+   `src/process_flags.ts`; the one concession is that unknown flags are ignored
+   rather than rejected, and why is recorded there.
+3. **`tempo up`**, then **`tempo down`** — copy, units, enable, restart. The
+   hazards are listed above and every one of them works in testing and fails
+   later.
+4. **`tempo status`**, once its scope is settled.
 5. **The version fingerprint** (question 2), once there is a deployment that can
    go stale.
 6. **The drive and read commands** — `signal`, `cancel`, `terminate`, `list`,
