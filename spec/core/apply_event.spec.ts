@@ -223,6 +223,7 @@ describe('core applyEvent — marker validation', () => {
       childName: 'c',
       childArgs: [],
       detached: false,
+      parentClosePolicy: 'abandon',
     });
 
     expect(() =>
@@ -249,6 +250,7 @@ describe('core applyEvent — marker validation', () => {
       childName: 'planner',
       childArgs: [],
       detached: false,
+      parentClosePolicy: 'abandon',
       workflowId: 'plan-for-event-42',
     });
 
@@ -270,6 +272,7 @@ describe('core applyEvent — marker validation', () => {
       childName: 'planner',
       childArgs: [],
       detached: false,
+      parentClosePolicy: 'abandon',
     });
 
     expect(() =>

@@ -171,7 +171,8 @@ function formatEvent(ev: HistoryEvent, index: number, first?: number): string {
       : ev.type === 'signal'
         ? ` ${ev.name}`
         : ev.type === 'childStarted'
-          ? ` ${ev.childId}${ev.detached ? ' (detached)' : ''}`
+          ? ` ${ev.childId}${ev.detached ? ' (detached)' : ''}` +
+            ` on-close=${ev.parentClosePolicy ?? 'abandon'}`
           : ev.type === 'childCancelRequested'
             ? ` target=${ev.targetSeq}`
             : ev.type === 'timerStarted'
