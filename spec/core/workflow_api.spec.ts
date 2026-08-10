@@ -10,10 +10,12 @@ import {
   CancelledFailure,
   continueAsNew,
   createContext,
+  defineSignal,
   drainMicrotasks,
   executeChild,
   proxyActivities,
   runActivity,
+  signalWorkflow,
   sleep,
   startChild,
   workflowInfo,
@@ -148,6 +150,110 @@ describe('core primitives — children', () => {
     });
 
     expect(ctx.completions.size).toBe(0);
+  });
+});
+
+describe('core primitives — signalling another workflow', () => {
+  it('carries the target, the signal name and the payload on the command', () => {
+    const ctx = createContext([], []);
+
+    als.run(ctx, () => {
+      signalWorkflow('parent-1', defineSignal('comment'), {id: 7});
+    });
+
+    expect(ctx.commands[0]).toEqual({
+      type: 'signalWorkflow',
+      targetId: 'parent-1',
+      signalName: 'comment',
+      payload: {id: 7},
+      seq: 0,
+    });
+  });
+
+  /**
+   * It takes a seq like any other command — that is what its marker is keyed by
+   * — but parks nothing, because no completion is coming. Fire-and-forget in the
+   * same sense a detached child is.
+   */
+  it('takes a seq but parks no waiter, since nothing is awaited', () => {
+    const ctx = createContext([], []);
+
+    als.run(ctx, () => {
+      signalWorkflow('parent-1', defineSignal('comment'));
+      void runActivity('after');
+    });
+
+    expect(ctx.commands.map((c) => [c.type, c.seq])).toEqual([
+      ['signalWorkflow', 0],
+      ['scheduleActivity', 1],
+    ]);
+    expect([...ctx.completions.keys()]).toEqual([1]);
+  });
+
+  /**
+   * The reason it needs a marker at all. History holding the seq is the only
+   * evidence replay has that the signal already went out; without this the next
+   * replay would send it again, and the target would see the item twice.
+   */
+  it('does not re-send a signal history already holds the marker for', () => {
+    const ctx = createContext(
+      [],
+      [
+        {
+          type: 'workflowSignaled',
+          seq: 0,
+          targetId: 'parent-1',
+          signalName: 'comment',
+          delivered: true,
+        },
+      ],
+    );
+
+    als.run(ctx, () => {
+      signalWorkflow('parent-1', defineSignal('comment'), {id: 7});
+    });
+
+    expect(ctx.commands).toEqual([]);
+    expect(ctx.requested.has(0)).toBeTrue(); // still claimed, so the marker is checked
+  });
+
+  it('sends nothing once the run is cancelled', () => {
+    const ctx = createContext([], []);
+    ctx.cancelled = true;
+
+    als.run(ctx, () => {
+      signalWorkflow('parent-1', defineSignal('comment'));
+    });
+
+    expect(ctx.commands).toEqual([]);
+  });
+});
+
+describe('core primitives — workflowInfo', () => {
+  /**
+   * How a child addresses its parent: an id it was never handed as an argument,
+   * and could not have derived, since the engine chose it from lineage.
+   */
+  it('reports the execution that started this one', () => {
+    const child = createContext([], [], false, {}, {workflowId: 'p-1', seq: 3});
+    const root = createContext([], []);
+
+    expect(als.run(child, () => workflowInfo().parent)).toEqual({
+      workflowId: 'p-1',
+      seq: 3,
+    });
+    expect(als.run(root, () => workflowInfo().parent)).toBeUndefined();
+  });
+
+  it('hands back a copy, so a caller cannot write through it into the context', () => {
+    const ctx = createContext([], [], false, {}, {workflowId: 'p-1', seq: 3});
+
+    als.run(ctx, () => {
+      const info = workflowInfo();
+      info.parent!.workflowId = 'somewhere-else';
+    });
+
+    expect(ctx.parent?.workflowId).toBe('p-1');
   });
 });
 

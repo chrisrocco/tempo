@@ -32,7 +32,9 @@ on npm and makes no stability promises — clone it, read it, run it.
     backoff, start-to-close timeouts, and `heartbeat()` for work of unbounded
     duration
 -   **Timers** — real wall-clock, durable, re-armed from history on restart
--   **Signals** and **`condition`** — event-driven waiting, no polling
+-   **Signals** and **`condition`** — event-driven waiting, no polling; a
+    workflow can `signalWorkflow` another one, so a child poller can feed items
+    to a waiting parent without leaving the engine
 -   **Child workflows**, blocking or fire-and-forget, optionally keyed by a
     `workflowId` you choose — claim the same id twice and you get one child
 -   **Cancellation**, cascading to children, surfacing as a catchable failure —

@@ -13,9 +13,15 @@
  * make replay irreproducible and belongs on the runtime/host side instead.
  */
 
-import type {ActivityOptions, Command, CommandSpec} from '../protocol';
+import type {
+  ActivityOptions,
+  Command,
+  CommandSpec,
+  ExecutionParentView,
+} from '../protocol';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
+import type {SignalDef} from './signals';
 
 /**
  * The one place a command becomes real. Every site that mints a `Command` must go
@@ -174,6 +180,69 @@ export function startChild(
 }
 
 /**
+ * Send a signal to another execution, by workflow id.
+ *
+ * The counterpart of `setHandler` across an execution boundary: what arrives at
+ * the target is an ordinary signal, indistinguishable from one a client injected,
+ * so the receiving code needs no knowledge of who is feeding it.
+ *
+ *     const parent = workflowInfo().parent;
+ *     await pollForever({
+ *       everyMs: 30_000,
+ *       poll: () => act.listComments(pr),
+ *       differ: byId((c) => c.id),
+ *       onAdded: (c) => signalWorkflow(parent!.workflowId, newComment, c),
+ *     });
+ *
+ * That shape — a child poller feeding a waiting parent — is what this exists for.
+ * The alternative was an activity that calls `client.signal`, which puts the
+ * delivery path outside the determinism boundary and makes it at-least-once: an
+ * activity whose completion was lost is retried, and the target sees the item
+ * twice. Here the engine dispatches it, and the delivery is deduplicated against
+ * the target's history (see `SignalSource`).
+ *
+ * ## Fire-and-forget, and what that gives up
+ *
+ * Nothing is awaited: this returns `void`, allocates a seq for its marker, and
+ * parks nothing. A signal to an id nothing holds — or to an execution that has
+ * already settled — therefore cannot be caught. It is *recorded*, as
+ * `workflowSignaled.delivered: false` on the sender plus a `signal.undelivered`
+ * log line, so the failure is greppable rather than invisible.
+ *
+ * The awaitable form Temporal has (`SignalExternalWorkflowExecutionFailed`, a
+ * typed `NOT_FOUND` cause) was considered and declined for now. It costs a second
+ * history event and a park **on every signal**, which lands on the sender that
+ * sends the most — a poller relaying every item it finds — to report an outcome
+ * there is usually no recovery for. The recovery that would matter is "my target
+ * is gone, stop producing", and that is parent-close policy: a separate mechanism
+ * that should stop the poller outright rather than have it discover its parent's
+ * death one item at a time. Reopen this if a caller has a real branch to write on
+ * the failure; the event already carries the answer, so making it awaitable is a
+ * completion event away.
+ *
+ * Also unbuilt, deliberately: no cap on signals per execution (Temporal's
+ * `maximumSignalsPerExecution`) and no `childWorkflowOnly` guard restricting the
+ * target to this workflow's own children. Both are restrictions, and a restriction
+ * is cheap to add and breaking to remove — so neither is guessed at before a
+ * caller needs it.
+ */
+export function signalWorkflow(
+  workflowId: string,
+  signal: SignalDef,
+  payload?: unknown,
+): void {
+  const ctx = getContext();
+  if (ctx.cancelled) return; // no new work after cancel, as with startChild
+  issue(ctx, {
+    type: 'signalWorkflow',
+    targetId: workflowId,
+    signalName: signal.name,
+    payload,
+    seq: ctx.seq++,
+  });
+}
+
+/**
  * Terminal: end this run and start a fresh one carrying `args`. It emits a
  * `continueAsNew` command and returns a promise that never resolves, so no code
  * runs after it — `return continueAsNew(...)` (or `await` it) halts the run.
@@ -221,6 +290,21 @@ export interface WorkflowInfo {
    * context.
    */
   args: unknown[];
+  /**
+   * The execution that started this one, or absent if a client did.
+   *
+   * How a child learns its parent's id without being handed it as an argument —
+   * the same reason `args` is here. `signalWorkflow` addresses a target by id, so
+   * without this the child → parent direction would require every parent to pass
+   * its own id down, which it cannot always know either: an id the engine derived
+   * from lineage is not visible to the workflow that owns it.
+   *
+   * Absent is a real answer, not a missing one: a root execution has no parent, so
+   * code that needs one must say what it does without it. Fixed for the whole
+   * execution — a rollover does not change who started it — so branching on it is
+   * replay-safe.
+   */
+  parent?: ExecutionParentView;
 }
 
 /** Read server-provided facts about the current run off the context. */
@@ -229,6 +313,9 @@ export function workflowInfo(): WorkflowInfo {
   return {
     continueAsNewSuggested: ctx.continueAsNewSuggested,
     args: [...ctx.args],
+    // Copied for the same reason `args` is: a caller must not be able to reach
+    // back through the returned object and mutate the context.
+    parent: ctx.parent && {...ctx.parent},
   };
 }
 

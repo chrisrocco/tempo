@@ -5,6 +5,13 @@
  * an externally injected signal (which is not tied to a command, so has no seq).
  * Keeping those two families in separate unions lets `applyEvent` narrow with a
  * single `type === 'signal'` check instead of hunting for the seq-bearing ones.
+ *
+ * A third family sits between them: **markers**, which carry a seq but complete
+ * nothing. They record that a command was dispatched, which is what stops replay
+ * dispatching it twice and what crash recovery rebuilds pending work from. Every
+ * command leaves one (see `server_core`), so they are not a union worth naming —
+ * but they are the reason "has a seq" and "completes something" are different
+ * questions.
  */
 
 import type {ActivityOptions} from './activity_options';
@@ -166,11 +173,104 @@ export interface ChildCancelRequestedEvent extends HistoryEventBase {
   targetSeq: number;
 }
 
-/** Externally injected; not tied to a command, so it carries no seq. */
+/**
+ * Marker: a signal has been sent to another execution. Same role as the markers
+ * above — it records the dispatch so replay does not send a second one.
+ *
+ * The asymmetry to hold in mind: **a signal sent is numbered, a signal received
+ * is not.** Sending is a command, so it takes a seq in the sender's history like
+ * any other dispatch; arriving is an external input, so the `SignalEvent` on the
+ * target stays seq-less and is unchanged by this. The two events are the two ends
+ * of one delivery and they are deliberately not the same shape.
+ *
+ * Written **after** the delivery, as `childStarted` and `childCancelRequested`
+ * are, and for the same reason: nothing re-drives a signal on restart, so replay
+ * re-emitting the command is its only recovery, and a marker written first would
+ * suppress it. That ordering is only safe because delivery is idempotent —
+ * `SignalEvent.source` is what makes it so.
+ */
+export interface WorkflowSignaledEvent extends HistoryEventBase {
+  type: 'workflowSignaled';
+  seq: number;
+  /** The execution that was signalled. */
+  targetId: string;
+  signalName: string;
+  /**
+   * **The payload is deliberately not here.** `activityScheduled` carries its
+   * args because nothing else does — the task is rebuilt from it on recovery —
+   * whereas a signal's payload is already durable on the target, which is the
+   * copy that gets read. Keeping a second one would double the bytes of the
+   * highest-volume command there is (a poller relaying every item it finds) to
+   * store something one link away. `describe` on the target is where to look.
+   */
+  /**
+   * Whether the target took it: false when nothing holds that id, or when it has
+   * already settled.
+   *
+   * Recorded rather than dropped, because a signal into the void is the failure
+   * mode of this command and the sender cannot see it — `signalWorkflow` does not
+   * park, so there is no promise to reject. Temporal reports the same condition as
+   * a typed `EXTERNAL_WORKFLOW_EXECUTION_NOT_FOUND` on an awaitable command; this
+   * keeps the fact and drops the await (see `core/workflow_api.signalWorkflow`).
+   *
+   * A duplicate suppressed by `SignalEvent.source` reads `true`: it *was*
+   * delivered, by the dispatch this one is repeating.
+   */
+  delivered: boolean;
+}
+
+/**
+ * Which dispatch produced a signal, when a workflow sent it.
+ *
+ * Two jobs, and the second is the load-bearing one:
+ *
+ * - **Provenance.** A signal is otherwise the one event that says nothing about
+ *   where it came from, which is the first question asked of one that arrived
+ *   unexpectedly.
+ * - **Idempotent delivery.** `signalWorkflow` writes its marker *after* the
+ *   delivery, so a process that dies in between leaves replay to re-send. The
+ *   server drops a re-send by matching this triple against the target's history,
+ *   which turns "at least once" into "once" for the window that matters.
+ *
+ * `runId` is in the key because a sender's `seq` counter restarts at zero on
+ * continue-as-new, and the senders that use this most — pollers — roll over
+ * constantly. Without it, item 3 of run 1 and item 3 of run 2 would be the same
+ * dispatch and the second would be silently dropped.
+ *
+ * **The dedup window is the target's current history.** A target that continues
+ * as new discards the record along with everything else, so a re-send that
+ * straddles its rollover is delivered twice. Narrow — it needs a crash and a
+ * rollover interleaved — but real, and the honest claim is "once, except across
+ * the target's own rollover" rather than "exactly once".
+ */
+export interface SignalSource {
+  /** The sending execution. */
+  workflowId: string;
+  /** Which run of it — see the note above. */
+  runId: number;
+  /** The `signalWorkflow` command's seq in that run. */
+  seq: number;
+}
+
+/**
+ * Externally injected; not tied to a command, so it carries no seq.
+ *
+ * "Externally" now includes another workflow: a signal from `signalWorkflow`
+ * arrives here exactly as a client's does, and carries a `source` saying so. That
+ * is deliberate — the target's code, its handlers, and its replay cannot tell the
+ * two apart, so a workflow that consumes signals needs no knowledge of who is
+ * feeding it.
+ */
 export interface SignalEvent extends HistoryEventBase {
   type: 'signal';
   name: string;
   payload: unknown;
+  /**
+   * The dispatch that sent this, when a workflow sent it. Absent on a signal
+   * injected by a client — which is what makes its presence the answer to "did
+   * this come from inside the system?"
+   */
+  source?: SignalSource;
 }
 
 /**
@@ -198,5 +298,6 @@ export type HistoryEvent =
   | TimerStartedEvent
   | ChildStartedEvent
   | ChildCancelRequestedEvent
+  | WorkflowSignaledEvent
   | SignalEvent
   | CancelRequestedEvent;

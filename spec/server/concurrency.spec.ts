@@ -168,13 +168,7 @@ describe('late activity ack after redelivery', () => {
       if (!leased) return;
       const task = await core.buildWorkflowTask(leased.workflowId);
       if (task) {
-        const result = await workflowWorker.replayTask(
-          task.name,
-          task.args,
-          task.history,
-          task.continueAsNewSuggested,
-          task.carryover,
-        );
+        const result = await workflowWorker.replayTask(task);
         await core.applyWorkflowTaskResult(leased.workflowId, result);
       }
       workflowTaskQueue.complete(leased.token);

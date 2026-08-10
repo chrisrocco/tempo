@@ -33,7 +33,7 @@ import {
 import {
   MAX_CARRYOVER_BYTES,
   type Carryover,
-  type HistoryEvent,
+  type WorkflowTask,
   type WorkflowTaskResult,
 } from '../protocol';
 
@@ -64,19 +64,19 @@ function assertCarryoverFits(name: string, carryover: Carryover): void {
 
 export interface WorkflowWorker {
   has(name: string): boolean;
-  replayTask(
-    name: string,
-    args: unknown[],
-    history: HistoryEvent[],
-    continueAsNewSuggested: boolean,
-    /**
-     * Required, not optional-with-a-default: a default here type-checks at every
-     * call site that forgets it and silently starts the workflow from empty
-     * state, which is indistinguishable from a workflow that never wrote any.
-     * Both in-tree callers were written that way before this was tightened.
-     */
-    carryover: Carryover,
-  ): Promise<WorkflowTaskResult>;
+  /**
+   * Replay one task and report what the workflow did.
+   *
+   * Takes the whole `WorkflowTask` rather than the fields it happens to read.
+   * That is the same discipline the `carryover` parameter was tightened into and
+   * generalizes it: a positional list lets a call site forget a field and
+   * type-check anyway — silently starting the workflow from empty carryover, or
+   * telling a child it has no parent — whereas a missing field on a required
+   * object is a compile error. It also stops the list growing by one every time
+   * the server learns something new about an execution, which is what was about
+   * to happen for the fourth time.
+   */
+  replayTask(task: WorkflowTask): Promise<WorkflowTaskResult>;
 }
 
 export function createWorkflowRegistry(): WorkflowRegistry {
@@ -90,13 +90,8 @@ export function createWorkflowWorker(
     has(name: string): boolean {
       return registry.has(name);
     },
-    async replayTask(
-      name: string,
-      args: unknown[],
-      history: HistoryEvent[],
-      continueAsNewSuggested: boolean,
-      carryover: Carryover,
-    ): Promise<WorkflowTaskResult> {
+    async replayTask(task: WorkflowTask): Promise<WorkflowTaskResult> {
+      const {name} = task;
       const fn = registry.get(name);
       // Throw, so the poll loop reports this through `failWorkflowTask` and the
       // execution keeps running.
@@ -115,10 +110,11 @@ export function createWorkflowWorker(
       // author's behalf — see `server_core.failWorkflowTask`.
       if (!fn) throw new Error(`no workflow registered as ${name}`);
       const ctx = createContext(
-        args,
-        history,
-        continueAsNewSuggested,
-        carryover,
+        task.args,
+        task.history,
+        task.continueAsNewSuggested,
+        task.carryover,
+        task.parent,
       );
       await replay(ctx, fn);
       assertCarryoverFits(name, ctx.carryoverNext);

@@ -26,6 +26,7 @@
  * | `startTimer`       | `timerStarted`          | type only (`fireAt` absolute)  |
  * | `startChild`       | `childStarted`          | type + **`detached`**          |
  * | `cancelChild`      | `childCancelRequested`  | type + **`targetSeq`**         |
+ * | `signalWorkflow`   | `workflowSignaled`      | type + **target + name**       |
  *
  * So a swap between two same-named activities with different arguments still
  * slips through; argument comparison is expensive on large payloads and risks
@@ -53,6 +54,8 @@ function describeCommand(cmd: Command): string {
   if (cmd.type === 'startChild')
     return `startChild${cmd.detached ? ' (detached)' : ''}`;
   if (cmd.type === 'cancelChild') return `cancelChild of seq ${cmd.targetSeq}`;
+  if (cmd.type === 'signalWorkflow')
+    return `signalWorkflow ${cmd.signalName} to ${cmd.targetId}`;
   return cmd.type;
 }
 
@@ -81,6 +84,21 @@ function markerMismatch(
       return describeCommand(cmd);
     return undefined;
   }
+  if (ev.type === 'workflowSignaled') {
+    // Both halves are the workflow's own logic — who to tell, and what to tell
+    // them — and neither is derived by the engine. A replay that picks a
+    // different target sends a message to a workflow that was never meant to have
+    // it while the intended one waits, and a different name is a message the
+    // target has no handler for. Both are silent: nothing parks on a signal it
+    // sent, so there is no waiter to notice.
+    if (
+      cmd.type !== 'signalWorkflow' ||
+      cmd.targetId !== ev.targetId ||
+      cmd.signalName !== ev.signalName
+    )
+      return describeCommand(cmd);
+    return undefined;
+  }
   if (ev.type === 'childStarted') {
     if (cmd.type !== 'startChild' || cmd.detached !== ev.detached)
       return describeCommand(cmd);
@@ -102,6 +120,8 @@ function describeMarker(ev: HistoryEvent): string {
     return `childStarted ${ev.childId}${ev.detached ? ' (detached)' : ''}`;
   if (ev.type === 'childCancelRequested')
     return `childCancelRequested of seq ${ev.targetSeq}`;
+  if (ev.type === 'workflowSignaled')
+    return `workflowSignaled ${ev.signalName} to ${ev.targetId}`;
   return ev.type;
 }
 
@@ -116,7 +136,8 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     ev.type === 'activityScheduled' ||
     ev.type === 'timerStarted' ||
     ev.type === 'childStarted' ||
-    ev.type === 'childCancelRequested'
+    ev.type === 'childCancelRequested' ||
+    ev.type === 'workflowSignaled'
   ) {
     // Markers resolve nothing — their presence in history is what keeps replay
     // from re-dispatching the command. They are, however, the record of what was

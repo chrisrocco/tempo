@@ -169,6 +169,18 @@ export function buildTimeline(
       case 'signal':
         marks.push({at, label: `signal ${event.name}`, tone: 'accent'});
         break;
+      // Also a mark rather than a span, and for a stronger reason than the cancel
+      // above: a sent signal has no outcome event at all, because nothing parks
+      // on it. There is no second timestamp anywhere for `close` to pair with.
+      case 'workflowSignaled':
+        marks.push({
+          at,
+          label: event.delivered
+            ? `signal ${event.signalName} sent to ${event.targetId}`
+            : `signal ${event.signalName} undelivered to ${event.targetId}`,
+          tone: event.delivered ? 'accent' : 'danger',
+        });
+        break;
       case 'cancelRequested':
         marks.push({at, label: 'cancellation requested', tone: 'danger'});
         break;

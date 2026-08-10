@@ -110,6 +110,18 @@ export function describeEvent(event: HistoryEvent): EventView {
         label: `cancel requested for child at seq ${event.targetSeq}`,
         tone: 'danger',
       };
+    case 'workflowSignaled':
+      // `delivered: false` is the whole reason this row is worth rendering: the
+      // sender never sees the failure, so the history is where it surfaces.
+      return event.delivered
+        ? {
+            label: `signal ${event.signalName} sent to ${event.targetId}`,
+            tone: 'muted',
+          }
+        : {
+            label: `signal ${event.signalName} undelivered — no running ${event.targetId}`,
+            tone: 'danger',
+          };
     case 'cancelRequested':
       return {label: 'cancellation requested', tone: 'danger'};
     default:
@@ -120,7 +132,7 @@ export function describeEvent(event: HistoryEvent): EventView {
 /**
  * The families a reader narrows a history to.
  *
- * Five, rather than the ten event types, because the question is never "show me
+ * Five, rather than the eleven event types, because the question is never "show me
  * `activityFailed`" — it is "show me the activities", and a dispatch is only
  * legible next to its outcome. Splitting them would let a reader filter to the
  * failures and lose the `activityScheduled` rows that say which activity failed.
@@ -165,6 +177,10 @@ export function eventCategory(event: HistoryEvent): EventCategory {
     case 'childCancelRequested':
       return 'child';
     case 'signal':
+    // The sending end of a signal, filed with the receiving end: someone
+    // filtering to signals wants both halves of the conversation this execution
+    // is having, not only the half aimed at it.
+    case 'workflowSignaled':
       return 'signal';
     case 'cancelRequested':
       return 'cancellation';

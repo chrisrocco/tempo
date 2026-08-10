@@ -190,3 +190,16 @@ is friendlier and is more of what `up` is already doing.
 drive commands. All built, all deleted with the rest; none of them were the
 reason for the redesign. They are all RPC clients like `run`, so they should
 come back close to as they were once `up` and `run` have settled.
+
+**When `describe` comes back, its event formatter needs `assertNever`.** The
+deleted one was a ternary chain ending in `: ''`, so a history event it had
+never heard of rendered with no detail and nothing failed — the type-checker had
+no opinion. Merging `master` into this branch demonstrated it: the
+`workflowSignaled` event added meanwhile had to be hand-added to that formatter,
+while `dashboard/app/history_view.ts` and `history_spans.ts` were _forced_ to
+handle it because both end their switch in `assertNever`. Same question, two
+answers, and only one of them survives someone forgetting.
+
+So the CLI's formatter should be an exhaustive `switch` over `HistoryEvent`,
+matching the dashboard. AGENTS.md already requires this shape; the old formatter
+predated the rule and was never brought in line.
