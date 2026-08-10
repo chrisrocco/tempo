@@ -15,7 +15,7 @@
 import 'jasmine';
 import type {AddressInfo} from 'node:net';
 import type {Server} from 'node:http';
-import {status} from '../../src/deploy';
+import {status, type DeploymentStatus, type UnitState} from '../../src/deploy';
 import {
   createRemoteService,
   createRpcServer,
@@ -32,6 +32,19 @@ function showing(activeState: string, fileState = 'enabled', restarts = 0) {
       stdout: `ActiveState=${activeState}\nUnitFileState=${fileState}\nLoadState=loaded\nNRestarts=${restarts}\n`,
     },
   };
+}
+
+/**
+ * The units out of a report, insisting they were readable.
+ *
+ * Both halves of a `DeploymentStatus` are optional, so reading either means saying
+ * which case you expected. These specs supply a fake `systemctl`, so "unavailable"
+ * here is a spec bug rather than a scenario.
+ */
+function unitsOf(report: DeploymentStatus): readonly UnitState[] {
+  if (!report.systemd.available)
+    throw new Error(`expected systemd to answer: ${report.systemd.reason}`);
+  return report.systemd.units;
 }
 
 interface Harness {
@@ -66,20 +79,20 @@ describe('status — reading systemd', () => {
     const host = fakeHost({responses: [showing('active')]});
     const report = await status({serverUrl: 'http://127.0.0.1:1'}, host);
 
-    expect(report.units.map((u) => u.unit)).toEqual([
+    expect(unitsOf(report).map((u) => u.unit)).toEqual([
       'tempo-server',
       'tempo-worker-workflow',
       'tempo-worker-activity',
     ]);
-    expect(report.units[0]?.activeState).toBe('active');
-    expect(report.units[0]?.fileState).toBe('enabled');
+    expect(unitsOf(report)[0]?.activeState).toBe('active');
+    expect(unitsOf(report)[0]?.fileState).toBe('enabled');
   });
 
   it('carries the restart count, which is how a crash loop is visible at all', async () => {
     const host = fakeHost({responses: [showing('active', 'enabled', 47)]});
     const report = await status({serverUrl: 'http://127.0.0.1:1'}, host);
 
-    expect(report.units[0]?.restarts).toBe(47);
+    expect(unitsOf(report)[0]?.restarts).toBe(47);
   });
 
   /**
@@ -101,7 +114,7 @@ describe('status — reading systemd', () => {
     });
     const report = await status({serverUrl: 'http://127.0.0.1:1'}, host);
 
-    expect(report.units[0]?.fileState).toBe('not-found');
+    expect(unitsOf(report)[0]?.fileState).toBe('not-found');
   });
 
   it('needs no root, unlike up and down', async () => {
@@ -110,6 +123,54 @@ describe('status — reading systemd', () => {
     await expectAsync(
       status({serverUrl: 'http://127.0.0.1:1'}, host),
     ).toBeResolved();
+  });
+});
+
+/**
+ * The other half of "report what you found". Found by assembling a CLI on a
+ * machine with no systemd and watching `status` throw `spawn systemctl ENOENT`:
+ * the degrade-rather-than-throw rule had been applied to the server half and not
+ * to this one, which is the one thing a status command must never do.
+ */
+describe('status — a machine without systemd is an answer too', () => {
+  /** What `Host.run` does for a command that is not installed. */
+  const noSystemctl = {
+    match: 'systemctl',
+    result: {throws: 'spawn systemctl ENOENT'},
+  };
+
+  it('reports systemd as unavailable rather than throwing', async () => {
+    const host = fakeHost({responses: [noSystemctl]});
+    const report = await status({serverUrl: 'http://127.0.0.1:1'}, host);
+
+    expect(report.systemd.available).toBe(false);
+    if (!report.systemd.available)
+      expect(report.systemd.reason).toContain('ENOENT');
+  });
+
+  // The point of degrading: everything the server had to say still arrives.
+  it('still reports the server when systemd cannot be consulted', async () => {
+    const server = await startServer();
+    const host = fakeHost({responses: [noSystemctl]});
+
+    try {
+      const report = await status({serverUrl: server.url}, host);
+
+      expect(report.systemd.available).toBe(false);
+      expect(report.server.reachable).toBe(true);
+      if (report.server.reachable)
+        expect(report.server.health.uptimeMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      await server.teardown();
+    }
+  }, 15000);
+
+  // Not knowing is not the same as being fine.
+  it('never calls a deployment healthy on a source it could not consult', async () => {
+    const host = fakeHost({responses: [noSystemctl]});
+    const report = await status({serverUrl: 'http://127.0.0.1:1'}, host);
+
+    expect(report.healthy).toBe(false);
   });
 });
 
@@ -124,7 +185,7 @@ describe('status — an unreachable server is an answer', () => {
       expect(report.server.reason).toBeTruthy();
     }
     // The half that does not depend on the server is still there.
-    expect(report.units.length).toBe(3);
+    expect(unitsOf(report).length).toBe(3);
     expect(report.healthy).toBe(false);
   });
 });
@@ -190,7 +251,9 @@ describe('status — reading the fleet', () => {
         expect(report.server.unservedQueues).toContain('nobody-serves-this');
       // Every unit is active and the deployment is still not healthy, which is
       // exactly the judgement a units-only status could not make.
-      expect(report.units.every((u) => u.activeState === 'active')).toBe(true);
+      expect(unitsOf(report).every((u) => u.activeState === 'active')).toBe(
+        true,
+      );
       expect(report.healthy).toBe(false);
     } finally {
       await server.teardown();
@@ -216,7 +279,9 @@ describe('status — reading the fleet', () => {
         expect(report.server.health.durable).toBe(false);
         expect(report.server.health.uptimeMs).toBeGreaterThanOrEqual(0);
       }
-      expect(report.units.every((u) => u.activeState === 'active')).toBe(true);
+      expect(unitsOf(report).every((u) => u.activeState === 'active')).toBe(
+        true,
+      );
       expect(report.healthy).toBe(false);
     } finally {
       await server.teardown();

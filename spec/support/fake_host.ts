@@ -33,8 +33,17 @@ export interface FakeHostOptions {
   /**
    * Canned answers for `run`, matched against `"<command> <args joined>"` by
    * substring. First match wins; anything unmatched succeeds with empty output.
+   *
+   * `result.throws` makes the call **reject** rather than resolve, which is what
+   * the real host does for a command that is not installed — a non-zero exit is an
+   * answer and a missing binary is not. That is the difference between "this unit
+   * is inactive" and "there is no systemd on this machine", and only a caller that
+   * catches can tell them apart.
    */
-  responses?: Array<{match: string; result: Partial<CommandResult>}>;
+  responses?: Array<{
+    match: string;
+    result: Partial<CommandResult> & {throws?: string};
+  }>;
   /** Paths whose `installFile` should fail, as a missing artifact would. */
   failInstall?: readonly string[];
 }
@@ -100,6 +109,7 @@ export function fakeHost(options: FakeHostOptions = {}): FakeHost {
       record({kind: 'run', target: command, detail: args.join(' ')});
 
       const canned = options.responses?.find((r) => line.includes(r.match));
+      if (canned?.result.throws) throw new Error(canned.result.throws);
       return {
         code: canned?.result.code ?? 0,
         stdout: canned?.result.stdout ?? '',

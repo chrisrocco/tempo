@@ -101,14 +101,49 @@ export interface ServerUnreachable {
   reason: string;
 }
 
-/** Everything `status` found. */
-export interface DeploymentStatus {
+/** What systemd said about the units. */
+export interface UnitsReport {
+  available: true;
   /** One entry per unit, server first. */
   units: readonly UnitState[];
+}
+
+/**
+ * Why systemd said nothing.
+ *
+ * Almost always `systemctl` not being on the machine at all — a container, a
+ * developer's laptop, a host where nothing was ever deployed. That is an *answer*
+ * to "what is the state of this deployment", which is why it is reported here
+ * rather than thrown. `up` and `down` still fail outright on the same condition,
+ * and rightly: they cannot do their job without systemd, whereas this one can
+ * still say everything it learned from the server.
+ */
+export interface UnitsUnavailable {
+  available: false;
+  /** What went wrong, as far as it can be known from the outside. */
+  reason: string;
+}
+
+/**
+ * Everything `status` found.
+ *
+ * **Both halves are optional and for the same reason.** Either source can be
+ * absent — no systemd on the machine, no server on the port — and the whole point
+ * of this function is to report what it did learn and name what it could not. An
+ * earlier version treated systemd as always available and threw
+ * `spawn systemctl ENOENT` on a host without it, which is the one thing a status
+ * command must never do.
+ */
+export interface DeploymentStatus {
+  systemd: UnitsReport | UnitsUnavailable;
   server: ServerReport | ServerUnreachable;
   /**
-   * True when every unit is active and the server answered. The one-line summary
-   * a caller can branch on without re-deriving it from the parts.
+   * True when both sources answered, every unit is active, the server is durable,
+   * and no queue has work nothing is polling. The one-line summary a caller can
+   * branch on without re-deriving it from the parts.
+   *
+   * A source that could not be consulted is never "healthy": not knowing is not
+   * the same as being fine.
    */
   healthy: boolean;
 }
@@ -201,6 +236,29 @@ async function readServer(
   };
 }
 
+/**
+ * Ask systemd about each unit.
+ *
+ * Sequential rather than concurrent: three `systemctl show` calls against one
+ * machine, where the ordering of the result matters more than the milliseconds.
+ *
+ * A missing `systemctl` is reported rather than thrown — see `UnitsUnavailable`.
+ * `Host.run` rejects when a command does not exist, which is right for every other
+ * caller and is the one thing this one has to catch.
+ */
+async function readUnits(host: Host): Promise<UnitsReport | UnitsUnavailable> {
+  const units: UnitState[] = [];
+  try {
+    for (const unit of ALL_UNITS) units.push(await unitState(host, unit));
+  } catch (e) {
+    return {
+      available: false,
+      reason: e instanceof Error ? e.message : String(e),
+    };
+  }
+  return {available: true, units};
+}
+
 /** Read a deployment's state from systemd and from the server it runs. */
 export async function status(
   options: StatusOptions,
@@ -208,22 +266,19 @@ export async function status(
 ): Promise<DeploymentStatus> {
   const serverUrl = options.serverUrl ?? DEFAULT_SERVER_URL;
 
-  // Sequential rather than concurrent: three `systemctl show` calls against one
-  // machine, where the ordering of the result matters more than the milliseconds.
-  const units: UnitState[] = [];
-  for (const unit of ALL_UNITS) units.push(await unitState(host, unit));
-
+  const systemd = await readUnits(host);
   const server = await readServer(serverUrl);
 
   return {
-    units,
+    systemd,
     server,
     healthy:
+      systemd.available &&
+      systemd.units.every((u) => u.activeState === 'active') &&
       server.reachable &&
       // A server that will lose everything on its next restart is not healthy,
       // however green systemd is about it.
       server.health.durable &&
-      units.every((u) => u.activeState === 'active') &&
       server.unservedQueues.length === 0,
   };
 }

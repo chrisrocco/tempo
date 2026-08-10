@@ -68,6 +68,8 @@ export {
   type ServerReport,
   type ServerUnreachable,
   type StatusOptions,
+  type UnitsReport,
+  type UnitsUnavailable,
 } from './status';
 export {systemHost} from './system_host';
 export {type UnitState} from './systemctl';
