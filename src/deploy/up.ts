@@ -75,6 +75,20 @@ export interface UpOptions {
    * TLS. `0.0.0.0` lets other machines connect; keep it on a private network.
    */
   host?: string;
+  /**
+   * Absolute path to the interpreter the units should run. Defaults to
+   * `Host.interpreterPath()` — the node running this process.
+   *
+   * The default is right whenever `up` is invoked by the person whose services
+   * these are, which is the normal case for a per-user deployment: their node
+   * exists, and it is the version the artifacts were built against.
+   *
+   * Worth overriding when the deploying process is *not* running the interpreter
+   * the services should use — a wrapper script under a different node, or a CLI
+   * shipped as a single-file executable, where `process.execPath` is that
+   * executable rather than node.
+   */
+  node?: string;
 }
 
 /** What a deploy did, so a caller can report it without guessing. */
@@ -89,6 +103,14 @@ export interface UpResult {
   units: readonly string[];
   /** Where the artifacts and units went, so a caller can say. */
   installRoot: string;
+  /**
+   * The interpreter the units were written to run.
+   *
+   * Reported because it is resolved rather than fixed, and because it is the field
+   * most worth reading back: a deployment that will not start usually has a wrong
+   * one here, and it is otherwise only visible by reading the unit file.
+   */
+  nodeBin: string;
   /**
    * Whether this user's services survive logging out.
    *
@@ -115,6 +137,7 @@ export async function up(options: UpOptions, host: Host): Promise<UpResult> {
   const config: UnitConfig = {
     port: options.port ?? DEFAULT_PORT,
     host: options.host ?? '127.0.0.1',
+    nodeBin: options.node ?? host.interpreterPath(),
   };
 
   // Before the first write, not after the first surprise. Under sudo every path
@@ -158,6 +181,7 @@ export async function up(options: UpOptions, host: Host): Promise<UpResult> {
     installed: [layout.serverArtifact, layout.workerArtifact],
     units: names,
     installRoot: layout.installRoot,
+    nodeBin: config.nodeBin,
     lingering,
     ...(lingering ? {} : {lingerPrerequisite: LINGER_PREREQUISITE}),
   };

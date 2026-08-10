@@ -28,6 +28,16 @@ export const FAKE_USER_PATHS: UserPaths = {
   state: '/fake/home/.local/state',
 };
 
+/**
+ * The interpreter the fake reports.
+ *
+ * Deliberately a version-manager path rather than `/usr/bin/node`: that is the
+ * case the hardcoded constant used to get wrong, and a unit that reintroduced the
+ * constant would pass a spec written against `/usr/bin/node` while failing on every
+ * machine that installs node this way.
+ */
+export const FAKE_NODE = '/fake/home/.nvm/versions/node/v22.15.0/bin/node';
+
 /** One thing that was asked of the machine, in the order it was asked. */
 export interface RecordedCall {
   kind: 'euid' | 'makeDirectory' | 'installFile' | 'writeFile' | 'run';
@@ -51,6 +61,11 @@ export interface FakeHostOptions {
    * assertable without depending on whose machine the suite runs on.
    */
   userPaths?: UserPaths;
+  /**
+   * What `interpreterPath()` reports. Defaults to a fake path under a version
+   * manager, so a unit that hardcoded `/usr/bin/node` would be obvious.
+   */
+  interpreterPath?: string;
   /**
    * Canned answers for `run`, matched against `"<command> <args joined>"` by
    * substring. First match wins; anything unmatched succeeds with empty output.
@@ -109,6 +124,10 @@ export function fakeHost(options: FakeHostOptions = {}): FakeHost {
 
     userPaths(): UserPaths {
       return options.userPaths ?? FAKE_USER_PATHS;
+    },
+
+    interpreterPath(): string {
+      return options.interpreterPath ?? FAKE_NODE;
     },
 
     async makeDirectory(path: string): Promise<void> {

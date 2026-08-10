@@ -23,7 +23,7 @@ import {
   workerUnit,
   type UnitConfig,
 } from '../../src/deploy';
-import {fakeHost} from '../support/fake_host';
+import {FAKE_NODE, fakeHost} from '../support/fake_host';
 import {
   DEFAULT_PORT,
   SERVER_FLAG,
@@ -38,7 +38,11 @@ import {
   resolveTaskQueue,
 } from '../../src/tempo';
 
-const config: UnitConfig = {port: DEFAULT_PORT, host: '127.0.0.1'};
+const config: UnitConfig = {
+  port: DEFAULT_PORT,
+  host: '127.0.0.1',
+  nodeBin: FAKE_NODE,
+};
 
 /** A layout for a fixed fake user, so paths are assertable. */
 const layout = resolveLayout(fakeHost());
@@ -110,7 +114,7 @@ describe('deploy units — what is written is what is read', () => {
     for (const port of [DEFAULT_PORT, 1234])
       expect(
         flagValue(
-          serverArgs(layout, {port, host: '0.0.0.0'}),
+          serverArgs(layout, {port, host: '0.0.0.0', nodeBin: FAKE_NODE}),
           SERVER_FLAG.dataDir,
         ),
       ).toBe(layout.stateDir);
@@ -119,9 +123,9 @@ describe('deploy units — what is written is what is read', () => {
 
 describe('deploy units — the address a worker dials', () => {
   it('dials the host the server binds', () => {
-    expect(workerServerUrl({port: 7777, host: '10.0.0.4'})).toBe(
-      'http://10.0.0.4:7777',
-    );
+    expect(
+      workerServerUrl({port: 7777, host: '10.0.0.4', nodeBin: FAKE_NODE}),
+    ).toBe('http://10.0.0.4:7777');
   });
 
   /**
@@ -131,16 +135,18 @@ describe('deploy units — the address a worker dials', () => {
    * connect, and it must not break the workers on this one.
    */
   it('turns a wildcard bind into a loopback a worker can actually reach', () => {
-    expect(workerServerUrl({port: 7777, host: '0.0.0.0'})).toBe(
-      'http://127.0.0.1:7777',
+    expect(
+      workerServerUrl({port: 7777, host: '0.0.0.0', nodeBin: FAKE_NODE}),
+    ).toBe('http://127.0.0.1:7777');
+    expect(workerServerUrl({port: 7777, host: '::', nodeBin: FAKE_NODE})).toBe(
+      'http://[::1]:7777',
     );
-    expect(workerServerUrl({port: 7777, host: '::'})).toBe('http://[::1]:7777');
   });
 
   it('brackets an IPv6 literal, which has no unambiguous reading otherwise', () => {
-    expect(workerServerUrl({port: 7777, host: 'fd00::1'})).toBe(
-      'http://[fd00::1]:7777',
-    );
+    expect(
+      workerServerUrl({port: 7777, host: 'fd00::1', nodeBin: FAKE_NODE}),
+    ).toBe('http://[fd00::1]:7777');
   });
 });
 
@@ -245,12 +251,29 @@ describe('deploy units — staying running', () => {
 });
 
 describe('deploy units — the three services', () => {
-  it('names the interpreter absolutely rather than resolving it from PATH', () => {
-    // A unit that inherited PATH would run whichever node the deploying operator
-    // happened to have.
+  /**
+   * `ExecStart=` must begin with an absolute path — systemd rejects a bare `node`
+   * — so some absolute path has to be chosen. It is the *configured* one and no
+   * longer a constant: this used to hardcode `/usr/bin/node`, which is where `apt`
+   * and NodeSource put node and where nvm, fnm, volta, asdf, and Homebrew do not.
+   * A per-user deployment implies a developer's machine, so the constant was most
+   * likely to be wrong exactly where this model gets used.
+   *
+   * `FAKE_NODE` is a version-manager path on purpose: reintroducing the constant
+   * would fail here rather than passing against a path that happens to match.
+   */
+  it('runs the configured interpreter, by absolute path', () => {
     expect(serverUnit(layout, config)).toContain(
-      `ExecStart=/usr/bin/node ${layout.installRoot}/`,
+      `ExecStart=${FAKE_NODE} ${layout.installRoot}/`,
     );
+    expect(serverUnit(layout, config)).not.toContain('/usr/bin/node');
+  });
+
+  it('runs the same interpreter for the workers', () => {
+    for (const role of ['workflow', 'activity'] as const)
+      expect(workerUnit(layout, role, config)).toContain(
+        `ExecStart=${FAKE_NODE} `,
+      );
   });
 
   it('runs one artifact twice, once per role', () => {

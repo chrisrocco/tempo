@@ -42,7 +42,6 @@ export {down, type DownResult, type UnitOutcome} from './down';
 export {
   ALL_UNITS,
   LINGER_PREREQUISITE,
-  NODE_BIN,
   SERVER_UNIT,
   DEPLOYMENT_NAME,
   WORKER_UNITS,

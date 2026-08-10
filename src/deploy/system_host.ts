@@ -30,6 +30,13 @@ export function systemHost(): Host {
       return process.geteuid?.() ?? -1;
     },
 
+    interpreterPath(): string {
+      // Absolute by definition, which is what `ExecStart=` requires. Note this is
+      // node even when the caller is running under `tsx`: that is a loader, not a
+      // different binary.
+      return process.execPath;
+    },
+
     userPaths(): UserPaths {
       // The XDG defaults, which are what the specification says to use when a
       // variable is unset *or empty* — an exported-but-empty `XDG_DATA_HOME` is

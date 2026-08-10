@@ -18,7 +18,7 @@
 import 'jasmine';
 import {ALL_UNITS, resolveLayout, unitPath, up} from '../../src/deploy';
 import {DEFAULT_PORT} from '../../src/process_flags';
-import {fakeHost, type FakeHost} from '../support/fake_host';
+import {FAKE_NODE, fakeHost, type FakeHost} from '../support/fake_host';
 
 const artifacts = {server: 'out/server.js', worker: 'out/worker.js'};
 
@@ -167,6 +167,45 @@ describe('up — a per-user deployment', () => {
       '/fake/home/.local/state/tempo',
       '/fake/home/.config/systemd/user',
     ]);
+  });
+});
+
+/**
+ * The interpreter the units run. `ExecStart=` must be an absolute path, so one has
+ * to be chosen; what changed is that it is no longer the constant `/usr/bin/node`,
+ * which is absent on any machine where node came from nvm, fnm, volta, asdf, or
+ * Homebrew — which is most machines that would want a per-user deployment.
+ */
+describe('up — which node the units run', () => {
+  it('defaults to the interpreter running this process', async () => {
+    const host = fakeHost();
+    const result = await up(artifacts, host);
+
+    expect(result.nodeBin).toBe(FAKE_NODE);
+    expect(host.written.get(unitPath(layout, 'tempo-server'))).toContain(
+      `ExecStart=${FAKE_NODE} `,
+    );
+  });
+
+  it('never writes the path it used to hardcode', async () => {
+    const host = fakeHost();
+    await up(artifacts, host);
+
+    for (const [, text] of host.written)
+      expect(text).not.toContain('/usr/bin/node');
+  });
+
+  // For a deploying process that is not itself running the interpreter the services
+  // should use — a wrapper under a different node, or a single-file executable where
+  // `process.execPath` is that executable rather than node.
+  it('takes an explicit interpreter when the default is wrong', async () => {
+    const host = fakeHost();
+    const result = await up({...artifacts, node: '/opt/node22/bin/node'}, host);
+
+    expect(result.nodeBin).toBe('/opt/node22/bin/node');
+    expect(
+      host.written.get(unitPath(layout, 'tempo-worker-activity')),
+    ).toContain('ExecStart=/opt/node22/bin/node ');
   });
 });
 

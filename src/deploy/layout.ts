@@ -46,17 +46,6 @@ import type {Host} from './ports/host';
 import type {WorkerRole} from '../tempo';
 
 /**
- * The interpreter the units run.
- *
- * Named absolutely rather than resolved from a `PATH`, because a unit that
- * inherits `PATH` runs a different interpreter depending on how it was started.
- * The honest weak point: a host with node installed elsewhere gets `203/EXEC` on
- * the first start — loud rather than silent, the deployment does not come up, and
- * `systemctl --user status` names the missing file.
- */
-export const NODE_BIN = '/usr/bin/node';
-
-/**
  * The directory name this deployment uses under each of the user's base
  * directories, so the install root, the state directory, and the units all sit
  * under one recognisable name.

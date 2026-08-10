@@ -51,14 +51,29 @@
 
 import {SERVER_FLAG, WORKER_FLAG, formatFlag} from '../process_flags';
 import type {WorkerRole} from '../tempo';
-import {NODE_BIN, SERVER_UNIT, WORKER_UNITS, type Layout} from './layout';
+import {SERVER_UNIT, WORKER_UNITS, type Layout} from './layout';
 
-/** What a deployment's units need to know that is not a constant of the layout. */
+/** What a deployment's units need to know that is not a path in the layout. */
 export interface UnitConfig {
   /** The port the server binds and the workers dial. Typically `DEFAULT_PORT`. */
   port: number;
   /** The interface the server binds. */
   host: string;
+  /**
+   * Absolute path to the interpreter `ExecStart=` names.
+   *
+   * A value rather than a constant because there is no path that is right on every
+   * machine. `/usr/bin/node` — which this used to hardcode — is where `apt` and
+   * NodeSource put it and is where **nvm, fnm, volta, asdf, and Homebrew do not**.
+   * A per-user deployment implies a developer's machine, which implies a version
+   * manager, so the hardcoded path was most likely to be wrong exactly where this
+   * model is most likely to be used. It could also be *present and a different
+   * major version* than the artifacts were built against, which is the silent
+   * failure the old "it fails loudly with 203/EXEC" defence assumed away.
+   *
+   * `up` defaults it to `Host.interpreterPath()`. See `UpOptions.node`.
+   */
+  nodeBin: string;
 }
 
 /**
@@ -177,7 +192,7 @@ Description=tempo server
 ${unitSection()}
 
 [Service]
-ExecStart=${NODE_BIN} ${layout.serverArtifact} ${serverArgs(layout, config).join(' ')}
+ExecStart=${config.nodeBin} ${layout.serverArtifact} ${serverArgs(layout, config).join(' ')}
 ${serviceSection(layout)}
 
 [Install]
@@ -206,7 +221,7 @@ After=${SERVER_UNIT}.service
 ${unitSection()}
 
 [Service]
-ExecStart=${NODE_BIN} ${layout.workerArtifact} ${workerArgs(role, config).join(' ')}
+ExecStart=${config.nodeBin} ${layout.workerArtifact} ${workerArgs(role, config).join(' ')}
 ${serviceSection(layout)}
 
 [Install]

@@ -80,6 +80,21 @@ export interface Host {
   /** Where this user's files go. See `UserPaths`. */
   userPaths(): UserPaths;
 
+  /**
+   * The absolute path of the interpreter running *this* process.
+   *
+   * systemd requires `ExecStart=` to begin with an absolute path, so a unit cannot
+   * say `node` and let a `PATH` decide. Something absolute has to be chosen, and
+   * this is the best available answer for a per-user deployment: the node that ran
+   * `up` is the user's own node, it is guaranteed to exist, and it is the version
+   * the artifacts were just built and tested against.
+   *
+   * That reasoning is specific to this deployment model and would be wrong for a
+   * system daemon, where root runs the installer and the service runs as somebody
+   * else. See `UpOptions.node` for the case where it is wrong here too.
+   */
+  interpreterPath(): string;
+
   /** Create a directory and any missing parents. Succeeds if it already exists. */
   makeDirectory(path: string): Promise<void>;
 

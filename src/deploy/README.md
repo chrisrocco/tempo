@@ -94,9 +94,13 @@ because the workflows need the user's own identity and an operator should not ne
 - **History lives in `$HOME`.** If that is NFS-mounted, `FileHistoryStore`'s
   single-writer lockfile is on much shakier ground than it is on local disk. Not
   investigated.
-- **`/usr/bin/node` is still a constant.** A host with node elsewhere gets
-  `203/EXEC` on the first start — loud rather than silent, which is what makes it
-  acceptable, but the first such host is the trigger to make it an option.
+- **The interpreter is resolved, not assumed.** `ExecStart=` must be an absolute
+  path, so one has to be chosen; `up` defaults it to the node running `up` itself,
+  which for a per-user deployment is the user's own node and the version the
+  artifacts were built against. This used to hardcode `/usr/bin/node`, which nvm,
+  fnm, volta, asdf, and Homebrew all contradict — most likely to be wrong exactly
+  where this model gets used. `up` takes a `node` option for the case where the
+  deploying process is not running the right interpreter.
 
 The prediction this replaces is worth keeping for the shape of the lesson: an
 earlier version of this file said `/opt/tempo` and `/var/lib/tempo` would need to
