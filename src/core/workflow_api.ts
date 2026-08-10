@@ -235,11 +235,11 @@ export function startChild(
  * history event and a park **on every signal**, which lands on the sender that
  * sends the most — a poller relaying every item it finds — to report an outcome
  * there is usually no recovery for. The recovery that would matter is "my target
- * is gone, stop producing", and that is parent-close policy: a separate mechanism
- * that should stop the poller outright rather than have it discover its parent's
- * death one item at a time. Reopen this if a caller has a real branch to write on
- * the failure; the event already carries the answer, so making it awaitable is a
- * completion event away.
+ * is gone, stop producing", and `parentClosePolicy` already does that job better:
+ * a poller feeding its parent is terminated when that parent closes, rather than
+ * discovering its death one undelivered item at a time. Reopen this if a caller
+ * has a real branch to write on the failure; the event already carries the
+ * answer, so making it awaitable is a completion event away.
  *
  * Also unbuilt, deliberately: no cap on signals per execution (Temporal's
  * `maximumSignalsPerExecution`) and no `childWorkflowOnly` guard restricting the
