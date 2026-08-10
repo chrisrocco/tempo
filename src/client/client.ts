@@ -65,6 +65,8 @@ import type {
   ExecutionPage,
   ExecutionStatus,
   QueueWorkers,
+  RemoteWorkflowService,
+  ServerHealth,
   WorkflowService,
 } from '../protocol';
 
@@ -143,20 +145,34 @@ export interface Client {
    * The handle is the author-facing surface and this is an operator's tool.
    */
   reset(workflowId: string, keep: number): void;
+}
+
+/**
+ * A `Client` talking to a server over a wire, plus the one question only such a
+ * client can ask.
+ *
+ * Mirrors `RemoteWorkflowService` one layer up, and for the same reason: there is
+ * no server tier in the local case, so asking an in-process engine for its uptime
+ * and data directory would be asking it to invent answers.
+ */
+export interface RemoteClient extends Client {
   /**
-   * Is a server answering at all?
+   * Liveness, and what this server is.
    *
-   * Worth its own call because the writes on `WorkflowHandle` are
-   * fire-and-forget — `signal`, `cancel`, `terminate`, and `reset` all return
-   * `void`, and the service reports their failures later or not at all. Without a
-   * probe, "sent" and "dropped into a closed port" are the same thing from the
-   * caller's side.
+   * Doubles as the reachability probe an operator tool needs, which is why there
+   * is no separate `ping`. The writes on `WorkflowHandle` are fire-and-forget —
+   * `signal`, `cancel`, `terminate`, and `reset` all return `void`, and the
+   * service reports their failures later or not at all — so without a probe
+   * "sent" and "dropped into a closed port" are the same thing from the caller's
+   * side. Rejecting is the answer to "not reachable"; a caller that wants a
+   * boolean catches, and one that wants to name the address it tried has the
+   * error to do it with.
    *
-   * Answers rather than throws, so a caller can phrase the failure itself: an
-   * operator tool wants to say which address it tried and what would fix it, and
-   * neither is something this can know.
+   * **`durable: false` is the field to read first.** It means the server is
+   * keeping history in memory and will lose every execution on its next restart,
+   * while looking entirely healthy until then. Nothing else reports that.
    */
-  ping(): Promise<boolean>;
+  health(): Promise<ServerHealth>;
 }
 
 export function createClient(service: WorkflowService): Client {
@@ -194,16 +210,22 @@ export function createClient(service: WorkflowService): Client {
     queues: () => service.listQueues(),
     counts: () => service.groupExecutions(),
     reset: (workflowId, keep) => service.reset(workflowId, keep),
-    async ping(): Promise<boolean> {
-      // Any answer proves reachability, so the cheapest read is the right probe.
-      // A local service cannot be unreachable and returns `true` immediately,
-      // which is correct rather than a special case: there is no port to miss.
-      try {
-        await service.listQueues();
-        return true;
-      } catch {
-        return false;
-      }
-    },
+  };
+}
+
+/**
+ * A client over a service that is talking to a server.
+ *
+ * Everything `createClient` gives, plus `health`. This is what an operator tool
+ * holds: it is always remote — a CLI that had the engine in its own process would
+ * be the engine — so it always has the whole surface, and never needs to keep a
+ * raw service alongside the client to reach one method.
+ */
+export function createRemoteClient(
+  service: RemoteWorkflowService,
+): RemoteClient {
+  return {
+    ...createClient(service),
+    health: () => service.health(),
   };
 }

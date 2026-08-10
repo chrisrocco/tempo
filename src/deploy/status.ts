@@ -44,6 +44,7 @@ import {
   workersServing,
   type ExecutionGroup,
   type QueueWorkers,
+  type ServerHealth,
 } from '../protocol';
 import {createRemoteService} from '../services';
 import {DEFAULT_SERVER_URL} from '../tempo';
@@ -73,6 +74,16 @@ export interface QueueReport {
 /** What the server said, when it said anything. */
 export interface ServerReport {
   reachable: true;
+  /**
+   * Uptime, durability, and where state lives. See `ServerHealth`.
+   *
+   * **Read `durable` first.** `false` means the server is keeping history in
+   * memory and will lose every execution on its next restart, while every unit
+   * reads `active` and every workflow completes normally until then. It is the
+   * one thing in a status report that is catastrophic and invisible, and it is
+   * exactly what a hand-started server without `--data-dir` looks like.
+   */
+  health: ServerHealth;
   queues: readonly QueueReport[];
   /**
    * Queues with executions and nothing polling them. The single most actionable
@@ -113,13 +124,20 @@ async function readServer(
   serverUrl: string,
 ): Promise<ServerReport | ServerUnreachable> {
   const service = createRemoteService(serverUrl);
+  let health: ServerHealth;
   let queues: QueueWorkers[];
   let groups: ExecutionGroup[];
   try {
-    const [q, g] = await Promise.all([
+    // One round of reads, because they are one question. `health` is the
+    // purpose-built liveness call — synchronous on the server, so it cannot hang
+    // on the store trouble it exists to reveal — and it doubles as the probe that
+    // decides whether the rest of this is reachable at all.
+    const [h, q, g] = await Promise.all([
+      service.health(),
       service.listQueues(),
       service.groupExecutions(),
     ]);
+    health = h;
     queues = q;
     groups = g.byTaskQueue;
   } catch (e) {
@@ -167,6 +185,7 @@ async function readServer(
 
   return {
     reachable: true,
+    health,
     queues: reports,
     // Only queues that have work: an idle unserved queue is a pool nobody is
     // using, which is not a problem, and reporting it as one trains an operator
@@ -201,6 +220,9 @@ export async function status(
     server,
     healthy:
       server.reachable &&
+      // A server that will lose everything on its next restart is not healthy,
+      // however green systemd is about it.
+      server.health.durable &&
       units.every((u) => u.activeState === 'active') &&
       server.unservedQueues.length === 0,
   };

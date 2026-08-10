@@ -2,11 +2,18 @@
  * @fileoverview
  * ★ DEPLOYMENT ENTRYPOINT — install, stop, and inspect a tempo deployment.
  *
- * Three functions over one seam:
+ * Five functions over one seam:
  *
- *   up(options, host)      copy two artifacts in, install three units, start them
- *   down(host)             stop those units and stop them coming back on boot
- *   status(options, host)  what the deployment is doing, from systemd and the server
+ *   up(options, host)       copy two artifacts in, install three units, start them
+ *   down(host)              stop those units and stop them coming back on boot
+ *   status(options, host)   what the deployment is doing, from systemd and the server
+ *   restart(target, host)   bounce services without touching what is installed
+ *   logs(options, host)     what a service has been saying
+ *
+ * `up` and `down` are the deployment's lifecycle; `status`, `restart`, and `logs`
+ * are what you do to one that already exists. The split matters most for
+ * `restart`: reaching for `up` to bounce a wedged worker would reinstall from
+ * whatever artifact paths happened to be at hand.
  *
  * **This is a library, not a command-line tool.** Typed options in, typed values
  * out, nothing printed: no `process.stdout`, no exit codes, no `process.argv`.
@@ -44,6 +51,15 @@ export {
   WORKER_UNITS,
   unitPath,
 } from './layout';
+export {
+  logs,
+  restart,
+  unitsFor,
+  type LogOptions,
+  type RestartResult,
+  type Target,
+  type UnitLog,
+} from './operate';
 export type {CommandResult, Host} from './ports/host';
 export {
   status,

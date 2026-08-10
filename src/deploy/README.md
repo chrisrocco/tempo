@@ -6,6 +6,10 @@ deployment actually _is_, and [`ports/host.ts`](ports/host.ts) for why the machi
 is an argument. Every decision behind those is in the module it constrains, per
 `AGENTS.md`.
 
+Five functions: `up` and `down` are a deployment's lifecycle; `status`, `restart`,
+and `logs` are what you do to one that exists. Workflow operations are not here —
+they are [`../client/`](../client/client.ts), and the last section says why.
+
 **This file is what is left over** — questions with no code to host them yet. It
 held the whole design while none of this existed; now that `up`, `down`, and
 `status` have landed, only the open parts belong here.
@@ -88,7 +92,7 @@ guessing wrong about _when_ is how they end up as options nobody needs:
 ## What this library deliberately does not cover
 
 **Driving and reading workflows.** `start`, `result`, `describe`, `signal`,
-`cancel`, `terminate`, `reset`, `list`, `queues`, `counts`, `ping` — the deleted
+`cancel`, `terminate`, `reset`, `list`, `queues`, `counts`, `health` — the deleted
 CLI had all of these and this library needs none of them, because they are all
 [`../client/`](../client/client.ts). An assembler calls that directly. What the CLI
 added around them was argument typing, result formatting, and exit codes, all of
@@ -96,12 +100,13 @@ which are presentation.
 
 That was not true when this library landed: `Client` covered only the six calls
 that drive a single execution, and the reads meant dropping to a raw
-`WorkflowService`. It covers all eleven now, so an assembler needs one object
-rather than two.
+`WorkflowService`. `createRemoteClient` now covers all of them, so an assembler
+holds one object rather than two.
 
-`status` here is not a duplicate of `Client.ping`: that answers "is a server
-listening", and this one answers "is the deployment working", which needs systemd
-as well and can disagree with it.
+`status` here is not a duplicate of `RemoteClient.health`: that answers "is a
+server listening and is it durable", and this one answers "is the deployment
+working", which needs systemd as well and can disagree with it — a unit can be
+`active` while nothing is polling the queue that has the work.
 
 **Running a workflow from source with nothing deployed.** It was going to be a
 `run-local` command, and it is the one piece that would have to know how source
