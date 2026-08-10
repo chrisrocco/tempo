@@ -13,11 +13,13 @@
  * make replay irreproducible and belongs on the runtime/host side instead.
  */
 
-import type {
-  ActivityOptions,
-  Command,
-  CommandSpec,
-  ExecutionParentView,
+import {
+  DEFAULT_PARENT_CLOSE_POLICY,
+  type ActivityOptions,
+  type Command,
+  type CommandSpec,
+  type ExecutionParentView,
+  type ParentClosePolicy,
 } from '../protocol';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
@@ -108,6 +110,23 @@ export interface ChildOptions {
    * to hand work to a different pool.
    */
   taskQueue?: string;
+  /**
+   * What becomes of this child when this workflow closes. Defaults to
+   * `'terminate'`; `'cancel'` lets the child unwind, `'abandon'` leaves it
+   * running. See `protocol/parent_close_policy.ts` for what each guarantees and
+   * why the default is the harsh one.
+   *
+   * Set `'abandon'` for a child deliberately started to outlive its parent — a
+   * follow-up job, a handoff. Leave it alone for anything started to serve this
+   * workflow, which is the case that used to leak: an infinite poller feeding a
+   * parent goes on polling forever once the parent is gone, and nothing reports
+   * that it has.
+   *
+   * It is read from history, not from this call, whenever the parent actually
+   * closes — so changing it in the source affects children started from then on,
+   * not ones already running.
+   */
+  parentClosePolicy?: ParentClosePolicy;
 }
 
 /**
@@ -131,6 +150,7 @@ export function executeChild<T = unknown>(
     detached: false,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
+    parentClosePolicy: options.parentClosePolicy ?? DEFAULT_PARENT_CLOSE_POLICY,
   }) as Promise<T>;
 }
 
@@ -167,6 +187,7 @@ export function startChild(
     detached: true,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
+    parentClosePolicy: options.parentClosePolicy ?? DEFAULT_PARENT_CLOSE_POLICY,
     seq: targetSeq,
   });
   return {
@@ -214,11 +235,11 @@ export function startChild(
  * history event and a park **on every signal**, which lands on the sender that
  * sends the most — a poller relaying every item it finds — to report an outcome
  * there is usually no recovery for. The recovery that would matter is "my target
- * is gone, stop producing", and that is parent-close policy: a separate mechanism
- * that should stop the poller outright rather than have it discover its parent's
- * death one item at a time. Reopen this if a caller has a real branch to write on
- * the failure; the event already carries the answer, so making it awaitable is a
- * completion event away.
+ * is gone, stop producing", and `parentClosePolicy` already does that job better:
+ * a poller feeding its parent is terminated when that parent closes, rather than
+ * discovering its death one undelivered item at a time. Reopen this if a caller
+ * has a real branch to write on the failure; the event already carries the
+ * answer, so making it awaitable is a completion event away.
  *
  * Also unbuilt, deliberately: no cap on signals per execution (Temporal's
  * `maximumSignalsPerExecution`) and no `childWorkflowOnly` guard restricting the

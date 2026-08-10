@@ -15,6 +15,7 @@
  */
 
 import type {ActivityOptions} from './activity_options';
+import type {ParentClosePolicy} from './parent_close_policy';
 
 /**
  * What every recorded event carries, whatever kind it is.
@@ -143,6 +144,24 @@ export interface ChildStartedEvent extends HistoryEventBase {
   childId: string;
   /** true = fire-and-forget (`startChild`); false = blocking (`executeChild`). */
   detached: boolean;
+  /**
+   * What becomes of this child when its parent closes — see
+   * `parent_close_policy.ts`.
+   *
+   * Recorded here rather than only held in memory because the process that closes
+   * a parent need not be the one that started its children: `resumeFromHistory`
+   * rebuilds the child map from these events, and it must rebuild the policies
+   * with them or a restart would quietly turn every child into an abandoned one.
+   *
+   * **Optional, and absent means `abandon`** — not the default. That is a
+   * deliberate exception to how the other optional fields here read. A missing
+   * `ts` or `childId` is a fact the writer *had* and did not record, so a reader
+   * treats it as unknown; a missing policy is a child dispatched before policies
+   * existed, when the engine unconditionally left children running. Absent
+   * therefore records what the engine actually did, which means deploying this
+   * change cannot alter what an already-dispatched child does.
+   */
+  parentClosePolicy?: ParentClosePolicy;
 }
 
 /**

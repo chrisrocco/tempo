@@ -160,6 +160,7 @@ describe('children inherit their parent queue', () => {
           childName: 'kid',
           childArgs: [],
           detached: true,
+          parentClosePolicy: 'abandon',
         },
       ],
     });
@@ -183,6 +184,7 @@ describe('children inherit their parent queue', () => {
           childName: 'kid',
           childArgs: [],
           detached: true,
+          parentClosePolicy: 'abandon',
           taskQueue: 'gpu',
         },
       ],

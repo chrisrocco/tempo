@@ -15,6 +15,7 @@
  */
 
 import type {ActivityOptions} from './activity_options';
+import type {ParentClosePolicy} from './parent_close_policy';
 
 /** Fields common to every command. */
 export interface CommandBase {
@@ -53,6 +54,16 @@ export interface StartChildCommand extends CommandBase {
   workflowId?: string;
   /** Which pool runs the child. Defaults to the parent execution's queue. */
   taskQueue?: string;
+  /**
+   * What becomes of this child when its parent closes. See
+   * `parent_close_policy.ts`.
+   *
+   * Required, not optional-with-a-server-side-default, because the choice is the
+   * *workflow's* and the core is where a workflow's intent is turned into a
+   * command. `executeChild` and `startChild` both fill it in, so every command
+   * this engine mints carries one and the server never has to guess.
+   */
+  parentClosePolicy: ParentClosePolicy;
 }
 
 /** Cancel a fire-and-forget child, identified by the seq of its startChild command. */

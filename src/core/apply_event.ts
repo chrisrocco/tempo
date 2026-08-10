@@ -32,6 +32,15 @@
  * slips through; argument comparison is expensive on large payloads and risks
  * false positives on serialization differences, so it is deliberately out.
  *
+ * `parentClosePolicy` is out too, and for a different reason worth separating
+ * from that one. It *is* cheap to compare — but the marker is the copy that
+ * governs (`server_core.closeChildren` reads history, never the replayed
+ * command), so a policy that differs on this replay changes nothing about what
+ * happens. Checking it would turn editing an option in the source into a
+ * nondeterminism error on every in-flight execution, in exchange for catching a
+ * divergence with no consequence. Contrast `detached`, which is checked because
+ * it decides whether a completion is coming back.
+ *
  * Every command now leaves a marker. `cancelChild` was the exception until issue
  * #50, on the grounds that its effect is already durable on the child — true, and
  * beside the point once replay began deciding suppression by asking whether

@@ -194,12 +194,24 @@ come back close to as they were once `up` and `run` have settled.
 **When `describe` comes back, its event formatter needs `assertNever`.** The
 deleted one was a ternary chain ending in `: ''`, so a history event it had
 never heard of rendered with no detail and nothing failed — the type-checker had
-no opinion. Merging `master` into this branch demonstrated it: the
-`workflowSignaled` event added meanwhile had to be hand-added to that formatter,
-while `dashboard/app/history_view.ts` and `history_spans.ts` were _forced_ to
-handle it because both end their switch in `assertNever`. Same question, two
+no opinion.
+
+Keeping this branch in sync demonstrated it twice in a row. `workflowSignaled`
+arrived and had to be hand-added to that formatter; then `childStarted` gained a
+`parentClosePolicy` and had to be hand-added again. Both times
+`dashboard/app/history_view.ts` and `history_spans.ts` were _forced_ to handle
+the change, because both end their switch in `assertNever`. Same question, two
 answers, and only one of them survives someone forgetting.
 
-So the CLI's formatter should be an exhaustive `switch` over `HistoryEvent`,
-matching the dashboard. AGENTS.md already requires this shape; the old formatter
-predated the rule and was never brought in line.
+It also means this file is a magnet for merge conflicts while the CLI is absent:
+**every change that touches the history-event union conflicts with a branch that
+deletes it.** That is an argument for landing the replacement sooner rather than
+carrying the deletion for long.
+
+So the formatter should be an exhaustive `switch` over `HistoryEvent`, matching
+the dashboard. AGENTS.md already requires that shape; the old formatter predated
+the rule and was never brought in line. The two cases it will need on arrival,
+recorded here because they were only ever written in a file this branch deletes:
+
+- `workflowSignaled` — `<name> -> <targetId>`, marked when undelivered.
+- `childStarted` — the existing id and `detached`, plus `on-close=<policy>`.
