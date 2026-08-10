@@ -1,7 +1,7 @@
 /**
  * @fileoverview
- * `Tempo.startWorker` as a caller meets it: which runtime it composes, which
- * server it connects to, and what it refuses.
+ * `Tempo.startWorker` as a caller meets it: what it registers, which server it
+ * connects to, and what it refuses.
  *
  * These are internals specs (per AGENTS.md's two-kinds split) — the entrypoint
  * is host wiring rather than the programming model, which
@@ -10,61 +10,30 @@
  * entrypoint does on the caller's behalf, and the precedence rules that decide
  * where the work goes.
  *
- * Two of these cases would otherwise only be reachable through a spawned
- * process (`spec/integration/distributed.spec.ts`, `cli.spec.ts`), which is why
- * `--runtime=local` exists at all: an in-process runtime makes the entrypoint
- * itself testable without a port, a server, or a child to wait on.
+ * Every case runs against a real server on loopback, because a worker only has
+ * one shape now — poll loops against a `RemoteService`. These used to compose an
+ * in-process runtime through `--runtime=local` to avoid the port; that flag is
+ * gone (see `src/tempo.ts`), and a loopback server is cheap enough that it was
+ * never the reason to keep it.
  */
 
 import 'jasmine';
-import type {ChildProcess} from 'node:child_process';
 import type {AddressInfo} from 'node:net';
 import type {Server} from 'node:http';
-import {spawn} from 'node:child_process';
 import {
   createRemoteService,
   createRpcServer,
   createServerHost,
 } from '../../src/services';
-import {startWorker, resolveRuntime} from '../../src/tempo';
+import {DEFAULT_PORT} from '../../src/process_flags';
+import {
+  DEFAULT_SERVER_URL,
+  requestedRole,
+  resolveServerUrl,
+  resolveTaskQueue,
+  startWorker,
+} from '../../src/tempo';
 import {proxyActivities} from '../../src/workflow';
-import {repoPath} from '../support/repo_root';
-
-/** The reference deployable binary, run as a deployment would run it. */
-const WORKER_ENTRY = repoPath('examples/greeter.ts');
-
-/**
- * The `tsx` loader as an absolute path. `--import tsx` would make the child
- * resolve the bare specifier from its own working directory, which need not
- * contain a `node_modules` at all.
- */
-const TSX_LOADER = require.resolve('tsx');
-
-/**
- * Run a worker binary to completion, capturing what it printed.
- *
- * Spawns the entrypoint directly rather than through a toolchain. This used to
- * borrow the CLI's resolution so the spec ran a worker exactly as the CLI did;
- * the CLI is being redesigned (see `src/cli/README.md`) and these specs are
- * about `Tempo.startWorker`, not about how a target becomes a process.
- */
-async function runToCompletion(
-  args: string[],
-  env: Record<string, string> = {},
-): Promise<{code: number | null; out: string; err: string}> {
-  return new Promise((resolve) => {
-    const proc: ChildProcess = spawn(
-      process.execPath,
-      ['--import', TSX_LOADER, WORKER_ENTRY, ...args],
-      {env: {...process.env, ...env}, stdio: ['ignore', 'pipe', 'pipe']},
-    );
-    let out = '';
-    let err = '';
-    proc.stdout?.on('data', (d: Buffer) => (out += d.toString()));
-    proc.stderr?.on('data', (d: Buffer) => (err += d.toString()));
-    proc.on('exit', (code) => resolve({code, out, err}));
-  });
-}
 
 /** The reference shape: a module namespace holding a constant and an activity. */
 const activities = {
@@ -108,23 +77,24 @@ async function startServer(): Promise<Harness> {
 }
 
 /**
- * `startWorker` reads `process.argv` and `process.env` directly, because a
- * deployed binary has no caller to pass them. Specs that exercise that reading
- * put them back afterwards.
+ * `startWorker` reads `process.argv` directly, because a deployed binary has no
+ * caller to pass it. Specs that exercise that reading put it back afterwards.
+ *
+ * Note what the test runner's own argv proves incidentally: it carries
+ * `--config=` and, when filtered, `--filter=`, and a worker constructed under it
+ * starts anyway. Unknown flags have to be ignored, which is the constraint
+ * `process_flags.ts` records — a worker that rejected an argv it did not
+ * recognize could not be built inside a spec at all.
  */
 const originalArgv = process.argv;
-const originalRole = process.env['TEMPO_ROLE'];
-const originalServerUrl = process.env['TEMPO_SERVER_URL'];
 
 afterEach(() => {
   process.argv = originalArgv;
-  restore('TEMPO_ROLE', originalRole);
-  restore('TEMPO_SERVER_URL', originalServerUrl);
 });
 
-function restore(name: string, value: string | undefined): void {
-  if (value === undefined) delete process.env[name];
-  else process.env[name] = value;
+/** Run as if launched with these flags appended to the command line. */
+function launchedWith(...flags: string[]): void {
+  process.argv = [...originalArgv, ...flags];
 }
 
 /**
@@ -145,54 +115,8 @@ async function pollUntil<T>(
   }
 }
 
-describe('worker entrypoint — choosing a runtime', () => {
-  it('runs a workflow end to end in local mode, with no server anywhere', async () => {
-    const worker = startWorker({
-      name: 'greeter',
-      runtime: 'local',
-      workflows,
-      activities,
-    });
-
-    try {
-      const handle = worker.localRuntime!.start<string>('greeter', ['world']);
-      await expectAsync(handle.result()).toBeResolvedTo('Hello, world!');
-    } finally {
-      await worker.stop();
-    }
-  });
-
+describe('worker entrypoint — registering what it was handed', () => {
   it('registers both halves from the module namespaces it was handed', async () => {
-    const worker = startWorker({
-      name: 'greeter',
-      runtime: 'local',
-      workflows,
-      activities,
-    });
-
-    expect(worker.roles).toEqual(['workflow', 'activity']);
-    await worker.stop();
-  });
-
-  // The constant sitting beside the activity is the case: a module namespace
-  // carries whatever the module exported, and only the callables may register.
-  it('starts a workflow whose activity module also exports constants', async () => {
-    const worker = startWorker({
-      name: 'greeter',
-      runtime: 'local',
-      workflows,
-      activities,
-    });
-
-    try {
-      const handle = worker.localRuntime!.start<string>('greeter', ['ada']);
-      await expectAsync(handle.result()).toBeResolvedTo('Hello, ada!');
-    } finally {
-      await worker.stop();
-    }
-  });
-
-  it('leaves a remote worker without a local runtime to reach', async () => {
     const server = await startServer();
     try {
       const worker = startWorker({
@@ -201,107 +125,34 @@ describe('worker entrypoint — choosing a runtime', () => {
         workflows,
         activities,
       });
-      expect(worker.localRuntime).toBeUndefined();
+
+      expect(worker.roles).toEqual(['workflow', 'activity']);
       await worker.stop();
     } finally {
       await server.teardown();
     }
   });
 
-  it('takes the flag from the launch site over the mode in code', async () => {
-    process.argv = [...originalArgv, '--runtime=local'];
-
+  // The constant sitting beside the activity is the case: a module namespace
+  // carries whatever the module exported, and only the callables may register.
+  it('runs a workflow whose activity module also exports constants', async () => {
+    const server = await startServer();
     const worker = startWorker({
       name: 'greeter',
-      runtime: 'remote',
-      serverUrl: 'http://127.0.0.1:1', // never dialled: the flag wins
+      serverUrl: server.url,
       workflows,
       activities,
     });
 
-    expect(worker.localRuntime).toBeDefined();
-    await worker.stop();
-  });
-});
-
-describe('worker entrypoint — the real binary, run from a command line', () => {
-  /**
-   * The flag's other use: boot the shipped artifact with no server anywhere and
-   * see whether it comes up at all. Every export registers or the process
-   * throws, which is the check `--describe` cannot make — it reads names
-   * without composing anything.
-   *
-   * It exits rather than staying up because nothing outside the process can
-   * reach a local runtime, so once the module finishes there is no work left to
-   * hold the event loop. That is the behaviour, not an accident of the test.
-   */
-  it('boots the shipped worker binary with no server, and exits cleanly', async () => {
-    const {code, out} = await runToCompletion(['--runtime=local']);
-
-    expect(code).toBe(0);
-    expect(out).toContain('WORKER_READY greeter workflow,activity default');
-  }, 30000);
-
-  it('fails the binary outright when a role is asked of the local runtime', async () => {
-    const {code, err} = await runToCompletion(['--runtime=local'], {
-      TEMPO_ROLE: 'workflow',
-    });
-
-    expect(code).toBe(1);
-    expect(err).toContain('no poll loops to split');
-  }, 30000);
-
-  // `--describe` reports the artifact's contents without composing anything, so
-  // it must keep working under a flag that chooses what to compose.
-  it('still describes itself under a runtime flag, without connecting', async () => {
-    const {code, out} = await runToCompletion([
-      '--runtime=local',
-      '--describe',
-    ]);
-
-    expect(code).toBe(0);
-    expect(JSON.parse(out.trim())).toEqual({
-      name: 'greeter',
-      workflows: ['greeter'],
-      activities: ['greet'],
-    });
-  }, 30000);
-});
-
-describe('worker entrypoint — the runtime flag', () => {
-  it('reads the mode the launch site asked for', () => {
-    expect(resolveRuntime(['--runtime=local'], undefined)).toBe('local');
-    expect(resolveRuntime(['--runtime=remote'], undefined)).toBe('remote');
-  });
-
-  it('falls back to the mode the code shipped, then to remote', () => {
-    expect(resolveRuntime([], 'local')).toBe('local');
-    expect(resolveRuntime([], undefined)).toBe('remote');
-  });
-
-  it('lets the flag override the mode in code, in both directions', () => {
-    expect(resolveRuntime(['--runtime=local'], 'remote')).toBe('local');
-    expect(resolveRuntime(['--runtime=remote'], 'local')).toBe('remote');
-  });
-
-  // Guessing what an unfinished argument meant is how a worker ends up in the
-  // wrong runtime quietly, which is the one outcome the flag exists to prevent.
-  it('refuses a bare --runtime rather than assuming local', () => {
-    expect(() => resolveRuntime(['--runtime'], undefined)).toThrowError(
-      /takes a value/,
-    );
-  });
-
-  it('refuses a mode it does not have, and says which it has', () => {
-    expect(() => resolveRuntime(['--runtime=cluster'], undefined)).toThrowError(
-      /"local" or "remote".*cluster/,
-    );
-  });
-
-  it('ignores flags meant for something else', () => {
-    expect(
-      resolveRuntime(['--describe', '--runtime-ish=local'], undefined),
-    ).toBe('remote');
+    try {
+      const {workflowId} = server.service.start('greeter', ['ada']);
+      await expectAsync(server.service.getResult(workflowId)).toBeResolvedTo(
+        'Hello, ada!',
+      );
+    } finally {
+      await worker.stop();
+      await server.teardown();
+    }
   });
 });
 
@@ -328,13 +179,13 @@ describe('worker entrypoint — choosing a server', () => {
 
   /**
    * The precedence that keeps one artifact redeployable: the code's URL is the
-   * default it ships with, and the environment is the deployment. Proven by
-   * pointing the code at a closed port — the work still lands, so the
-   * environment is what was dialled.
+   * default it ships with, and the launch site is the deployment. Proven by
+   * pointing the code at a closed port — the work still lands, so the flag is
+   * what was dialled.
    */
-  it('lets the environment override the server the code shipped with', async () => {
+  it('lets the launch site override the server the code shipped with', async () => {
     const server = await startServer();
-    process.env['TEMPO_SERVER_URL'] = server.url;
+    launchedWith(`--server=${server.url}`);
 
     const worker = startWorker({
       name: 'greeter',
@@ -355,53 +206,86 @@ describe('worker entrypoint — choosing a server', () => {
   });
 });
 
-describe('worker entrypoint — what it refuses', () => {
-  /**
-   * A role splits the two poll loops, and local mode has none to split. Serving
-   * it half-way would park every execution on an activity nothing will run —
-   * a hang rather than a failure, which is why this is worth a startup error.
-   */
-  it('refuses a role under the local runtime, and says why', () => {
-    process.env['TEMPO_ROLE'] = 'workflow';
-
-    expect(() =>
-      startWorker({name: 'greeter', runtime: 'local', workflows, activities}),
-    ).toThrowError(/no poll loops to split/);
+/**
+ * The precedence rules on their own, without a worker or a global to rewrite.
+ * These are the functions `startWorker` calls, and each takes its argv rather
+ * than reaching for `process.argv` precisely so this block can exist.
+ */
+describe('worker entrypoint — resolving configuration', () => {
+  it('prefers the launch site, then the code, then the default', () => {
+    expect(resolveServerUrl(['--server=http://a:1'], 'http://b:2')).toBe(
+      'http://a:1',
+    );
+    expect(resolveServerUrl([], 'http://b:2')).toBe('http://b:2');
+    expect(resolveServerUrl([], undefined)).toBe(DEFAULT_SERVER_URL);
   });
 
-  it('still refuses a role the binary cannot serve in remote mode', () => {
-    process.env['TEMPO_ROLE'] = 'activity';
+  it('applies the same precedence to the queue', () => {
+    expect(resolveTaskQueue(['--queue=fast'], 'slow')).toBe('fast');
+    expect(resolveTaskQueue([], 'slow')).toBe('slow');
+    expect(resolveTaskQueue([], undefined)).toBe('default');
+  });
+
+  it('reports which source asked for a role', () => {
+    expect(requestedRole(['--role=activity'], 'workflow')).toEqual({
+      value: 'activity',
+      source: '--role',
+    });
+    expect(requestedRole([], 'workflow')).toEqual({
+      value: 'workflow',
+      source: 'role',
+    });
+    expect(requestedRole([], undefined)).toBeUndefined();
+  });
+
+  // The port both sides of a deployment have to agree on. A worker dialling one
+  // number while the server binds another is a deployment where every process is
+  // healthy and no work ever moves.
+  it('defaults to the port the server defaults to binding', () => {
+    expect(DEFAULT_SERVER_URL).toBe(`http://127.0.0.1:${DEFAULT_PORT}`);
+    expect(DEFAULT_PORT).toBe(7777);
+  });
+});
+
+describe('worker entrypoint — what it refuses', () => {
+  it('refuses a role the binary cannot serve', () => {
+    launchedWith('--role=activity');
 
     expect(() => startWorker({name: 'workflows-only', workflows})).toThrowError(
       /registers no activities/,
     );
   });
 
-  it('refuses a worker that registers nothing, in either runtime', () => {
-    expect(() => startWorker({name: 'empty', runtime: 'local'})).toThrowError(
-      /registers no workflows or activities/,
-    );
+  it('refuses a worker that registers nothing', () => {
     expect(() => startWorker({name: 'empty'})).toThrowError(
       /registers no workflows or activities/,
     );
   });
 
-  // The error has to name where the ask was written, because "this binary
-  // cannot serve that role" is only actionable if you know which file to open.
-  it('names the environment or the options object, whichever asked', () => {
+  it('refuses a role that is not one of the two', () => {
+    launchedWith('--role=cluster');
+
+    expect(() =>
+      startWorker({name: 'greeter', workflows, activities}),
+    ).toThrowError(/must be "workflow" or "activity".*cluster/);
+  });
+
+  // A unit file and a source file are very different things to go and fix, so
+  // "this binary cannot serve that role" is only actionable if it says which.
+  it('names the flag or the options object, whichever asked', () => {
     expect(() =>
       startWorker({name: 'workflows-only', role: 'activity', workflows}),
     ).toThrowError(/started as role=activity/);
 
-    process.env['TEMPO_ROLE'] = 'activity';
+    launchedWith('--role=activity');
     expect(() => startWorker({name: 'workflows-only', workflows})).toThrowError(
-      /started as TEMPO_ROLE=activity/,
+      /started as --role=activity/,
     );
   });
 });
 
 describe('worker entrypoint — the options object is the configuration', () => {
-  it('takes the role from code, with no environment variable in sight', () => {
+  it('takes the role from code, with no flag in sight', () => {
     const worker = startWorker({
       name: 'greeter',
       role: 'workflow',
@@ -415,8 +299,8 @@ describe('worker entrypoint — the options object is the configuration', () => 
   });
 
   // The exception, and the only reason it exists: one artifact, two services.
-  it('lets the environment override the role the code shipped with', () => {
-    process.env['TEMPO_ROLE'] = 'activity';
+  it('lets the launch site override the role the code shipped with', () => {
+    launchedWith('--role=activity');
 
     const worker = startWorker({
       name: 'greeter',
@@ -431,7 +315,7 @@ describe('worker entrypoint — the options object is the configuration', () => 
   });
 
   /**
-   * `identity` is the config that has no environment variable on purpose — a
+   * `identity` is the config with no launch-site override on purpose — a
    * container passes `process.env['HOSTNAME']` through the options object
    * instead. So the thing worth proving is that it travels: the name a
    * deployment chooses is the name an operator reads back out of `tempo

@@ -44,8 +44,8 @@ on npm and makes no stability promises — clone it, read it, run it.
 -   **`continueAsNew`** to bound history on long-lived workflows
 -   **Crash recovery** — kill the server mid-workflow, restart, and it continues
 -   **Inspection** — an execution's status, history, and what it is currently
-    waiting on, derived from history rather than stored (the CLI that surfaced
-    this is being redesigned — see [`src/cli/README.md`](src/cli/README.md))
+    waiting on, derived from history rather than stored and reachable through
+    [`src/client/`](src/client/client.ts) or the dashboard
 -   **Structured lifecycle log** — JSON Lines on stderr, one event per fact, so
     a run can be aggregated without parsing prose
 -   **Task queues** — route work to a pool of workers, so several applications
@@ -93,20 +93,33 @@ console.log(await rt.start<string>('greeter', ['world']).result());
 rt.shutdown(); // stop background timers so the process exits
 ```
 
-Or run the pieces separately — a server process and one or more workers. **The
-CLI that drove this is being redesigned and is not currently present**; see
-[`src/cli/README.md`](src/cli/README.md) for the shape it is coming back in.
-Until it lands, run the server and a worker directly:
+Or run the pieces separately — a server process and one or more workers:
 
 ```bash
-tsx bin/server-main.ts &            # PORT, HOST, DATA_DIR from the environment
-TEMPO_SERVER_URL=http://127.0.0.1:7233 tsx examples/greeter.ts
+tsx bin/server-main.ts &                                    # --port=7777 by default
+tsx examples/greeter.ts --server=http://127.0.0.1:7777 &    # --role= picks one loop
+```
+
+then drive them through [`src/client/`](src/client/client.ts), the same seam an
+application uses — `start`, `describe`, `signal`, `cancel`, `terminate`, `reset`,
+`list`, `queues`, `counts`, `ping`. Configuration is flags with defaults, never
+the environment — see [`src/process_flags.ts`](src/process_flags.ts) for why.
+
+**There is no command-line tool, by design.** There was, and it was deleted; what
+replaced it is [`src/deploy/`](src/deploy/index.ts) — `up`, `down`, and `status`
+as ordinary functions, typed options in and typed values out, for a consumer to
+assemble a CLI from. Installing a server and its two worker tiers as supervised
+systemd services is one call:
+
+```ts
+import { up, systemHost } from './src/deploy';
+
+await up({ server: 'out/server.js', worker: 'out/worker.js' }, systemHost());
 ```
 
 Going distributed does not change the workflow code, only how it is hosted. See
 [`bin/server-main.ts`](bin/server-main.ts) for the server process and
-[`src/tempo.ts`](src/tempo.ts) for the worker entrypoint and its environment
-contract.
+[`src/tempo.ts`](src/tempo.ts) for the worker entrypoint and its input contract.
 
 ## How it works
 
@@ -217,13 +230,15 @@ src/
     file/           durable append-only history log + single-writer lockfile
   services/       The WorkflowService implementations + HTTP transport
   worker/         Stateless workflow + activity workers
-  client/         WorkflowService -> ergonomic handles
-  cli/            the `tempo` CLI
+  client/         WorkflowService -> handles and server-wide reads
+  deploy/         up · down · status — install and inspect a deployment
+    ports/          host — the seam onto the machine being deployed to
   workflow.ts     ★ AUTHOR ENTRYPOINT — deterministic primitives only
   activity.ts     ★ ACTIVITY ENTRYPOINT — heartbeat()
   index.ts        ★ HOST ENTRYPOINT — createLocalRuntime, types
   tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
-bin/              server-main (the server process) · tempo (the CLI)
+  process_flags.ts  how a deployed process reads its own configuration
+bin/              server-main.ts — the server process
 examples/         greeter.ts — the reference deployable worker
 spec/             the executable documentation
 ```
@@ -313,7 +328,7 @@ The full programming model runs in all three modes above.
 
 Not built: server HA, workflow versioning, metrics and alerting on top of the
 lifecycle log, the workflow-worker sticky cache, cross-process timer-sweep
-failover, and the deployment half of the CLI. The RPC has no auth or TLS and
+failover, and the deployment library in `src/deploy/`. The RPC has no auth or TLS and
 binds loopback. [`ROADMAP.md`](ROADMAP.md) ranks these by how likely each is to
 bite a real deployment ("Adoption blockers") and tracks what's planned;
 in-flight design work lives in

@@ -3,12 +3,10 @@
  * The reference deployable worker, in one file: an activity, a workflow, and the
  * entrypoint that hands both to the library.
  *
- * Run it directly against a server — `TEMPO_SERVER_URL`
- * picks the server, `TEMPO_ROLE` picks a single poll loop, `--runtime=local`
- * composes an in-process runtime instead of connecting to anything, and
- * `--describe` prints what the artifact contains (see src/tempo.ts for the full
- * input surface). This is the binary spec/integration/distributed.spec.ts,
- * cli.spec.ts, and worker_entrypoint.spec.ts actually run, so it stays honest.
+ * Run it directly against a server — `--server=URL` picks the server and
+ * `--role=ROLE` picks a single poll loop (see src/tempo.ts for the full input
+ * surface). This is the binary spec/integration/distributed.spec.ts actually
+ * runs, so it stays honest.
  *
  * Real projects should split activities and workflows into separate modules: a
  * workflow module that imports activities with `import type * as` keeps their

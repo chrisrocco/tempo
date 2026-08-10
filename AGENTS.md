@@ -373,7 +373,8 @@ Not every test is documentation, and forcing it to be makes both worse.
 
 Every file in `examples/` must be exercised by a spec. An example nobody runs
 rots silently; one that CI runs cannot. `examples/greeter.ts` is covered by
-`spec/integration/distributed.spec.ts` and `spec/integration/cli.spec.ts`.
+`spec/integration/distributed.spec.ts` and
+`spec/integration/worker_entrypoint.spec.ts`.
 
 ## Commands
 

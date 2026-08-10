@@ -200,8 +200,8 @@ A could be claimed by an app B worker, which has no such workflow registered —
 that used to **settle the execution as failed**, nondeterministically, depending
 on which worker won the poll.
 
-Work is now routed by queue name: workers declare theirs (`TEMPO_TASK_QUEUE`),
-callers pick one (`--task-queue`), and activities and children inherit their
+Work is now routed by queue name: workers declare theirs (`--queue`), callers
+pick one (`start`'s `taskQueue` option), and activities and children inherit their
 execution's. An unregistered workflow type is now a _task_ failure rather than an
 execution failure — it usually means a deploy still rolling, and recovering when
 the right version lands is worth more than failing fast, which is the poison-task
@@ -236,10 +236,16 @@ phase.
   explicit `workflowId` now, which is a _claim_: the same id twice yields one
   child, so "one planner per calendar event" is expressible in the workflow
   rather than reconstructed from its own bookkeeping.
-- **The CLI**, which was deleted rather than grown: the whole surface is being
-  redesigned from `tempo run` outwards, and the deployment half was never built.
-  Design in progress in [`src/cli/README.md`](src/cli/README.md); the deployment
-  half is [#41](https://github.com/chrisrocco/tempo/issues/41).
+- ~~**Deployment**~~ — **landed** as a library rather than a CLI:
+  [`src/deploy/`](src/deploy/index.ts) exports `up`, `down`, and `status` as
+  ordinary functions over a `Host` seam, so a consumer assembles the command-line
+  tool and no argv convention is baked in here. Installs a server and both worker
+  tiers as supervised systemd units. What it knowingly does not answer — version
+  skew across a worker fleet, deploying the dashboard, verifying a built artifact
+  — is in [`src/deploy/README.md`](src/deploy/README.md) and belongs in issues
+  ([#41](https://github.com/chrisrocco/tempo/issues/41) is the original).
+  Untested against real systemd: everything runs against a fake `Host`, because a
+  unit file cannot be installed from a spec.
 - **Sticky cache** in the workflow worker — keep warm suspended executions to skip
   cold replay ([`src/worker/workflow_worker.ts`](src/worker/workflow_worker.ts)).
   Pure performance; correctness never depends on it, which is the point.

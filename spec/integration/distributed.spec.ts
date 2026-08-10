@@ -2,8 +2,8 @@
  * @fileoverview
  * Against a REAL server process (spawned via `node --import tsx bin/server-main`),
  * over real sockets, driving the real deployable worker entrypoint
- * (`examples/greeter.ts`) exactly as `tempo deploy` would: one binary,
- * its role chosen by TEMPO_ROLE. Test 2 demonstrates the phase's failure
+ * (`examples/greeter.ts`) exactly as `tempo up` deploys it: one binary,
+ * its role chosen by --role. Test 2 demonstrates the phase's failure
  * semantics: an activity whose worker "crashed" (ran it but never acked) has its
  * lease expire and is redelivered — so it runs at-least-once.
  */
@@ -29,13 +29,14 @@ function wait(ms: number): Promise<void> {
 }
 const WORKER = repoPath('examples/greeter.ts');
 
-function spawnMain(
-  script: string,
-  env: Record<string, string>,
-  args: string[] = [],
-): ChildProcess {
+/**
+ * Run a deployable entrypoint the way a systemd unit would: an argv and nothing
+ * ambient. Configuration used to arrive here as environment variables; it is
+ * flags now, for the reasons in `src/process_flags.ts`.
+ */
+function spawnMain(script: string, args: string[] = []): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx', script, ...args], {
-    env: {...process.env, ...env},
+    env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -104,10 +105,15 @@ async function pollUntil<T>(
   }
 }
 
+/**
+ * A server on an arbitrary port. `--port=0` is asked for explicitly: the default
+ * is 7777 now, and a suite leaning on a random default would have had every spec
+ * here fighting over one port the moment that default changed.
+ */
 async function spawnServer(
-  env: Record<string, string> = {},
+  args: string[] = [],
 ): Promise<{url: string; proc: ChildProcess}> {
-  const proc = spawnMain(repoPath('bin/server-main.ts'), env);
+  const proc = spawnMain(repoPath('bin/server-main.ts'), ['--port=0', ...args]);
   const m = await waitForLine(proc, /LISTENING (\d+)/);
   return {url: `http://127.0.0.1:${m[1]}`, proc};
 }
@@ -121,17 +127,11 @@ function remote(
 
 describe('distributed — real server process over RPC', () => {
   // The deployed shape: one worker binary, started twice, each process taking a
-  // single role from TEMPO_ROLE — what the generated systemd units do.
+  // single role from --role — what the units `tempo up` writes do.
   it('runs a workflow across a server and the worker binary in each role', async () => {
     const {url, proc: server} = await spawnServer();
-    const wf = spawnMain(WORKER, {
-      TEMPO_SERVER_URL: url,
-      TEMPO_ROLE: 'workflow',
-    });
-    const act = spawnMain(WORKER, {
-      TEMPO_SERVER_URL: url,
-      TEMPO_ROLE: 'activity',
-    });
+    const wf = spawnMain(WORKER, [`--server=${url}`, '--role=workflow']);
+    const act = spawnMain(WORKER, [`--server=${url}`, '--role=activity']);
     try {
       await waitForLine(wf, /WORKER_READY greeter workflow/);
       await waitForLine(act, /WORKER_READY greeter activity/);
@@ -148,11 +148,11 @@ describe('distributed — real server process over RPC', () => {
     }
   }, 30000);
 
-  // The dev shape: TEMPO_ROLE unset, so one process serves both roles. This is
+  // The dev shape: --role unset, so one process serves both roles. This is
   // what a hand-run binary does.
   it('runs a workflow with one worker process serving both roles', async () => {
     const {url, proc: server} = await spawnServer();
-    const worker = spawnMain(WORKER, {TEMPO_SERVER_URL: url});
+    const worker = spawnMain(WORKER, [`--server=${url}`]);
     try {
       await waitForLine(worker, /WORKER_READY greeter workflow,activity/);
 
@@ -178,7 +178,7 @@ describe('distributed — real server process over RPC', () => {
    */
   it('keeps an execution alive when no worker has its workflow, and says why', async () => {
     const {url, proc: server} = await spawnServer();
-    const worker = spawnMain(WORKER, {TEMPO_SERVER_URL: url});
+    const worker = spawnMain(WORKER, [`--server=${url}`]);
     try {
       await waitForLine(worker, /WORKER_READY/);
 
@@ -204,26 +204,8 @@ describe('distributed — real server process over RPC', () => {
     }
   }, 30000);
 
-  // How `tempo deploy` interrogates a built binary: it reports what it contains
-  // and exits, without connecting to a server (none is running here).
-  it('reports its workflows and activities under --describe, without connecting', async () => {
-    const proc = spawnMain(WORKER, {}, ['--describe']);
-    try {
-      const [line] = await waitForLine(proc, /\{.*\}/);
-      expect(JSON.parse(line)).toEqual({
-        name: 'greeter',
-        workflows: ['greeter'],
-        activities: ['greet'], // GREETING is a constant, so it is not an activity
-      });
-    } finally {
-      await kill(proc);
-    }
-  }, 30000);
-
   it('redelivers an activity after its lease expires, running it at-least-once', async () => {
-    const {url, proc: server} = await spawnServer({
-      ACTIVITY_LEASE_MS: '60',
-    });
+    const {url, proc: server} = await spawnServer(['--activity-lease-ms=60']);
     const service = remote(url);
 
     const workflowRegistry = createWorkflowRegistry();

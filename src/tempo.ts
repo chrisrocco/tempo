@@ -11,69 +11,39 @@
  * configuration" below. Everything else is what can reach a worker from outside
  * that object, and there is deliberately little of it:
  *
- *   TEMPO_SERVER_URL  overrides `serverUrl` (else 127.0.0.1:7233)
- *   TEMPO_TASK_QUEUE  overrides `taskQueue` (else `default`)
- *   TEMPO_ROLE        overrides `role` — unset runs every role it can
- *   --runtime=MODE    overrides `runtime` — `remote` (default) or `local`
- *   --describe        print {name, workflows, activities} as JSON and exit
+ *   --server=URL   overrides `serverUrl` (else 127.0.0.1:7777)
+ *   --queue=NAME   overrides `taskQueue` (else `default`)
+ *   --role=ROLE    overrides `role` — unset runs every role it can
  *
- * Running the *same* binary twice with a different `TEMPO_ROLE` is how the two
- * worker tiers are deployed: workflow workers replay workflow code, activity
- * workers run activities (the only I/O in the system), and each scales
- * independently against one server.
+ * Running the *same* binary twice with a different `--role` is how the two worker
+ * tiers are deployed: workflow workers replay workflow code, activity workers run
+ * activities (the only I/O in the system), and each scales independently against
+ * one server. `tempo up` writes exactly that — one unit per role, one artifact.
  *
- * `TEMPO_TASK_QUEUE` is what lets more than one application share a server. A
- * queue name is a contract — every worker on it must register the same workflows
- * and activities — and it is not optional once a second app exists: with one
- * global queue, whichever worker wins a poll decides whether the task can run at
- * all, and one that cannot serve it fails the task rather than passing it on.
+ * `--queue` is what lets more than one application share a server. A queue name
+ * is a contract — every worker on it must register the same workflows and
+ * activities — and it is not optional once a second app exists: with one global
+ * queue, whichever worker wins a poll decides whether the task can run at all,
+ * and one that cannot serve it fails the task rather than passing it on.
  *
- * ## Two runtimes behind one entrypoint
+ * ## This entrypoint composes one thing: a worker that polls a server
  *
- * **`remote`**, the default, is the deployable shape: a `RemoteService` over the
- * RPC, and poll loops that claim work from a server somewhere else.
+ * A `RemoteService` over the RPC, and one poll loop per role claiming work from
+ * a server in another process. That is the only shape it builds.
  *
- * **`local`** composes `createLocalRuntime()` instead — server, workers, and
- * client in one process, dispatching by function call rather than by poll. It
- * exists so a test can exercise *this entrypoint*, registries and all, without a
- * port to pick or a server to bring up. `spec/integration/local.spec.ts` covers
- * the runtime itself; what only this mode covers is the wiring in between,
- * which is where a workflow that is exported but never registered would hide.
+ * It used to build a second one. `--runtime=local` composed
+ * `createLocalRuntime()` instead — server, workers, and client in one process,
+ * dispatching by function call — so that a spec could exercise this entrypoint
+ * without a port to pick or a child to wait on. It is gone, because running
+ * locally and running deployed differ by more than a composition: a local run
+ * needs no build and no deployment, and folding it in here made a *deployable
+ * artifact's* startup path branch on which of the two it was. Local running is
+ * its own thing now, unbuilt (see `src/deploy/README.md`), and this file is about
+ * the deployed worker only.
  *
- * The returned `Worker` carries `localRuntime` in that mode. It has to: a local
- * worker holds the only reference to its own server, so without it nothing can
- * start an execution and the process is inert.
- *
- * That is also why a *spawned* binary in local mode prints `WORKER_READY` and
- * then exits: nothing outside the process can reach it, so once the module
- * finishes there is no work and nothing holding the event loop open. Run that
- * way it is a smoke test — every export registered, no server needed — and not
- * a dev server. `tempo up` is the dev server, and it is remote by design.
- *
- * ### Why a flag rather than `TEMPO_RUNTIME`
- *
- * Every other input here is an environment variable, and this one deliberately
- * is not. Environment variables are inherited: one `TEMPO_RUNTIME=local` left in
- * a deployment's environment — or exported in a shell that later launches a real
- * worker — turns a production worker into a process that serves nobody while
- * still printing `WORKER_READY` and looking healthy to its supervisor. That is
- * the same failure the poll-failure reporting in `worker/worker_loops.ts` exists
- * for, arrived at from a different direction. A flag has to be typed at the launch site and does not propagate to
- * children, which is the property that matters for a testing affordance.
- *
- * ### What local mode ignores, and the one thing it refuses
- *
- * The server URL and the task queue are **ignored**: there is nothing to connect
- * to, and one in-process pair serves every queue (`LocalService` polls with no
- * queue filter). Ignored rather than rejected, because both are ambient in a dev
- * shell — `tempo up` sets `TEMPO_SERVER_URL` for its own child — and erroring on
- * an inherited value would make the flag unusable exactly where it is wanted.
- *
- * `TEMPO_ROLE` is the exception and throws. It splits the two poll loops, and
- * local mode has no poll loops to split; honouring it half-way would leave a
- * "workflow-only" local worker parking every execution on an activity nothing
- * will ever run. That is a hang, not a failure, so it is worth the startup
- * error.
+ * `createLocalRuntime` itself is untouched and is still the fast in-process
+ * runtime — see `local_runtime.ts` and `spec/integration/local.spec.ts`. What
+ * went away is this entrypoint's ability to compose it.
  *
  * ## The options object is the configuration
  *
@@ -82,35 +52,42 @@
  * one object is reading the deployment, in a file that is type-checked, diffed,
  * and reviewed. It is the config file; it just happens to be TypeScript.
  *
- * **Three values can be overridden from the environment, and that is the
+ * **Three values can be overridden from the command line, and that is the
  * exception rather than the pattern**:
  *
- *   TEMPO_SERVER_URL  which server
- *   TEMPO_TASK_QUEUE  which pool
- *   TEMPO_ROLE        which half of the worker pair
+ *   --server=URL   which server
+ *   --queue=NAME   which pool
+ *   --role=ROLE    which half of the worker pair
  *
  * Those three are what a *deployment* changes about an artifact it did not
  * build: the same binary rolled into staging, into a second pool, or into the
- * two-tier split. An override wins when it is set — that is what makes it an
+ * two-tier split. An override wins when it is given — that is what makes it an
  * override — so code supplies the default the application ships with and the
- * environment supplies the deviation.
+ * launch site supplies the deviation.
+ *
+ * They used to be `TEMPO_SERVER_URL`, `TEMPO_TASK_QUEUE`, and `TEMPO_ROLE`. The
+ * reason they are flags is in `process_flags.ts` and is the same reason the
+ * `--runtime` flag that used to live here was a flag: **an environment variable
+ * is inherited and a flag is not**, and one stale `TEMPO_SERVER_URL` in a shell
+ * turns the next worker launched from it into a process that serves nobody while
+ * printing `WORKER_READY` and looking healthy to its supervisor.
  *
  * Everything else is code only, deliberately. A value that changes only when the
  * code changes has no business being ambient, where it is invisible at the call
- * site and inherited by every child process. `identity` is the case that looks
- * like it wants an environment variable and does not: a container already has
- * its name in the environment, so write `identity: process.env['HOSTNAME']` in
- * the options object, where a reader can see where it came from, rather than
- * growing a second ambient surface that only some deployments set.
+ * site. `identity` is the case that looks like it wants to be ambient and does
+ * not: a container already has its name in the environment, so write
+ * `identity: process.env['HOSTNAME']` in the options object, where a reader can
+ * see where it came from, rather than growing an ambient surface that only some
+ * deployments set.
  *
  * The shape follows Temporal's client, where the address is a connection
  * argument rather than ambient state — and it is what the older "deployment
- * config is never passed in code" rule was really protecting, since the
- * environment still overrides the three values a redeploy needs.
+ * config is never passed in code" rule was really protecting, since the launch
+ * site still overrides the three values a redeploy needs.
  */
 
 import type {WorkflowFn} from './core';
-import {createLocalRuntime, type Runtime} from './local_runtime';
+import {DEFAULT_PORT, WORKER_FLAG, flagValue} from './process_flags';
 import {DEFAULT_TASK_QUEUE} from './protocol';
 import {createJsonLogger} from './server';
 import {createRemoteService} from './services';
@@ -126,41 +103,34 @@ import {
   type WorkerLoopOptions,
 } from './worker';
 
-/** Where a worker looks for its server when `TEMPO_SERVER_URL` is unset. */
-export const DEFAULT_SERVER_URL = 'http://127.0.0.1:7233';
+/**
+ * Where a worker looks for its server when `--server` was not given.
+ *
+ * Built from `DEFAULT_PORT` rather than spelling the number again: a worker
+ * dialling one port while the server binds another is a deployment in which
+ * every process is healthy and no work ever moves.
+ */
+export const DEFAULT_SERVER_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 
 /**
  * Which poll loop a worker process runs. Deployments split the two into separate
  * services so that an activity blocking the event loop cannot stall workflow
- * replay into a lease expiry; with `TEMPO_ROLE` unset a single process runs both,
- * which is what `tempo up` and a hand-run binary want.
+ * replay into a lease expiry; with `--role` unset a single process runs both,
+ * which is what a hand-run binary wants.
  */
 export type WorkerRole = 'workflow' | 'activity';
-
-/**
- * Which composition a worker runs under: a `RemoteService` polling a server, or
- * the in-process `createLocalRuntime()`. See the two-runtimes section above.
- */
-export type RuntimeMode = 'local' | 'remote';
 
 export interface StartWorkerOptions {
   /** Service identity: the unit name, the `tempo status` row, the `tempo logs` target. */
   name: string;
   /**
-   * Which server to connect to in remote mode. `TEMPO_SERVER_URL` overrides it,
-   * so this is the default the application ships with rather than its
-   * deployment. Ignored in local mode — there is nothing to connect to.
+   * Which server to connect to. `--server` overrides it, so this is the default
+   * the application ships with rather than its deployment.
    */
   serverUrl?: string;
   /**
-   * Which runtime to compose. `--runtime=` overrides it, so a binary that ships
-   * `runtime: 'remote'` can still be booted locally without editing code, and a
-   * test can ask for local mode without touching `process.argv`.
-   */
-  runtime?: RuntimeMode;
-  /**
-   * Which pool this worker serves. `TEMPO_TASK_QUEUE` overrides it, so one binary
-   * can be deployed into several pools.
+   * Which pool this worker serves. `--queue` overrides it, so one binary can be
+   * deployed into several pools.
    *
    * A queue name is a **contract**: every worker on it must register the same
    * workflows and activities. Two different applications sharing one queue is the
@@ -169,13 +139,14 @@ export interface StartWorkerOptions {
    */
   taskQueue?: string;
   /**
-   * Which poll loop to run. `TEMPO_ROLE` overrides it, which is how the same
-   * artifact is deployed twice — one service per role, scaled independently.
+   * Which poll loop to run. `--role` overrides it, which is how the same artifact
+   * is deployed twice — one service per role, scaled independently, which is
+   * exactly what `tempo up` writes.
    *
    * Omitted runs every role the binary has definitions for, which is what a
-   * hand-run binary and `tempo up` want. Naming a role the binary cannot serve
-   * is a startup error rather than a process that polls forever for work it
-   * could never complete.
+   * hand-run binary wants. Naming a role the binary cannot serve is a startup
+   * error rather than a process that polls forever for work it could never
+   * complete.
    */
   role?: WorkerRole;
   /**
@@ -206,19 +177,8 @@ export interface StartWorkerOptions {
 
 export interface Worker {
   readonly name: string;
-  /**
-   * The roles this process actually started. In local mode there are no poll
-   * loops, so this reports what the binary *registered* — which is what the
-   * readiness line has always meant to a supervisor.
-   */
+  /** The roles this process started a poll loop for. */
   readonly roles: readonly WorkerRole[];
-  /**
-   * The in-process runtime, in local mode only. A local worker holds the sole
-   * reference to its own server, so this is the only way to start an execution
-   * against it; in remote mode it is `undefined` and the client is somewhere
-   * else entirely.
-   */
-  readonly localRuntime?: Runtime;
   /** Stop polling and wait for in-flight work to finish. Idempotent. */
   stop(): Promise<void>;
 }
@@ -239,60 +199,48 @@ function callableEntries(source: object | undefined): [string, AnyFn][] {
 }
 
 /**
- * Which runtime to compose: `--runtime=` if the launch site said, else what the
- * code shipped, else remote.
- *
- * Exported because the precedence is the interesting part and a spec should be
- * able to state it without rewriting `process.argv`. Takes `argv` for the same
- * reason.
- *
- * A bare `--runtime` is an error rather than a synonym for `local`: the flag has
- * two modes and guessing which one an unfinished argument meant is how a worker
- * ends up in the wrong one silently.
- */
-export function resolveRuntime(
-  argv: readonly string[],
-  option: RuntimeMode | undefined,
-): RuntimeMode {
-  const flag = argv.find(
-    (arg) => arg === '--runtime' || arg.startsWith('--runtime='),
-  );
-  if (flag === undefined) return option ?? 'remote';
-
-  const value = flag.slice('--runtime='.length);
-  if (value !== 'local' && value !== 'remote')
-    throw new Error(
-      `--runtime must be "local" or "remote"${value ? ` (got "${value}")` : ' — it takes a value, as --runtime=local'}`,
-    );
-  return value;
-}
-
-/**
- * Where a remote worker connects. The environment wins over the code, so the
+ * Where a remote worker connects. The launch site wins over the code, so the
  * artifact redeploys against another server without a rebuild; the code's value
  * is the default it ships with.
+ *
+ * Takes `argv` rather than reading `process.argv` so the precedence is statable
+ * by a spec without rewriting a global — the same reason `resolveRoles` takes
+ * what it was asked for rather than going and finding it.
  */
-function resolveServerUrl(option: string | undefined): string {
-  return process.env['TEMPO_SERVER_URL'] ?? option ?? DEFAULT_SERVER_URL;
+export function resolveServerUrl(
+  argv: readonly string[],
+  option: string | undefined,
+): string {
+  return flagValue(argv, WORKER_FLAG.server) ?? option ?? DEFAULT_SERVER_URL;
+}
+
+/** Which pool a worker serves: the launch site, else the code, else `default`. */
+export function resolveTaskQueue(
+  argv: readonly string[],
+  option: string | undefined,
+): string {
+  return flagValue(argv, WORKER_FLAG.queue) ?? option ?? DEFAULT_TASK_QUEUE;
 }
 
 /** A configured role and where it came from, so an error can name its source. */
 interface RequestedRole {
   value: string;
-  source: 'TEMPO_ROLE' | 'role';
+  source: '--role' | 'role';
 }
 
 /**
- * The role the deployment asked for: the environment if it overrode, else the
- * options object, else none. Trimmed and returned with its origin, because "you
- * asked for a role this binary cannot serve" is only actionable if it says
- * *where* the ask was written.
+ * The role the deployment asked for: the flag if it overrode, else the options
+ * object, else none. Trimmed and returned with its origin, because "you asked for
+ * a role this binary cannot serve" is only actionable if it says *where* the ask
+ * was written — a unit file or a source file are very different things to go and
+ * fix.
  */
-function requestedRole(
+export function requestedRole(
+  argv: readonly string[],
   option: WorkerRole | undefined,
 ): RequestedRole | undefined {
-  const fromEnvironment = process.env['TEMPO_ROLE']?.trim();
-  if (fromEnvironment) return {value: fromEnvironment, source: 'TEMPO_ROLE'};
+  const fromFlag = flagValue(argv, WORKER_FLAG.role)?.trim();
+  if (fromFlag) return {value: fromFlag, source: '--role'};
   if (option) return {value: option, source: 'role'};
   return undefined;
 }
@@ -341,15 +289,9 @@ type WorkerLoopTuning = Pick<
   'identity' | 'pollIntervalMs' | 'errorBackoffMs' | 'maxErrorBackoffMs'
 >;
 
-/** What a runtime mode has to supply: something to stop, and maybe a way in. */
-interface Composition {
-  readonly localRuntime?: Runtime;
-  stop(): Promise<void>;
-}
-
 /**
- * The deployable composition: a `RemoteService` over the RPC, and one poll loop
- * per role, each claiming work from a server in another process.
+ * The composition: a `RemoteService` over the RPC, and one poll loop per role,
+ * each claiming work from a server in another process.
  */
 function composeRemote(args: {
   name: string;
@@ -359,7 +301,7 @@ function composeRemote(args: {
   loop: WorkerLoopTuning;
   workflows: readonly [string, AnyFn][];
   activities: readonly [string, AnyFn][];
-}): Composition {
+}): {stop(): Promise<void>} {
   const service = createRemoteService(args.serverUrl);
 
   // The worker's own lifecycle log, in the same JSON Lines shape the server
@@ -407,101 +349,47 @@ function composeRemote(args: {
   };
 }
 
-/**
- * The in-process composition: `createLocalRuntime()` fed from the same module
- * namespaces, so what a test exercises is the entrypoint's own registration and
- * not a second wiring written for the test.
- *
- * Both halves are registered regardless of role, because there are no roles here
- * — a `LocalService` dispatches to its workers by function call, and the split
- * that `TEMPO_ROLE` describes has no meaning without poll loops to divide.
- */
-function composeLocal(args: {
-  workflows: readonly [string, AnyFn][];
-  activities: readonly [string, AnyFn][];
-}): Composition {
-  const runtime = createLocalRuntime();
-  for (const [exported, fn] of args.workflows)
-    runtime.registerWorkflow(exported, fn as WorkflowFn);
-  for (const [exported, fn] of args.activities)
-    runtime.registerActivity(exported, fn as ActivityFn);
-
-  return {
-    localRuntime: runtime,
-    stop: () => {
-      // Timers hold the event loop open; shutting them down is what lets a
-      // process that started a local worker exit on its own.
-      runtime.shutdown();
-      return Promise.resolve();
-    },
-  };
-}
-
 export function startWorker(options: StartWorkerOptions): Worker {
   const workflows = callableEntries(options.workflows);
   const activities = callableEntries(options.activities);
 
-  // `--describe` is how `tempo deploy` interrogates a built binary: it must
-  // report what the artifact contains without connecting to anything.
-  if (process.argv.includes('--describe')) {
-    console.log(
-      JSON.stringify({
-        name: options.name,
-        workflows: workflows.map(([exported]) => exported),
-        activities: activities.map(([exported]) => exported),
-      }),
-    );
-    return {name: options.name, roles: [], stop: () => Promise.resolve()};
-  }
-
-  const runtime = resolveRuntime(process.argv, options.runtime);
-  const role = requestedRole(options.role);
-  if (runtime === 'local' && role)
-    throw new Error(
-      `worker "${options.name}" cannot serve ${role.source}=${role.value} under --runtime=local — the local runtime has no poll loops to split, and half of one parks every execution it starts on work nothing will claim`,
-    );
+  // Read once, from the process's own arguments past the interpreter and script.
+  const argv = process.argv.slice(2);
 
   const roles = resolveRoles(
-    role,
+    requestedRole(argv, options.role),
     options.name,
     workflows.length > 0,
     activities.length > 0,
   );
 
-  // Resolved in both modes so the readiness line keeps one shape. In local mode
-  // it names a pool nothing routes on: one in-process pair serves every queue.
-  const taskQueue =
-    process.env['TEMPO_TASK_QUEUE'] ?? options.taskQueue ?? DEFAULT_TASK_QUEUE;
+  const taskQueue = resolveTaskQueue(argv, options.taskQueue);
 
-  const composition =
-    runtime === 'local'
-      ? composeLocal({workflows, activities})
-      : composeRemote({
-          name: options.name,
-          serverUrl: resolveServerUrl(options.serverUrl),
-          taskQueue,
-          roles,
-          // Straight through: what the poll loops take, this entrypoint passes.
-          loop: {
-            identity: options.identity,
-            pollIntervalMs: options.pollIntervalMs,
-            errorBackoffMs: options.errorBackoffMs,
-            maxErrorBackoffMs: options.maxErrorBackoffMs,
-          },
-          workflows,
-          activities,
-        });
+  const composition = composeRemote({
+    name: options.name,
+    serverUrl: resolveServerUrl(argv, options.serverUrl),
+    taskQueue,
+    roles,
+    // Straight through: what the poll loops take, this entrypoint passes.
+    loop: {
+      identity: options.identity,
+      pollIntervalMs: options.pollIntervalMs,
+      errorBackoffMs: options.errorBackoffMs,
+      maxErrorBackoffMs: options.maxErrorBackoffMs,
+    },
+    workflows,
+    activities,
+  });
 
   let stopping: Promise<void> | undefined;
   const worker: Worker = {
     name: options.name,
     roles,
-    localRuntime: composition.localRuntime,
     stop(): Promise<void> {
       stopping ??= composition.stop().then(() => {
         // Dropped on the way out so a process that starts several workers over
-        // its lifetime — which is what local mode invites — does not accumulate
-        // a handler per worker.
+        // its lifetime — which a spec does — does not accumulate a handler per
+        // worker.
         process.off('SIGTERM', shutdown);
         process.off('SIGINT', shutdown);
       });
