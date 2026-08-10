@@ -393,6 +393,3 @@ npm run format
 npm run format:check
 ```
 
-```bash
-npm run tempo -- help
-```

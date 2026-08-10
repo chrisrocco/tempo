@@ -50,7 +50,7 @@ describe('conventions — the repo obeys its own conventions', () => {
 describe('conventions — namespace imports', () => {
   it('rejects a default import of a Node builtin', () => {
     const violations = checkConventions([
-      file('src/cli/up.ts', `import path from 'node:path';`),
+      file('src/services/rpc_server.ts', `import path from 'node:path';`),
     ]);
 
     expect(violations.length).toBe(1);
@@ -90,7 +90,7 @@ describe('conventions — namespace imports', () => {
 
   it('accepts the namespace import it asks for', () => {
     const violations = checkConventions([
-      file('src/cli/up.ts', `import * as path from 'node:path';`),
+      file('src/services/rpc_server.ts', `import * as path from 'node:path';`),
     ]);
 
     expect(violations).toEqual([]);

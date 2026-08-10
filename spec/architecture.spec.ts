@@ -131,7 +131,7 @@ describe('architecture — layering', () => {
   it('leaves the entrypoints and the CLI free to compose every layer', () => {
     const violations = checkBoundaries([
       file('src/local_runtime.ts', `import { s } from './services';`),
-      file('src/cli/up.ts', `import { h } from '../services';`),
+      file('bin/server-main.ts', `import { h } from '../src/services';`),
     ]);
 
     expect(violations).toEqual([]);
