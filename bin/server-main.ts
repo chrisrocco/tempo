@@ -52,7 +52,12 @@
 
 import type {AddressInfo} from 'node:net';
 import {FileHistoryStore} from '../src';
-import {DEFAULT_PORT, flagValue, numericFlagValue} from '../src/process_flags';
+import {
+  DEFAULT_PORT,
+  SERVER_FLAG,
+  flagValue,
+  numericFlagValue,
+} from '../src/process_flags';
 import {createJsonLogger} from '../src/server';
 import {createRpcServer, createServerHost} from '../src/services';
 
@@ -60,10 +65,10 @@ const argv = process.argv.slice(2);
 
 // Named `bindHost`, not `host`: `main` binds a local `host` to the server host
 // object, which would shadow this and silently pass an object to `listen`.
-const bindHost = flagValue(argv, 'host') ?? '127.0.0.1';
-const port = numericFlagValue(argv, 'port') ?? DEFAULT_PORT;
-const activityLeaseMs = numericFlagValue(argv, 'activity-lease-ms');
-const dataDir = flagValue(argv, 'data-dir');
+const bindHost = flagValue(argv, SERVER_FLAG.host) ?? '127.0.0.1';
+const port = numericFlagValue(argv, SERVER_FLAG.port) ?? DEFAULT_PORT;
+const activityLeaseMs = numericFlagValue(argv, SERVER_FLAG.activityLeaseMs);
+const dataDir = flagValue(argv, SERVER_FLAG.dataDir);
 
 async function main(): Promise<void> {
   // Durable when --data-dir is set (a single-writer lockfile guards the dir);

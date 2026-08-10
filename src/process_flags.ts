@@ -58,6 +58,37 @@
 export const DEFAULT_PORT = 7777;
 
 /**
+ * The flags `bin/server-main.ts` reads.
+ *
+ * Named constants rather than string literals at each site, because
+ * `deploy/units.ts` writes these same flags into the systemd unit that launches
+ * that process. A unit emitting `--listen=7777` where the server reads `--port`
+ * produces a deployment that starts, reports healthy, and serves nobody — the
+ * expensive kind of wrong, because nothing fails.
+ *
+ * Sharing the constant makes that disagreement a **compile error rather than a
+ * spec's job**: there is one spelling, and both sides read it from here.
+ */
+export const SERVER_FLAG = {
+  host: 'host',
+  port: 'port',
+  dataDir: 'data-dir',
+  activityLeaseMs: 'activity-lease-ms',
+} as const;
+
+/** The flags `src/tempo.ts` reads, shared with `deploy/units.ts` for the same reason. */
+export const WORKER_FLAG = {
+  server: 'server',
+  queue: 'queue',
+  role: 'role',
+} as const;
+
+/** `--name=value`, the only spelling anything here writes or reads. */
+export function formatFlag(name: string, value: string | number): string {
+  return `--${name}=${value}`;
+}
+
+/**
  * The value of `--name=…`, or `undefined` if it was not given.
  *
  * Throws when the flag is present without a value. `--data-dir` alone is someone

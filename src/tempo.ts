@@ -87,7 +87,7 @@
  */
 
 import type {WorkflowFn} from './core';
-import {DEFAULT_PORT, flagValue} from './process_flags';
+import {DEFAULT_PORT, WORKER_FLAG, flagValue} from './process_flags';
 import {DEFAULT_TASK_QUEUE} from './protocol';
 import {createJsonLogger} from './server';
 import {createRemoteService} from './services';
@@ -211,7 +211,7 @@ export function resolveServerUrl(
   argv: readonly string[],
   option: string | undefined,
 ): string {
-  return flagValue(argv, 'server') ?? option ?? DEFAULT_SERVER_URL;
+  return flagValue(argv, WORKER_FLAG.server) ?? option ?? DEFAULT_SERVER_URL;
 }
 
 /** Which pool a worker serves: the launch site, else the code, else `default`. */
@@ -219,7 +219,7 @@ export function resolveTaskQueue(
   argv: readonly string[],
   option: string | undefined,
 ): string {
-  return flagValue(argv, 'queue') ?? option ?? DEFAULT_TASK_QUEUE;
+  return flagValue(argv, WORKER_FLAG.queue) ?? option ?? DEFAULT_TASK_QUEUE;
 }
 
 /** A configured role and where it came from, so an error can name its source. */
@@ -239,7 +239,7 @@ export function requestedRole(
   argv: readonly string[],
   option: WorkerRole | undefined,
 ): RequestedRole | undefined {
-  const fromFlag = flagValue(argv, 'role')?.trim();
+  const fromFlag = flagValue(argv, WORKER_FLAG.role)?.trim();
   if (fromFlag) return {value: fromFlag, source: '--role'};
   if (option) return {value: option, source: 'role'};
   return undefined;
