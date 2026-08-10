@@ -20,29 +20,35 @@ process), and the whole engine. Only the command-line surface is gone.
 
 ## The shape
 
-Four commands to start, and **none of them knows what a build system is**.
+Five commands to start, and **the four deployment-facing ones know nothing about
+a build system**.
 
-| Command        | Does                                                         |
-| -------------- | ------------------------------------------------------------ |
-| `tempo up`     | Copies artifacts in, installs supervised units, starts them. |
-| `tempo down`   | Stops and disables those units. Touches no data.             |
-| `tempo run`    | Starts a workflow against a server. An RPC client, no more.  |
-| `tempo result` | Fetches the outcome of an execution that already exists.     |
+| Command           | Does                                                     |
+| ----------------- | -------------------------------------------------------- |
+| `tempo up`        | Copies artifacts in, installs supervised units, starts.  |
+| `tempo down`      | Stops and disables those units. Touches no data.         |
+| `tempo run`       | Starts a workflow against a server. An RPC client.       |
+| `tempo result`    | Fetches the outcome of an execution that already exists. |
+| `tempo run-local` | Runs one workflow from source, in this process.          |
 
-That last one is not optional: `run` without `--wait` prints an id and exits, so
+`result` is not optional: `run` without `--wait` prints an id and exits, so
 without `result` the id it printed leads nowhere.
 
 The build-system property is worth stating as a goal rather than noting as an
 accident, because two earlier drafts lost it. `run` was going to deploy on
 demand, which put building binaries and installing systemd units behind a verb
 meaning "execute this workflow". Then `up` was going to take build _targets_ and
-resolve them through a toolchain. Both are gone. The CLI copies files and makes
-RPCs.
+resolve them through a toolchain. Both are gone: `up` copies files and `run`
+makes RPCs.
 
-The read and drive commands come back after these four — see
-[what this does not cover yet](#what-this-does-not-cover-yet). The
-local-development story is deliberately **not** a CLI feature; see
-[running locally](#running-locally-is-a-worker-feature-not-a-cli-one).
+`run-local` is the deliberate exception and the reason the property is stated per
+command rather than for the CLI as a whole — running from source with nothing
+built is _defined_ by knowing how to get from source to a running workflow. See
+[run-local](#tempo-run-local--its-own-command-not-a-flag-on-run) for why that is
+a smaller concession than it looks.
+
+The read and drive commands come back after these five — see
+[what this does not cover yet](#what-this-does-not-cover-yet).
 
 ---
 
@@ -53,12 +59,12 @@ local-development story is deliberately **not** a CLI feature; see
 
 The port is **7777**.
 
-Two reasons, and the first is already written down in `src/tempo.ts` about
-`--runtime`: **an environment variable is inherited, and a flag is not.** One
-stale `TEMPO_SERVER_URL` exported in a shell — or inherited by a worker spawned
-from a test — points a production worker at the wrong server while it still
-prints `WORKER_READY` and looks healthy to its supervisor. A flag has to be
-typed at the launch site.
+Two reasons. The first: **an environment variable is inherited, and a flag is
+not.** One stale `TEMPO_SERVER_URL` exported in a shell — or inherited by a
+worker spawned from a test — points a production worker at the wrong server
+while it still prints `WORKER_READY` and looks healthy to its supervisor. A flag
+has to be typed at the launch site, which is the property that matters for
+anything a deployment gets wrong silently.
 
 The second is what makes this a _simplification_ rather than a relocation: `up`
 writes the units, so **the unit file is the deployment's configuration** —
@@ -285,32 +291,61 @@ explicit act with a name that says so.
 
 ---
 
-## Running locally is a worker feature, not a CLI one
+## `tempo run-local` — its own command, not a flag on `run`
 
-There is no local mode on `tempo run`. A one-process, in-memory, no-server run
-is had by running the worker binary directly:
+A one-process, in-memory, no-server run of a workflow **straight from source**,
+with nothing built and nothing deployed.
 
 ```
-blaze run //my:worker -- --runtime=local
-node ./dist/worker.js --runtime=local
+tempo run-local greeter world
 ```
 
-The CLI is not in the path at all, which is why it needs no knowledge of `tsx`,
-Blaze labels, or how a target becomes a process. That knowledge was the entire
-reason the deleted `ports/toolchain.ts` existed; with it gone there is nothing
-left for a toolchain abstraction to abstract.
+**It is a separate command rather than `run --local`, because the two share
+almost nothing.** `run` dials a server that something already deployed and makes
+one RPC; `run-local` composes a whole engine in this process, registers a
+worker's exports into it, runs one workflow, prints the result, and exits.
+Sharing a verb between those would mean a command whose prerequisites, failure
+modes, and output all depend on a flag — and the flag would be the only thing
+telling you whether "cannot reach a server" is a bug or irrelevant.
 
-**`--runtime=local` already exists and ships today** — see `resolveRuntime` in
-`src/tempo.ts`, covered by `spec/integration/worker_entrypoint.spec.ts`. An
-earlier draft of this file proposed a `--local` flag as new work, which would
-have been a second spelling for a flag that was already there; the argument it
-made for a flag over an environment variable was also already written in
-`src/tempo.ts`, where it belongs.
+**This is what `--runtime=local` on the worker entrypoint used to approximate,
+and it is why that flag is gone.** The flag made a _deployable artifact_ branch
+at startup on whether it was a deployment or a dev loop, which is a property no
+deployable artifact should have; and it could only ever run what its own binary
+already had compiled in, so it needed a build to demonstrate something whose
+whole point is needing no build. `createLocalRuntime` is untouched — that is the
+engine `run-local` composes.
 
-What is genuinely missing is a way to say **what to run**: which workflow, with
-which arguments, and what to print. Nothing parses that output any more, so it
-can be shaped for a human rather than for a protocol. That work belongs to
-`src/tempo.ts` and is not blocked by anything here.
+### What this means the CLI has to know, and why that is acceptable now
+
+`run-local` has to turn source into a running worker: find the entrypoint, run
+it under `tsx` or through a build system, and get its registrations. **That is
+exactly the knowledge `ports/toolchain.ts` and `source_toolchain.ts` carried,
+and #62 deleted them for a reason that no longer applies.** They existed because
+`up` _and_ `run` both needed it and had to agree on it — an abstraction serving
+two callers with different needs, which is why it grew a port. Here there is one
+caller, and `up` and `run` still know nothing about builds. So the knowledge
+comes back as one command's implementation detail rather than as a seam, and the
+next person to read #62 should not re-delete it on sight.
+
+Open, and worth settling before writing it: **whether `run-local` runs an
+entrypoint file or a workflow module.** Running the entrypoint means executing a
+file whose last statement is `Tempo.startWorker(...)`, which starts a _worker_,
+not a local runtime — so either the entrypoint gains a way to be imported
+without starting, or `run-local` takes the workflow and activity modules
+directly and never touches the entrypoint. The second is less magic and skips
+the artifact entirely; the first runs closer to what deploys.
+
+### The smoke test that lost its home
+
+`--runtime=local` had one use that was not about local development: booting the
+shipped artifact with no server anywhere, to prove every export actually
+registers. That check is gone with the flag, and `run-local` does not replace it
+— running from source proves nothing about a built artifact.
+
+Nothing verifies that today. It is worth an issue rather than a hole: the
+natural home is whatever builds the artifact, checking that the thing it just
+produced comes up.
 
 ---
 
@@ -424,7 +459,11 @@ recorded here because they were only ever written in a file that got deleted:
    in two places.
 3. **`tempo up` and `tempo down`** — copy, units, enable, restart. The hazards
    are listed above and every one of them works in testing and fails later.
-4. **The version fingerprint** (question 2), once there is a deployment that can
+4. **`tempo run-local`**, once the entrypoint-or-modules question above is
+   settled. Last of the five rather than first despite being the smallest: it is
+   the only one that needs a decision nobody has made yet, and the only one whose
+   implementation the other four do not touch.
+5. **The version fingerprint** (question 2), once there is a deployment that can
    go stale.
-5. **The drive and read commands** — `signal`, `cancel`, `terminate`, `list`,
+6. **The drive and read commands** — `signal`, `cancel`, `terminate`, `list`,
    `describe`, `queues`.
