@@ -1,71 +1,70 @@
 /**
  * @fileoverview
- * Where a deployment lives on disk, and what its services are called.
+ * Where a deployment lives, and what its services are called.
  *
- * Every path here is a **constant rather than an option**, and that is a
- * decision rather than an omission. An option with one correct value is an
- * option that only ever gets passed wrong, and each of these is a value that
- * `up` writes into a unit file while something else — `down`, `status`, an
- * operator reading `systemctl cat` — assumes the same value independently. One
- * module holding all of them is what makes "they agree" true by construction
- * instead of by review.
+ * **This is a per-user deployment.** Artifacts, unit files, and history all live
+ * under the invoking user's own directories, and the services are systemd *user*
+ * units. Nothing here touches `/opt`, `/etc`, or `/var`, and nothing needs root.
  *
- * They become options the day a deployment needs them to differ. Nothing here
- * forecloses that; it just refuses to pay for it in advance.
+ * ## Why user units rather than a system daemon
  *
- * ## The split between `/opt` and `/var/lib`
+ * The workflows have to run as the user — with that user's files and credentials —
+ * and an operator should not need `sudo` to deploy. A system daemon can be made to
+ * satisfy the first (`User=`) but not the second: installing into
+ * `/etc/systemd/system` is privileged every single time.
  *
- * `/opt/tempo` is the software and `/var/lib/tempo` is the state it accumulates.
- * Separating them is what makes "replace the artifact, keep the history" a
- * non-event: `up` overwrites the first and never touches the second.
+ * A user unit runs as its owner by construction, so the identity question
+ * disappears rather than being configured, and `systemctl --user` needs no
+ * privilege at all. That is the whole trade, and what it costs is in
+ * `LINGER_PREREQUISITE` below.
  *
- * ## `/usr/bin/node` is the weak point, and it is deliberate
+ * An earlier design installed to `/opt/tempo` with a `tempo` system account and
+ * required root for `up`, `down`, and `restart`. It is worth knowing that existed,
+ * because a shared machine-wide daemon is the thing this cannot do: two users each
+ * get their own server, their own workers, and their own history — which is the
+ * point, but it also means they cannot share a port. See `unitsFor` and the port
+ * note in `up`.
  *
- * The units name their interpreter absolutely rather than resolving `node` from
- * a `PATH`, because a unit that inherits `PATH` runs a different interpreter
- * depending on who deployed it. The cost is that a host with node installed
- * elsewhere gets `203/EXEC` on the first start — which is **loud**: the
- * deployment does not come up and `systemctl status` names the missing file.
- * That is what makes a constant acceptable where a wrong guess would otherwise
- * be unacceptable.
+ * ## Paths are resolved, not constant
+ *
+ * They used to be constants, deliberately, on the grounds that a value with one
+ * correct answer is one that only ever gets passed wrong. Per-user deployment is
+ * what changed: there is no longer one correct answer, because the answer contains
+ * a home directory. `deploy/README.md` predicted this trigger as "two deployments
+ * on one machine" — with user units, every user is a deployment.
+ *
+ * So a `Layout` is resolved from a `Host` once and threaded through. What did not
+ * become variable is the *shape*: one install root, one state directory, three
+ * units, whatever the prefix.
+ *
+ * The paths follow the XDG base directory specification, which is also the one
+ * place a deployment reads the environment — see `UserPaths` for why that is not a
+ * contradiction of the flags-not-environment rule.
  */
 
+import type {Host} from './ports/host';
 import type {WorkerRole} from '../tempo';
 
-/** The software. Overwritten by every deploy. */
-export const INSTALL_ROOT = '/opt/tempo';
-
 /**
- * The name systemd is given as `StateDirectory=`, from which it derives
- * `/var/lib/tempo` — creating it and chowning it to the unit's user before every
- * `ExecStart`. That is why nothing here creates the state directory: letting
- * systemd own it means it also survives someone deleting it between deploys.
+ * The interpreter the units run.
+ *
+ * Named absolutely rather than resolved from a `PATH`, because a unit that
+ * inherits `PATH` runs a different interpreter depending on how it was started.
+ * The honest weak point: a host with node installed elsewhere gets `203/EXEC` on
+ * the first start — loud rather than silent, the deployment does not come up, and
+ * `systemctl --user status` names the missing file.
  */
-export const STATE_DIRECTORY_NAME = 'tempo';
-
-/** Where `STATE_DIRECTORY_NAME` resolves to, which is what the server is told. */
-export const STATE_DIR = `/var/lib/${STATE_DIRECTORY_NAME}`;
-
-/** The interpreter the units run. See the fileoverview on why it is absolute. */
 export const NODE_BIN = '/usr/bin/node';
 
-/** The unprivileged account the services run as. Created by `up` if absent. */
-export const SERVICE_USER = 'tempo';
-
-/** Where systemd reads unit files an administrator installed. */
-export const UNIT_DIR = '/etc/systemd/system';
-
-/** The installed server artifact — what `--server` was copied to. */
-export const SERVER_ARTIFACT = `${INSTALL_ROOT}/server.js`;
-
 /**
- * The installed worker artifact — what `--worker` was copied to.
+ * The directory name this deployment uses under each of the user's base
+ * directories, so the install root, the state directory, and the units all sit
+ * under one recognisable name.
  *
- * One file, run twice. The two worker services are the same bytes with a
- * different `--role`, which is the whole reason the roles can be deployed
- * separately without building anything twice.
+ * Not passed to systemd as `StateDirectory=` — see `units.ts` for why that is
+ * unsafe in a user unit, and `up` for what creates the directory instead.
  */
-export const WORKER_ARTIFACT = `${INSTALL_ROOT}/worker.js`;
+export const DEPLOYMENT_NAME = 'tempo';
 
 /** The service that hosts the engine and owns the durable state. */
 export const SERVER_UNIT = 'tempo-server';
@@ -88,9 +87,9 @@ export const WORKER_UNITS: Readonly<Record<WorkerRole, string>> = {
 /**
  * Every unit a deployment consists of, **server first**.
  *
- * The order is load-bearing for `up`: restarting the server before its workers
- * means the workers reconnect to a server that is already coming up, rather than
- * spending their first backoff on one that is going down.
+ * The order is load-bearing for `up` and `restart`: bringing the server up before
+ * its workers means the workers reconnect to something coming up, rather than
+ * spending their first backoff on something going down.
  */
 export const ALL_UNITS: readonly string[] = [
   SERVER_UNIT,
@@ -98,7 +97,66 @@ export const ALL_UNITS: readonly string[] = [
   WORKER_UNITS.activity,
 ];
 
+/**
+ * The one thing about this model that needs privilege, once.
+ *
+ * Without lingering enabled, a user's services are tied to their login sessions:
+ * they stop when the user logs out and do not start at boot. For a workflow engine
+ * that is fatal and silent — everything deploys, everything runs, and the whole
+ * deployment vanishes the next time the operator closes their laptop.
+ *
+ * It cannot be fixed from here: `loginctl enable-linger` is privileged. What `up`
+ * does instead is *check* it and report, because a prerequisite that is checked and
+ * named is a different thing from one buried in a README.
+ */
+export const LINGER_PREREQUISITE =
+  'sudo loginctl enable-linger $USER — without it these services stop at logout and do not start at boot';
+
+/** Where one deployment's files live, resolved for one user. */
+export interface Layout {
+  /** The install root: `$XDG_DATA_HOME/tempo`. Overwritten by every deploy. */
+  installRoot: string;
+  /** The installed server artifact. */
+  serverArtifact: string;
+  /**
+   * The installed worker artifact — one file, run twice.
+   *
+   * The two worker services are the same bytes with a different `--role`, which is
+   * why the roles deploy separately without building anything twice.
+   */
+  workerArtifact: string;
+  /**
+   * Where history goes: `$XDG_STATE_HOME/tempo`. The server is told this as
+   * `--data-dir` and `up` creates it.
+   *
+   * **The single source of truth for it**, deliberately not delegated to systemd's
+   * `StateDirectory=` — see `units.ts` for why that is unsafe in a user unit.
+   */
+  stateDir: string;
+  /** Where systemd reads this user's unit files: `$XDG_CONFIG_HOME/systemd/user`. */
+  unitDir: string;
+}
+
+/**
+ * Resolve a layout for the user this process is running as.
+ *
+ * Takes the `Host` rather than reading the environment directly, so a spec can
+ * describe a user without one existing — the same reason every other function here
+ * takes it.
+ */
+export function resolveLayout(host: Host): Layout {
+  const paths = host.userPaths();
+  const installRoot = `${paths.data}/${DEPLOYMENT_NAME}`;
+  return {
+    installRoot,
+    serverArtifact: `${installRoot}/server.js`,
+    workerArtifact: `${installRoot}/worker.js`,
+    stateDir: `${paths.state}/${DEPLOYMENT_NAME}`,
+    unitDir: `${paths.config}/systemd/user`,
+  };
+}
+
 /** Where a unit file goes. Takes the bare name; adds the `.service` suffix. */
-export function unitPath(unit: string): string {
-  return `${UNIT_DIR}/${unit}.service`;
+export function unitPath(layout: Layout, unit: string): string {
+  return `${layout.unitDir}/${unit}.service`;
 }

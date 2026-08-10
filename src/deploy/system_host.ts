@@ -10,8 +10,9 @@
 
 import {execFile} from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
-import type {CommandResult, Host} from './ports/host';
+import type {CommandResult, Host, UserPaths} from './ports/host';
 
 /**
  * The machine this process is running on.
@@ -24,8 +25,25 @@ export function systemHost(): Host {
   return {
     euid(): number {
       // Absent on Windows, where the concept does not exist. -1 reads as "not
-      // root", which makes `up` refuse rather than half-run.
+      // root", which is the permissive answer and correct: with user units there
+      // is nothing privileged left to guard.
       return process.geteuid?.() ?? -1;
+    },
+
+    userPaths(): UserPaths {
+      // The XDG defaults, which are what the specification says to use when a
+      // variable is unset *or empty* — an exported-but-empty `XDG_DATA_HOME` is
+      // common enough in shell profiles that `??` alone would be wrong here.
+      const home = os.homedir();
+      const xdg = (name: string, fallback: string): string => {
+        const value = process.env[name];
+        return value && value.trim() !== '' ? value : `${home}/${fallback}`;
+      };
+      return {
+        data: xdg('XDG_DATA_HOME', '.local/share'),
+        config: xdg('XDG_CONFIG_HOME', '.config'),
+        state: xdg('XDG_STATE_HOME', '.local/state'),
+      };
     },
 
     async makeDirectory(directory: string): Promise<void> {

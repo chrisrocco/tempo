@@ -17,6 +17,20 @@ function serviceOf(unit: string): string {
 }
 
 /**
+ * `--user` goes on **every** call here, without exception.
+ *
+ * These are user units, so omitting it does not fall back — it addresses the system
+ * manager instead, which is a different set of units entirely. Left off `enable` it
+ * would fail for lack of privilege; left off `show` it would cheerfully report
+ * `not-found` for units that exist, which is the worse outcome because it looks
+ * like an answer.
+ *
+ * A constant rather than a literal at five call sites so that "every call" is
+ * something a reader can verify rather than count.
+ */
+const USER = '--user';
+
+/**
  * Run a `systemctl` subcommand whose failure means the deployment did not happen.
  *
  * Throws with what systemd said, because these are the calls where continuing
@@ -28,10 +42,10 @@ export async function systemctl(
   host: Host,
   ...args: readonly string[]
 ): Promise<void> {
-  const result = await host.run('systemctl', args);
+  const result = await host.run('systemctl', [USER, ...args]);
   if (result.code !== 0)
     throw new Error(
-      `systemctl ${args.join(' ')} failed (exit ${result.code})` +
+      `systemctl --user ${args.join(' ')} failed (exit ${result.code})` +
         `${result.stderr.trim() ? `: ${result.stderr.trim()}` : ''}`,
     );
 }
@@ -73,7 +87,7 @@ export function disableNow(
   detail: string;
 }> {
   return host
-    .run('systemctl', ['disable', '--now', serviceOf(unit)])
+    .run('systemctl', [USER, 'disable', '--now', serviceOf(unit)])
     .then((result) => ({
       ok: result.code === 0,
       detail:
@@ -84,6 +98,33 @@ export function disableNow(
 /** Restart a unit, so it picks up the artifact that was just installed. */
 export function restart(host: Host, unit: string): Promise<void> {
   return systemctl(host, 'restart', serviceOf(unit));
+}
+
+/**
+ * Is lingering enabled for this user?
+ *
+ * The single most important thing about a user-unit deployment that nothing else
+ * reveals. Without it, these services are tied to login sessions: they stop when
+ * the user logs out and do not start at boot. Every deploy succeeds, every workflow
+ * runs, and the whole deployment disappears the next time the operator closes their
+ * laptop — with `systemctl --user status` having been green throughout.
+ *
+ * `loginctl show-user --property=Linger` is readable without privilege. A user with
+ * no session at all — which is itself a reason services would not be running —
+ * makes `loginctl` exit non-zero, and that reads as "not lingering", which is the
+ * safe direction to be wrong in: it prompts a check rather than suppressing one.
+ *
+ * Cannot be *fixed* from here; `loginctl enable-linger` is privileged. Reporting it
+ * is the whole contribution, and it is why `up` returns it rather than throwing.
+ */
+export async function isLingerEnabled(host: Host): Promise<boolean> {
+  const result = await host.run('loginctl', [
+    'show-user',
+    '--property=Linger',
+    // No user named: loginctl defaults to the caller, which is the only user this
+    // deployment is ever about, and naming one would mean knowing it.
+  ]);
+  return result.code === 0 && /Linger=yes/.test(result.stdout);
 }
 
 /** One unit's state, as systemd reports it. */
@@ -111,6 +152,7 @@ export interface UnitState {
  */
 export async function unitState(host: Host, unit: string): Promise<UnitState> {
   const result = await host.run('systemctl', [
+    USER,
     'show',
     serviceOf(unit),
     '--property=ActiveState',

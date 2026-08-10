@@ -38,7 +38,7 @@ describe('restart — bouncing without redeploying', () => {
 
     expect(result.units).toEqual([...ALL_UNITS]);
     expect(host.commands()).toEqual(
-      ALL_UNITS.map((u) => `systemctl restart ${u}.service`),
+      ALL_UNITS.map((u) => `systemctl --user restart ${u}.service`),
     );
   });
 
@@ -48,7 +48,7 @@ describe('restart — bouncing without redeploying', () => {
 
     expect(result.units).toEqual(['tempo-worker-activity']);
     expect(host.commands()).toEqual([
-      'systemctl restart tempo-worker-activity.service',
+      'systemctl --user restart tempo-worker-activity.service',
     ]);
   });
 
@@ -66,11 +66,11 @@ describe('restart — bouncing without redeploying', () => {
 
   // Restarting the server and then failing on the workers leaves a deployment
   // half-bounced, so the refusal comes first.
-  it('refuses without root before restarting anything', async () => {
-    const host = fakeHost({euid: 1000});
+  it('refuses to run as root before restarting anything', async () => {
+    const host = fakeHost({euid: 0});
 
     await expectAsync(restart('all', host)).toBeRejectedWithError(
-      /must run as root.*effective uid 1000/s,
+      /must not run as root/,
     );
     expect(host.commands()).toEqual([]);
   });

@@ -18,9 +18,12 @@
  * **1. It is running at all times** — across crashes, restarts, and reboots.
  *
  * - `Restart=always` with a short `RestartSec`, so a crash comes back.
- * - `WantedBy=multi-user.target`, so `systemctl enable` makes a reboot come back.
- *   Without it a host reboot silently drops the whole deployment, having been
- *   green every day until then.
+ * - `WantedBy=default.target`, so `systemctl --user enable` makes the deployment
+ *   come back. `default.target` is the user manager's boot target, the user-unit
+ *   counterpart of `multi-user.target`. Without it a logout silently drops the
+ *   whole deployment, having been green every day until then — and note that
+ *   surviving a *host reboot* additionally needs lingering, which no unit file can
+ *   express (see `layout.LINGER_PREREQUISITE`).
  * - `StartLimitIntervalSec=0`, so systemd **never gives up**. The default rate
  *   limit stops a unit after five restarts in ten seconds and leaves it `failed`,
  *   which turns "always running" into "gave up during the incident" — precisely
@@ -48,17 +51,7 @@
 
 import {SERVER_FLAG, WORKER_FLAG, formatFlag} from '../process_flags';
 import type {WorkerRole} from '../tempo';
-import {
-  INSTALL_ROOT,
-  NODE_BIN,
-  SERVER_ARTIFACT,
-  SERVER_UNIT,
-  SERVICE_USER,
-  STATE_DIR,
-  STATE_DIRECTORY_NAME,
-  WORKER_ARTIFACT,
-  WORKER_UNITS,
-} from './layout';
+import {NODE_BIN, SERVER_UNIT, WORKER_UNITS, type Layout} from './layout';
 
 /** What a deployment's units need to know that is not a constant of the layout. */
 export interface UnitConfig {
@@ -93,14 +86,16 @@ export function workerServerUrl(config: UnitConfig): string {
 }
 
 /** The arguments the server process is launched with. */
-export function serverArgs(config: UnitConfig): string[] {
+export function serverArgs(layout: Layout, config: UnitConfig): string[] {
   return [
     formatFlag(SERVER_FLAG.port, config.port),
     formatFlag(SERVER_FLAG.host, config.host),
-    // Always passed, never omitted: an unset data directory means the server
-    // keeps its history in memory and loses every execution on the next restart,
-    // while looking perfectly healthy until then.
-    formatFlag(SERVER_FLAG.dataDir, STATE_DIR),
+    // Always passed, never omitted: an unset data directory means the server keeps
+    // its history in memory and loses every execution on the next restart, while
+    // looking perfectly healthy until then. From the layout rather than spelled
+    // again here, because the layout is the only thing that knows where history
+    // goes now that systemd is not being asked to — see `serviceSection`.
+    formatFlag(SERVER_FLAG.dataDir, layout.stateDir),
   ];
 }
 
@@ -122,6 +117,13 @@ export function workerArgs(role: WorkerRole, config: UnitConfig): string[] {
  * anyway**. The unit then still gives up after five restarts in ten seconds — the
  * exact failure the line was written to prevent, in a file that looks like it
  * prevents it. The section is the whole of what makes the directive real.
+ *
+ * **No `network-online.target`.** A system unit would order itself after it; a user
+ * unit cannot. That target belongs to the system manager, and a user unit's
+ * `Wants=` cannot pull it in — it is silently ineffective at best. Nothing is lost:
+ * a worker whose first poll fails backs off and retries, and reports the failure
+ * while doing so (`worker/worker_loops.ts`), which is the same mechanism that
+ * already covers a server still binding its port.
  */
 function unitSection(): string {
   return [
@@ -132,38 +134,48 @@ function unitSection(): string {
 }
 
 /**
- * The `[Service]` directives every service shares: who it runs as, where, and
- * what happens when it dies.
+ * The `[Service]` directives every service shares: where it runs, and what happens
+ * when it dies.
  *
- * `StateDirectory` is on all three rather than only the server. It is what creates
- * and chowns `/var/lib/tempo`, and a worker unit that omitted it would work until
- * the day it started first on a fresh host.
+ * **No `User=` or `Group=`.** A user unit runs as the user who owns it, which is
+ * the entire reason this deployment model was chosen — the identity question stops
+ * being configuration and becomes a property of where the unit lives. Writing
+ * `User=` here would either be a no-op or an error, and would read as though the
+ * service could run as someone else.
+ *
+ * **No `StateDirectory=` either, and that is a deliberate reversal.** A system unit
+ * can use it safely: it resolves to `/var/lib/<name>`, full stop. In a *user* unit
+ * it resolves beneath an XDG base directory, and which one has not been stable
+ * across systemd versions. If systemd's answer ever differs from the path this
+ * writes into `--data-dir`, the server persists history to one directory while
+ * systemd carefully prepares another — a split nobody would notice until a restore
+ * came up empty.
+ *
+ * So the state directory has exactly one source of truth, `Layout.stateDir`, and
+ * `up` creates it. The cost is the property that made `StateDirectory=` attractive:
+ * systemd no longer recreates the directory if someone deletes it between deploys.
+ * A wrong-but-tidy path is worse than a right one that needs recreating.
  */
-function serviceSection(): string {
+function serviceSection(layout: Layout): string {
   return [
-    `User=${SERVICE_USER}`,
-    `Group=${SERVICE_USER}`,
-    `WorkingDirectory=${INSTALL_ROOT}`,
-    `StateDirectory=${STATE_DIRECTORY_NAME}`,
+    `WorkingDirectory=${layout.installRoot}`,
     'Restart=always',
     'RestartSec=1',
   ].join('\n');
 }
 
 /** The engine server: owns the durable state and the timers. */
-export function serverUnit(config: UnitConfig): string {
+export function serverUnit(layout: Layout, config: UnitConfig): string {
   return `[Unit]
 Description=tempo server
-After=network-online.target
-Wants=network-online.target
 ${unitSection()}
 
 [Service]
-ExecStart=${NODE_BIN} ${SERVER_ARTIFACT} ${serverArgs(config).join(' ')}
-${serviceSection()}
+ExecStart=${NODE_BIN} ${layout.serverArtifact} ${serverArgs(layout, config).join(' ')}
+${serviceSection(layout)}
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 `;
 }
 
@@ -177,19 +189,22 @@ WantedBy=multi-user.target
  * Encoding readiness in the unit would mean a health check that has to stay
  * true, to buy something the retry loop already handles.
  */
-export function workerUnit(role: WorkerRole, config: UnitConfig): string {
+export function workerUnit(
+  layout: Layout,
+  role: WorkerRole,
+  config: UnitConfig,
+): string {
   return `[Unit]
 Description=tempo ${role} worker
-After=network-online.target ${SERVER_UNIT}.service
-Wants=network-online.target
+After=${SERVER_UNIT}.service
 ${unitSection()}
 
 [Service]
-ExecStart=${NODE_BIN} ${WORKER_ARTIFACT} ${workerArgs(role, config).join(' ')}
-${serviceSection()}
+ExecStart=${NODE_BIN} ${layout.workerArtifact} ${workerArgs(role, config).join(' ')}
+${serviceSection(layout)}
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 `;
 }
 
@@ -200,10 +215,13 @@ WantedBy=multi-user.target
  * workers reconnect to something coming up rather than spending their first
  * backoff on something going down.
  */
-export function allUnits(config: UnitConfig): Array<[string, string]> {
+export function allUnits(
+  layout: Layout,
+  config: UnitConfig,
+): Array<[string, string]> {
   return [
-    [SERVER_UNIT, serverUnit(config)],
-    [WORKER_UNITS.workflow, workerUnit('workflow', config)],
-    [WORKER_UNITS.activity, workerUnit('activity', config)],
+    [SERVER_UNIT, serverUnit(layout, config)],
+    [WORKER_UNITS.workflow, workerUnit(layout, 'workflow', config)],
+    [WORKER_UNITS.activity, workerUnit(layout, 'activity', config)],
   ];
 }

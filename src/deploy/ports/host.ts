@@ -42,17 +42,43 @@ export interface CommandResult {
   stderr: string;
 }
 
+/**
+ * Where this user's files go, as the XDG base directory specification defines it.
+ *
+ * **This is the one place a deployment reads the environment, and it is not a
+ * contradiction of the flags-not-environment rule.** That rule is about *tempo's*
+ * configuration: which port, which server, which queue — values a stale inherited
+ * variable would silently get wrong. These are the platform telling us where the
+ * user keeps things. A user who sets `XDG_DATA_HOME` expects it honoured, and
+ * ignoring it in favour of a hardcoded `~/.local/share` would be the bug.
+ */
+export interface UserPaths {
+  /** `$XDG_DATA_HOME`, else `~/.local/share`. Installed artifacts. */
+  data: string;
+  /** `$XDG_CONFIG_HOME`, else `~/.config`. Unit files. */
+  config: string;
+  /** `$XDG_STATE_HOME`, else `~/.local/state`. Where `StateDirectory=` lands. */
+  state: string;
+}
+
 /** Everything a deployment does to the machine it is deploying to. */
 export interface Host {
   /**
-   * The effective user id, so `up` can refuse **before its first write** rather
-   * than discovering it lacks permission halfway through. A partial deploy is
-   * worse than a refused one.
+   * The effective user id.
+   *
+   * Used to refuse running **as root**, which is the inversion of what a
+   * system-wide installer would check: these are user units, so a deploy run under
+   * `sudo` would install into root's home and start services nobody asked for. See
+   * `up`.
    *
    * Returns a negative number where the concept does not exist — Windows has no
-   * `geteuid` — which reads as "not root" and refuses, correctly.
+   * `geteuid` — which reads as "not root" and is the permissive answer, correctly:
+   * there is nothing privileged left to guard.
    */
   euid(): number;
+
+  /** Where this user's files go. See `UserPaths`. */
+  userPaths(): UserPaths;
 
   /** Create a directory and any missing parents. Succeeds if it already exists. */
   makeDirectory(path: string): Promise<void>;

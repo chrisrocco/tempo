@@ -120,12 +120,10 @@ describe('down — a host where nothing is deployed', () => {
 });
 
 describe('down — what it refuses', () => {
-  it('refuses without root rather than failing three times over', async () => {
-    const host = fakeHost({euid: 1000});
+  it('refuses to run as root, which would address root’s units', async () => {
+    const host = fakeHost({euid: 0});
 
-    await expectAsync(down(host)).toBeRejectedWithError(
-      /must run as root.*effective uid 1000/s,
-    );
+    await expectAsync(down(host)).toBeRejectedWithError(/must not run as root/);
     expect(host.commands()).toEqual([]);
   });
 });

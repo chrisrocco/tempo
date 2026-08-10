@@ -16,17 +16,14 @@
  */
 
 import 'jasmine';
-import {
-  ALL_UNITS,
-  SERVER_ARTIFACT,
-  WORKER_ARTIFACT,
-  unitPath,
-  up,
-} from '../../src/deploy';
+import {ALL_UNITS, resolveLayout, unitPath, up} from '../../src/deploy';
 import {DEFAULT_PORT} from '../../src/process_flags';
 import {fakeHost, type FakeHost} from '../support/fake_host';
 
 const artifacts = {server: 'out/server.js', worker: 'out/worker.js'};
+
+/** The layout the fake user's deployment resolves to. */
+const layout = resolveLayout(fakeHost());
 
 /** Index of the first recorded command containing `fragment`. */
 function commandIndex(host: FakeHost, fragment: string): number {
@@ -38,10 +35,13 @@ describe('up — the deploy sequence', () => {
     const host = fakeHost();
     const result = await up(artifacts, host);
 
-    expect(result.installed).toEqual([SERVER_ARTIFACT, WORKER_ARTIFACT]);
+    expect(result.installed).toEqual([
+      layout.serverArtifact,
+      layout.workerArtifact,
+    ]);
     expect(result.units).toEqual([...ALL_UNITS]);
     for (const unit of ALL_UNITS)
-      expect(host.written.has(unitPath(unit))).toBe(true);
+      expect(host.written.has(unitPath(layout, unit))).toBe(true);
   });
 
   it('copies the artifacts through the install seam, not by writing them', async () => {
@@ -51,8 +51,16 @@ describe('up — the deploy sequence', () => {
     // `installFile` is what dereferences a symlink and renames atomically; a
     // `writeFile` of the artifact would quietly lose both properties.
     expect(host.callsOf('installFile')).toEqual([
-      {kind: 'installFile', target: 'out/server.js', detail: SERVER_ARTIFACT},
-      {kind: 'installFile', target: 'out/worker.js', detail: WORKER_ARTIFACT},
+      {
+        kind: 'installFile',
+        target: 'out/server.js',
+        detail: layout.serverArtifact,
+      },
+      {
+        kind: 'installFile',
+        target: 'out/worker.js',
+        detail: layout.workerArtifact,
+      },
     ]);
   });
 
@@ -90,7 +98,7 @@ describe('up — the deploy sequence', () => {
       -1,
     );
     const reload = host.calls.findIndex(
-      (c) => c.kind === 'run' && c.detail === 'daemon-reload',
+      (c) => c.kind === 'run' && c.detail?.includes('daemon-reload') === true,
     );
     expect(lastWrite).toBeGreaterThanOrEqual(0);
     expect(lastWrite).toBeLessThan(reload);
@@ -122,34 +130,93 @@ describe('up — the deploy sequence', () => {
   });
 });
 
-describe('up — the service user', () => {
-  it('creates the service user when it does not exist', async () => {
-    const host = fakeHost({
-      responses: [{match: 'id -u tempo', result: {code: 1}}],
-    });
+describe('up — a per-user deployment', () => {
+  it('installs under the user’s own directories and creates no accounts', async () => {
+    const host = fakeHost();
     const result = await up(artifacts, host);
 
-    expect(result.createdUser).toBe(true);
-    expect(host.commands().some((c) => c.startsWith('useradd'))).toBe(true);
-  });
-
-  it('leaves an existing service user alone', async () => {
-    const host = fakeHost({
-      responses: [{match: 'id -u tempo', result: {code: 0, stdout: '999\n'}}],
-    });
-    const result = await up(artifacts, host);
-
-    expect(result.createdUser).toBe(false);
+    expect(result.installRoot).toBe('/fake/home/.local/share/tempo');
+    expect(
+      host.written.has('/fake/home/.config/systemd/user/tempo-server.service'),
+    ).toBe(true);
+    // No system account: a user unit runs as the user who owns it.
     expect(host.commands().some((c) => c.startsWith('useradd'))).toBe(false);
+    expect(host.commands().some((c) => c.startsWith('id '))).toBe(false);
   });
 
-  it('creates the user before the units that name it are started', async () => {
-    const host = fakeHost({
-      responses: [{match: 'id -u tempo', result: {code: 1}}],
-    });
+  it('addresses the user manager on every systemctl call', async () => {
+    const host = fakeHost();
     await up(artifacts, host);
 
-    expect(commandIndex(host, 'useradd')).toBeLessThan(
+    for (const command of host
+      .commands()
+      .filter((c) => c.startsWith('systemctl')))
+      expect(command).toContain('--user');
+  });
+
+  // The unit directory does not exist on a machine that has never had a user unit,
+  // and systemd will not create it.
+  it('creates the unit directory as well as the install root', async () => {
+    const host = fakeHost();
+    await up(artifacts, host);
+
+    expect(host.callsOf('makeDirectory').map((c) => c.target)).toEqual([
+      '/fake/home/.local/share/tempo',
+      // The state directory too: systemd is not asked to own it, because
+      // `StateDirectory=` in a user unit could resolve elsewhere. See units.ts.
+      '/fake/home/.local/state/tempo',
+      '/fake/home/.config/systemd/user',
+    ]);
+  });
+});
+
+/**
+ * The one prerequisite this model has, and the one thing about it that fails
+ * silently: without lingering, these services stop at logout and do not start at
+ * boot. Every deploy succeeds and the deployment vanishes when the operator closes
+ * their laptop.
+ */
+describe('up — lingering', () => {
+  it('reports lingering as on when loginctl says it is', async () => {
+    const host = fakeHost({
+      responses: [{match: 'loginctl', result: {stdout: 'Linger=yes\n'}}],
+    });
+    const result = await up(artifacts, host);
+
+    expect(result.lingering).toBe(true);
+    expect(result.lingerPrerequisite).toBeUndefined();
+  });
+
+  // Reported, not thrown: the deployment is running right now and is correct.
+  // What is wrong is what happens later, and only the operator can fix it.
+  it('reports the fix when lingering is off, without failing the deploy', async () => {
+    const host = fakeHost({
+      responses: [{match: 'loginctl', result: {stdout: 'Linger=no\n'}}],
+    });
+    const result = await up(artifacts, host);
+
+    expect(result.units).toEqual([...ALL_UNITS]);
+    expect(result.lingering).toBe(false);
+    expect(result.lingerPrerequisite).toContain('enable-linger');
+  });
+
+  // A user with no session makes loginctl exit non-zero. Reading that as "not
+  // lingering" prompts a check rather than suppressing one.
+  it('treats an unreadable answer as not lingering', async () => {
+    const host = fakeHost({
+      responses: [
+        {match: 'loginctl', result: {code: 1, stderr: 'no such user'}},
+      ],
+    });
+
+    expect((await up(artifacts, host)).lingering).toBe(false);
+  });
+
+  it('asks only after the deployment is up, so it can never fail one', async () => {
+    const host = fakeHost();
+    await up(artifacts, host);
+
+    expect(commandIndex(host, 'loginctl')).toBeGreaterThan(
       commandIndex(host, 'restart'),
     );
   });
@@ -157,15 +224,17 @@ describe('up — the service user', () => {
 
 describe('up — what it refuses', () => {
   /**
-   * Before the first write, not after the first failure: a permission error found
-   * halfway through leaves an install root with one artifact in it and no units,
-   * which is harder to reason about than a deployment that never started.
+   * The inversion of what a system-wide installer would check, and not symmetry for
+   * its own sake: under `sudo` every path resolves against root's home, so this
+   * would install a deployment into `/root/.local/share/tempo` and start services
+   * owned by root that the operator cannot see with their own `systemctl --user`.
+   * It would appear to work and produce nothing they asked for.
    */
-  it('refuses without root, before touching anything', async () => {
-    const host = fakeHost({euid: 1000});
+  it('refuses to run as root, before touching anything', async () => {
+    const host = fakeHost({euid: 0});
 
     await expectAsync(up(artifacts, host)).toBeRejectedWithError(
-      /must run as root.*effective uid 1000/s,
+      /must not run as root.*user units/s,
     );
     expect(host.callsOf('installFile')).toEqual([]);
     expect(host.callsOf('writeFile')).toEqual([]);
@@ -195,17 +264,18 @@ describe('up — what it refuses', () => {
     expect(host.commands().some((c) => c.includes('restart'))).toBe(false);
   });
 
-  it('reports which user it could not create', async () => {
+  it('fails when systemd will not enable the units', async () => {
     const host = fakeHost({
       responses: [
-        {match: 'id -u tempo', result: {code: 1}},
-        {match: 'useradd', result: {code: 4, stderr: 'UID already in use'}},
+        {match: 'enable', result: {code: 1, stderr: 'Failed to enable unit'}},
       ],
     });
 
     await expectAsync(up(artifacts, host)).toBeRejectedWithError(
-      /could not create the tempo user \(exit 4\): UID already in use/,
+      /enable .*failed \(exit 1\): Failed to enable unit/,
     );
+    // Nothing was restarted into a deployment that will not survive a logout.
+    expect(host.commands().some((c) => c.includes('restart'))).toBe(false);
   });
 });
 
@@ -233,7 +303,7 @@ describe('up — configuration', () => {
     const host = fakeHost();
     await up(artifacts, host);
 
-    const server = host.written.get(unitPath('tempo-server'));
+    const server = host.written.get(unitPath(layout, 'tempo-server'));
     expect(server).toContain('--host=127.0.0.1');
   });
 

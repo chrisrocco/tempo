@@ -64,17 +64,17 @@ export interface RestartResult {
  * restarts in that order — the workers then reconnect to something coming up
  * rather than spending their first backoff on something going down.
  *
- * Requires root, and says so before doing anything, rather than restarting the
- * server and then failing on the workers.
+ * Needs no privilege: these are the calling user's own units, which is the whole
+ * point of the deployment model. What it refuses is running *as* root.
  */
 export async function restart(
   target: Target,
   host: Host,
 ): Promise<RestartResult> {
-  const euid = host.euid();
-  if (euid !== 0)
+  // See `up`: under sudo this addresses root's units, not the user's.
+  if (host.euid() === 0)
     throw new Error(
-      `restarting tempo services must run as root (effective uid ${euid})`,
+      'restarting tempo services must not run as root: these are systemd user units, and under sudo it would restart root’s rather than yours',
     );
 
   const units = unitsFor(target);
@@ -133,6 +133,10 @@ export async function logs(
   const out: UnitLog[] = [];
   for (const unit of units) {
     const args = [
+      // The user journal, matching where the units live. Without it journalctl
+      // reads the system journal, where these services have never written, and
+      // reports an empty log — an answer-shaped wrong answer.
+      '--user',
       '--unit',
       `${unit}.service`,
       '--lines',

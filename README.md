@@ -109,13 +109,18 @@ the environment — see [`src/process_flags.ts`](src/process_flags.ts) for why.
 replaced it is [`src/deploy/`](src/deploy/index.ts) — `up`, `down`, `status`,
 `restart`, and `logs` as ordinary functions, typed options in and typed values
 out, for a consumer to assemble a CLI from. Installing a server and its two worker
-tiers as supervised systemd services is one call:
+tiers as supervised systemd **user** services is one call, and needs no root:
 
 ```ts
 import { up, systemHost } from './src/deploy';
 
 await up({ server: 'out/server.js', worker: 'out/worker.js' }, systemHost());
 ```
+
+The workflows then run as the user who deployed them, under
+`$XDG_DATA_HOME/tempo`, managed with `systemctl --user`. One privileged step is
+needed once per user — `sudo loginctl enable-linger $USER`, without which the
+services stop at logout — and `up` reports whether it has been done.
 
 Going distributed does not change the workflow code, only how it is hosted. See
 [`bin/server-main.ts`](bin/server-main.ts) for the server process and

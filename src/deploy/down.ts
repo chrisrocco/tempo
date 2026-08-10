@@ -54,15 +54,14 @@ export interface DownResult {
 /**
  * Stop and disable every unit of a deployment.
  *
- * Requires root — `disable` writes to `/etc/systemd/system`. That is checked up
- * front so the answer is a refusal rather than three identical permission
- * failures.
+ * Needs no privilege: these are the calling user's own units.
  */
 export async function down(host: Host): Promise<DownResult> {
-  const euid = host.euid();
-  if (euid !== 0)
+  // Same reason as `up`: under sudo this would address root's units, report them
+  // all absent, and leave the user's deployment running.
+  if (host.euid() === 0)
     throw new Error(
-      `tempo down must run as root: it stops and disables systemd units (effective uid ${euid})`,
+      'tempo down must not run as root: these are systemd user units, and under sudo it would look for root’s and leave yours running',
     );
 
   const units: UnitOutcome[] = [];

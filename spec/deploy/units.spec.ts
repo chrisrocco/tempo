@@ -15,6 +15,7 @@
 
 import 'jasmine';
 import {
+  resolveLayout,
   serverArgs,
   serverUnit,
   workerArgs,
@@ -22,6 +23,7 @@ import {
   workerUnit,
   type UnitConfig,
 } from '../../src/deploy';
+import {fakeHost} from '../support/fake_host';
 import {
   DEFAULT_PORT,
   SERVER_FLAG,
@@ -37,6 +39,9 @@ import {
 } from '../../src/tempo';
 
 const config: UnitConfig = {port: DEFAULT_PORT, host: '127.0.0.1'};
+
+/** A layout for a fixed fake user, so paths are assertable. */
+const layout = resolveLayout(fakeHost());
 
 /**
  * Split a unit file into its sections.
@@ -68,11 +73,11 @@ describe('deploy units — what is written is what is read', () => {
    * nobody, and this is the only place that would notice.
    */
   it('gives the server flags the server itself parses', () => {
-    const args = serverArgs(config);
+    const args = serverArgs(layout, config);
 
     expect(numericFlagValue(args, SERVER_FLAG.port)).toBe(DEFAULT_PORT);
     expect(flagValue(args, SERVER_FLAG.host)).toBe('127.0.0.1');
-    expect(flagValue(args, SERVER_FLAG.dataDir)).toBe('/var/lib/tempo');
+    expect(flagValue(args, SERVER_FLAG.dataDir)).toBe(layout.stateDir);
   });
 
   it('gives each worker flags the worker entrypoint itself resolves', () => {
@@ -104,8 +109,11 @@ describe('deploy units — what is written is what is read', () => {
   it('always tells the server where its history goes', () => {
     for (const port of [DEFAULT_PORT, 1234])
       expect(
-        flagValue(serverArgs({port, host: '0.0.0.0'}), SERVER_FLAG.dataDir),
-      ).toBe('/var/lib/tempo');
+        flagValue(
+          serverArgs(layout, {port, host: '0.0.0.0'}),
+          SERVER_FLAG.dataDir,
+        ),
+      ).toBe(layout.stateDir);
   });
 });
 
@@ -137,7 +145,10 @@ describe('deploy units — the address a worker dials', () => {
 });
 
 describe('deploy units — staying running', () => {
-  const units = [serverUnit(config), workerUnit('workflow', config)];
+  const units = [
+    serverUnit(layout, config),
+    workerUnit(layout, 'workflow', config),
+  ];
 
   it('comes back from a crash', () => {
     for (const unit of units) {
@@ -182,25 +193,51 @@ describe('deploy units — staying running', () => {
   it('is wanted by the boot target, so enabling it survives a reboot', () => {
     for (const unit of units) {
       expect(unit).toContain('[Install]');
-      expect(unit).toContain('WantedBy=multi-user.target');
-    }
-  });
-
-  it('runs as the unprivileged service user, not as root', () => {
-    for (const unit of units) {
-      expect(unit).toContain('User=tempo');
-      expect(unit).toContain('Group=tempo');
+      expect(unit).toContain('WantedBy=default.target');
     }
   });
 
   /**
-   * `StateDirectory` is what creates and chowns `/var/lib/tempo` before every
-   * `ExecStart`. It is on all three units rather than only the server, because a
-   * worker unit that omitted it would work until the day it started first on a
-   * fresh host.
+   * A user unit runs as whoever owns it, so naming a user would either be a no-op
+   * or an error — and would read as though the service could run as someone else.
+   * The identity question is answered by *where the unit lives*, which is the whole
+   * reason this deployment model was chosen.
    */
-  it('lets systemd own the state directory, on every unit', () => {
-    for (const unit of units) expect(unit).toContain('StateDirectory=tempo');
+  it('names no user, because a user unit already runs as the user', () => {
+    for (const unit of units) {
+      expect(unit).not.toContain('User=');
+      expect(unit).not.toContain('Group=');
+    }
+  });
+
+  /**
+   * A system unit would order itself after `network-online.target`; a user unit
+   * cannot — that target belongs to the system manager, and a user unit's `Wants=`
+   * cannot pull it in, so writing it is ineffective at best. Nothing is lost: a
+   * worker whose first poll fails backs off and retries.
+   */
+  it('does not pretend to depend on system targets it cannot reach', () => {
+    for (const unit of units) expect(unit).not.toContain('network-online');
+  });
+
+  /**
+   * A system unit could safely say `StateDirectory=tempo` — it resolves to
+   * `/var/lib/tempo`, full stop. In a *user* unit it resolves beneath an XDG base
+   * directory whose mapping has not been stable across systemd versions, so if
+   * systemd's answer ever differed from the `--data-dir` these units carry, the
+   * server would persist history to one directory while systemd prepared another.
+   * `Layout.stateDir` is the one source of truth and `up` creates it.
+   */
+  it('does not delegate the state directory to systemd', () => {
+    for (const unit of units) expect(unit).not.toContain('StateDirectory');
+  });
+
+  // The counterpart: the path the server is actually told has to be the resolved
+  // one, since nothing else now creates or names it.
+  it('tells the server the state directory the layout resolved', () => {
+    expect(serverUnit(layout, config)).toContain(
+      `--data-dir=${layout.stateDir}`,
+    );
   });
 });
 
@@ -208,15 +245,17 @@ describe('deploy units — the three services', () => {
   it('names the interpreter absolutely rather than resolving it from PATH', () => {
     // A unit that inherited PATH would run whichever node the deploying operator
     // happened to have.
-    expect(serverUnit(config)).toContain('ExecStart=/usr/bin/node /opt/tempo/');
+    expect(serverUnit(layout, config)).toContain(
+      `ExecStart=/usr/bin/node ${layout.installRoot}/`,
+    );
   });
 
   it('runs one artifact twice, once per role', () => {
-    const workflow = workerUnit('workflow', config);
-    const activity = workerUnit('activity', config);
+    const workflow = workerUnit(layout, 'workflow', config);
+    const activity = workerUnit(layout, 'activity', config);
 
-    expect(workflow).toContain('/opt/tempo/worker.js');
-    expect(activity).toContain('/opt/tempo/worker.js');
+    expect(workflow).toContain(layout.workerArtifact);
+    expect(activity).toContain(layout.workerArtifact);
     expect(workflow).toContain(`--${WORKER_FLAG.role}=workflow`);
     expect(activity).toContain(`--${WORKER_FLAG.role}=activity`);
   });
@@ -224,11 +263,16 @@ describe('deploy units — the three services', () => {
   it('orders workers after the server without depending on its readiness', () => {
     // `After=` orders a boot and promises nothing about listening; the worker's
     // own poll backoff is what handles a server still binding.
-    expect(workerUnit('workflow', config)).toContain('tempo-server.service');
+    expect(workerUnit(layout, 'workflow', config)).toContain(
+      'tempo-server.service',
+    );
   });
 
   it('carries no environment, so systemctl cat shows the whole configuration', () => {
-    for (const unit of [serverUnit(config), workerUnit('activity', config)]) {
+    for (const unit of [
+      serverUnit(layout, config),
+      workerUnit(layout, 'activity', config),
+    ]) {
       expect(unit).not.toContain('Environment=');
       expect(unit).not.toContain('EnvironmentFile=');
     }

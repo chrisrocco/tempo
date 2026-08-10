@@ -10,29 +10,38 @@
  * on demand, the other resolved build *targets* through a toolchain — so it is
  * stated as a goal rather than left to be noticed.
  *
+ * ## It needs no privilege, and refuses to have any
+ *
+ * These are systemd **user** units, installed under the invoking user's own
+ * directories, so `up` runs as an ordinary user and so do the workflows. That is
+ * the inversion of what this function used to be: it required root, wrote `/opt`
+ * and `/etc/systemd/system`, and created a `tempo` system account.
+ *
+ * It now **refuses to run as root**, which is not symmetry for its own sake. Under
+ * `sudo` every path here resolves against root's home, so a deploy would install a
+ * deployment into `/root/.local/share/tempo` and start services owned by root that
+ * the operator cannot see with their own `systemctl --user`. It would appear to
+ * work and produce nothing the user asked for.
+ *
  * ## The order is the design
  *
- * 1. **Refuse without root**, before touching anything. A permission error found
- *    halfway through is a partial deploy; a refusal is not.
- * 2. **Ensure the service user**, because the units name it and systemd will not
- *    invent it.
- * 3. **Install the artifacts** — dereferenced, and atomically. See
+ * 1. **Refuse if root**, before touching anything.
+ * 2. **Install the artifacts** — dereferenced, and atomically. See
  *    `ports/host.ts`.
- * 4. **Write the units.**
- * 5. **`daemon-reload`**, or systemd keeps serving the unit it last loaded and a
+ * 3. **Write the units.**
+ * 4. **`daemon-reload`**, or systemd keeps serving the unit it last loaded and a
  *    changed `ExecStart` is silently ignored.
- * 6. **`enable`**, or the deployment is gone the first time the host reboots.
- * 7. **`restart`, server first.** Nothing rereads a `.js` in place, so the
+ * 5. **`enable`**, or the deployment is gone the first time this user logs out.
+ * 6. **`restart`, server first.** Nothing rereads a `.js` in place, so the
  *    restart *is* the deployment.
  *
- * Steps 5–7 are the three whose omission looks exactly like success, which is
+ * Steps 4–6 are the three whose omission looks exactly like success, which is
  * why each is a named call with a reason attached rather than a line in a script.
  *
  * ## What it does not do
  *
- * **It does not create `/var/lib/tempo`.** The units declare
- * `StateDirectory=tempo` and systemd creates and chowns it before every
- * `ExecStart`, which also holds when someone deletes it between deploys.
+ * **It does not enable lingering**, because it cannot — that is privileged. It
+ * checks and reports instead. See `UpResult.lingering`.
  *
  * **It does not write `VERSION`.** The layout has a place for artifact
  * fingerprints and nothing reads them yet; what they are *for* — catching a
@@ -47,15 +56,9 @@
  */
 
 import {DEFAULT_PORT} from '../process_flags';
-import {
-  INSTALL_ROOT,
-  SERVER_ARTIFACT,
-  SERVICE_USER,
-  WORKER_ARTIFACT,
-  unitPath,
-} from './layout';
+import {LINGER_PREREQUISITE, resolveLayout, unitPath} from './layout';
 import type {Host} from './ports/host';
-import {daemonReload, enable, restart} from './systemctl';
+import {daemonReload, enable, isLingerEnabled, restart} from './systemctl';
 import {allUnits, type UnitConfig} from './units';
 
 /** What to deploy, and the little a deployment varies. */
@@ -84,41 +87,20 @@ export interface UpResult {
   installed: readonly string[];
   /** Unit names written, enabled, and restarted — server first. */
   units: readonly string[];
-  /** True when the service user did not exist and was created. */
-  createdUser: boolean;
-}
-
-/**
- * Does this account exist?
- *
- * `id` exits non-zero for an unknown user, which is an answer rather than a
- * failure — hence `run` rather than a throwing helper.
- */
-async function userExists(host: Host, user: string): Promise<boolean> {
-  const result = await host.run('id', ['-u', user]);
-  return result.code === 0;
-}
-
-/**
- * Create the unprivileged account the services run as.
- *
- * `--system` keeps it out of the human uid range and gives it no expiry;
- * no home directory and no login shell because nothing ever logs in as it. The
- * account exists to own `/var/lib/tempo` and to be something other than root.
- */
-async function createUser(host: Host, user: string): Promise<void> {
-  const result = await host.run('useradd', [
-    '--system',
-    '--no-create-home',
-    '--shell',
-    '/usr/sbin/nologin',
-    user,
-  ]);
-  if (result.code !== 0)
-    throw new Error(
-      `could not create the ${user} user (exit ${result.code})` +
-        `${result.stderr.trim() ? `: ${result.stderr.trim()}` : ''}`,
-    );
+  /** Where the artifacts and units went, so a caller can say. */
+  installRoot: string;
+  /**
+   * Whether this user's services survive logging out.
+   *
+   * `false` means the deploy worked and **will not outlast the session**: user
+   * units without lingering stop at logout and do not start at boot. It is not an
+   * error — the deployment is running right now and correct — which is exactly why
+   * it has to be reported rather than thrown or ignored. `lingerPrerequisite`
+   * carries the one command that fixes it.
+   */
+  lingering: boolean;
+  /** The privileged one-time command that enables lingering, when it is not on. */
+  lingerPrerequisite?: string;
 }
 
 /**
@@ -135,22 +117,29 @@ export async function up(options: UpOptions, host: Host): Promise<UpResult> {
     host: options.host ?? '127.0.0.1',
   };
 
-  // Before the first write, not after the first failure.
-  const euid = host.euid();
-  if (euid !== 0)
+  // Before the first write, not after the first surprise. Under sudo every path
+  // below resolves against root's home, so this would deploy somewhere the
+  // operator cannot see and start services they did not ask for.
+  if (host.euid() === 0)
     throw new Error(
-      `tempo up must run as root: it writes ${INSTALL_ROOT} and installs systemd units (effective uid ${euid})`,
+      'tempo up must not run as root: these are systemd user units, and under sudo they would install into root’s home and run as root. Run it as the user the workflows should run as.',
     );
 
-  const createdUser = !(await userExists(host, SERVICE_USER));
-  if (createdUser) await createUser(host, SERVICE_USER);
+  const layout = resolveLayout(host);
 
-  await host.makeDirectory(INSTALL_ROOT);
-  await host.installFile(options.server, SERVER_ARTIFACT);
-  await host.installFile(options.worker, WORKER_ARTIFACT);
+  await host.makeDirectory(layout.installRoot);
+  // Created here rather than left to `StateDirectory=`, which in a user unit
+  // resolves beneath an XDG directory that has moved between systemd versions —
+  // see `units.ts`. One source of truth for where history lives.
+  await host.makeDirectory(layout.stateDir);
+  await host.installFile(options.server, layout.serverArtifact);
+  await host.installFile(options.worker, layout.workerArtifact);
 
-  const units = allUnits(config);
-  for (const [unit, text] of units) await host.writeFile(unitPath(unit), text);
+  // The unit directory may not exist on a machine that has never had a user unit.
+  await host.makeDirectory(layout.unitDir);
+  const units = allUnits(layout, config);
+  for (const [unit, text] of units)
+    await host.writeFile(unitPath(layout, unit), text);
 
   const names = units.map(([unit]) => unit);
   await daemonReload(host);
@@ -159,11 +148,17 @@ export async function up(options: UpOptions, host: Host): Promise<UpResult> {
   // spending their first backoff on something going down.
   for (const unit of names) await restart(host, unit);
 
+  // Asked last, because it describes what happens *after* this deploy rather than
+  // whether the deploy worked, and because it must not be able to fail one.
+  const lingering = await isLingerEnabled(host);
+
   return {
     port: config.port,
     host: config.host,
-    installed: [SERVER_ARTIFACT, WORKER_ARTIFACT],
+    installed: [layout.serverArtifact, layout.workerArtifact],
     units: names,
-    createdUser,
+    installRoot: layout.installRoot,
+    lingering,
+    ...(lingering ? {} : {lingerPrerequisite: LINGER_PREREQUISITE}),
   };
 }

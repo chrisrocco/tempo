@@ -74,18 +74,36 @@ task. `status` is not the right home — it inspects a deployment, not an artifa
 and the natural one is whatever _builds_ the artifact, checking that what it just
 produced comes up.
 
-## 4. Two constants that will eventually need to be options
+## 4. Consequences of being a per-user deployment
 
-Recorded because each is a one-line change with a real trigger, and because
-guessing wrong about _when_ is how they end up as options nobody needs:
+These are systemd **user** units under `$XDG_DATA_HOME/tempo` — no root, and the
+workflows run as the user who deployed them. That was chosen over a system daemon
+because the workflows need the user's own identity and an operator should not need
+`sudo` to deploy. What it costs:
 
-- **`/usr/bin/node`.** A host with node installed elsewhere gets `203/EXEC` on the
-  first start. Loud rather than silent, which is what makes the constant
-  acceptable — but the first such host is the trigger.
-- **`/opt/tempo` and `/var/lib/tempo`.** Fine until two tempo deployments have to
-  coexist on one machine, which is also the point at which one `--worker` and a
-  flat layout stop being enough. The role split is already a rehearsal for the
-  naming that would need.
+- **Lingering is a privileged prerequisite.** `sudo loginctl enable-linger $USER`,
+  once. Without it the services stop at logout and do not start at boot — every
+  deploy succeeds and the deployment vanishes when the operator closes their
+  laptop. `up` checks and reports it rather than failing, since the deployment is
+  genuinely running at the moment it is asked.
+- **No shared machine-wide daemon is possible.** Two users on one host get two
+  servers, two worker pairs, and two histories. That is the point, but it also
+  means **they cannot share port 7777** — a second user has to pass a different
+  `port`, and nothing detects the collision beyond the second server failing to
+  bind.
+- **History lives in `$HOME`.** If that is NFS-mounted, `FileHistoryStore`'s
+  single-writer lockfile is on much shakier ground than it is on local disk. Not
+  investigated.
+- **`/usr/bin/node` is still a constant.** A host with node elsewhere gets
+  `203/EXEC` on the first start — loud rather than silent, which is what makes it
+  acceptable, but the first such host is the trigger to make it an option.
+
+The prediction this replaces is worth keeping for the shape of the lesson: an
+earlier version of this file said `/opt/tempo` and `/var/lib/tempo` would need to
+become options "the day two tempo deployments have to coexist on one machine". The
+trigger was right and the direction was wrong — it arrived as _every user is a
+deployment_, which made the paths variable and deleted the system account entirely
+rather than parameterising it.
 
 ---
 

@@ -41,15 +41,14 @@
 export {down, type DownResult, type UnitOutcome} from './down';
 export {
   ALL_UNITS,
-  INSTALL_ROOT,
+  LINGER_PREREQUISITE,
   NODE_BIN,
-  SERVER_ARTIFACT,
   SERVER_UNIT,
-  SERVICE_USER,
-  STATE_DIR,
-  WORKER_ARTIFACT,
+  DEPLOYMENT_NAME,
   WORKER_UNITS,
+  resolveLayout,
   unitPath,
+  type Layout,
 } from './layout';
 export {
   logs,
@@ -60,7 +59,7 @@ export {
   type Target,
   type UnitLog,
 } from './operate';
-export type {CommandResult, Host} from './ports/host';
+export type {CommandResult, Host, UserPaths} from './ports/host';
 export {
   status,
   type DeploymentStatus,

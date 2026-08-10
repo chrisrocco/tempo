@@ -27,7 +27,7 @@ import {fakeHost} from '../support/fake_host';
 /** systemd's answer for a unit that is up and enabled. */
 function showing(activeState: string, fileState = 'enabled', restarts = 0) {
   return {
-    match: 'systemctl show',
+    match: 'show',
     result: {
       stdout: `ActiveState=${activeState}\nUnitFileState=${fileState}\nLoadState=loaded\nNRestarts=${restarts}\n`,
     },
@@ -104,7 +104,7 @@ describe('status — reading systemd', () => {
     const host = fakeHost({
       responses: [
         {
-          match: 'systemctl show',
+          match: 'show',
           result: {
             stdout:
               'ActiveState=inactive\nUnitFileState=\nLoadState=not-found\n',

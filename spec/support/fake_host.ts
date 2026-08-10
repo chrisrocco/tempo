@@ -15,7 +15,18 @@
  * only a single sequence can catch it.
  */
 
-import type {CommandResult, Host} from '../../src/deploy';
+import type {CommandResult, Host, UserPaths} from '../../src/deploy';
+
+/**
+ * A fixed home, so unit text is assertable without depending on whose machine the
+ * suite runs on — and deliberately not `/home/…`, so a path that leaked from the
+ * real environment would be obvious in a failure message.
+ */
+export const FAKE_USER_PATHS: UserPaths = {
+  data: '/fake/home/.local/share',
+  config: '/fake/home/.config',
+  state: '/fake/home/.local/state',
+};
 
 /** One thing that was asked of the machine, in the order it was asked. */
 export interface RecordedCall {
@@ -26,10 +37,20 @@ export interface RecordedCall {
   detail?: string;
 }
 
-/** How the fake should answer. Everything defaults to a healthy root machine. */
+/**
+ * How the fake should answer. Everything defaults to an ordinary user's machine.
+ */
 export interface FakeHostOptions {
-  /** What `euid()` reports. Defaults to 0 — root. */
+  /**
+   * What `euid()` reports. Defaults to `1000` — an ordinary user, which is what
+   * every one of these operations now wants. Pass `0` to exercise the refusals.
+   */
   euid?: number;
+  /**
+   * Where this user's files go. Defaults to a fixed fake home, so unit text is
+   * assertable without depending on whose machine the suite runs on.
+   */
+  userPaths?: UserPaths;
   /**
    * Canned answers for `run`, matched against `"<command> <args joined>"` by
    * substring. First match wins; anything unmatched succeeds with empty output.
@@ -83,7 +104,11 @@ export function fakeHost(options: FakeHostOptions = {}): FakeHost {
 
     euid(): number {
       record({kind: 'euid'});
-      return options.euid ?? 0;
+      return options.euid ?? 1000;
+    },
+
+    userPaths(): UserPaths {
+      return options.userPaths ?? FAKE_USER_PATHS;
     },
 
     async makeDirectory(path: string): Promise<void> {
