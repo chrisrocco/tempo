@@ -100,9 +100,10 @@ tsx bin/server-main.ts &                                    # --port=7777 by def
 tsx examples/greeter.ts --server=http://127.0.0.1:7777 &    # --role= picks one loop
 ```
 
-then start a workflow through [`src/client/`](src/client/client.ts), the same
-seam an application uses. Configuration is flags with defaults, never the
-environment — see [`src/process_flags.ts`](src/process_flags.ts) for why.
+then drive them through [`src/client/`](src/client/client.ts), the same seam an
+application uses — `start`, `describe`, `signal`, `cancel`, `terminate`, `reset`,
+`list`, `queues`, `counts`, `ping`. Configuration is flags with defaults, never
+the environment — see [`src/process_flags.ts`](src/process_flags.ts) for why.
 
 **There is no command-line tool, by design.** There was, and it was deleted; what
 replaced it is [`src/deploy/`](src/deploy/index.ts) — `up`, `down`, and `status`
@@ -229,7 +230,7 @@ src/
     file/           durable append-only history log + single-writer lockfile
   services/       The WorkflowService implementations + HTTP transport
   worker/         Stateless workflow + activity workers
-  client/         WorkflowService -> ergonomic handles
+  client/         WorkflowService -> handles and server-wide reads
   deploy/         up · down · status — install and inspect a deployment
     ports/          host — the seam onto the machine being deployed to
   workflow.ts     ★ AUTHOR ENTRYPOINT — deterministic primitives only

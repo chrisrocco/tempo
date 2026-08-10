@@ -87,15 +87,21 @@ guessing wrong about _when_ is how they end up as options nobody needs:
 
 ## What this library deliberately does not cover
 
-**Driving and reading workflows.** `start`, `result`, `signal`, `cancel`,
-`terminate`, `list`, `describe`, `queues` — the deleted CLI had all of them and
-this library needs none, because they are [`../client/`](../client/client.ts) and
-the `WorkflowService` methods behind it. An assembler calls those directly. What
-the CLI added around them was argument typing, result formatting, and exit codes,
-all of which are presentation.
+**Driving and reading workflows.** `start`, `result`, `describe`, `signal`,
+`cancel`, `terminate`, `reset`, `list`, `queues`, `counts`, `ping` — the deleted
+CLI had all of these and this library needs none of them, because they are all
+[`../client/`](../client/client.ts). An assembler calls that directly. What the CLI
+added around them was argument typing, result formatting, and exit codes, all of
+which are presentation.
 
-`status` is the one exception, and only because "is anything listening" has to be
-a value it returns rather than an exception it throws.
+That was not true when this library landed: `Client` covered only the six calls
+that drive a single execution, and the reads meant dropping to a raw
+`WorkflowService`. It covers all eleven now, so an assembler needs one object
+rather than two.
+
+`status` here is not a duplicate of `Client.ping`: that answers "is a server
+listening", and this one answers "is the deployment working", which needs systemd
+as well and can disagree with it.
 
 **Running a workflow from source with nothing deployed.** It was going to be a
 `run-local` command, and it is the one piece that would have to know how source
