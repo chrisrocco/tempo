@@ -204,22 +204,6 @@ describe('distributed — real server process over RPC', () => {
     }
   }, 30000);
 
-  // How `tempo deploy` interrogates a built binary: it reports what it contains
-  // and exits, without connecting to a server (none is running here).
-  it('reports its workflows and activities under --describe, without connecting', async () => {
-    const proc = spawnMain(WORKER, {}, ['--describe']);
-    try {
-      const [line] = await waitForLine(proc, /\{.*\}/);
-      expect(JSON.parse(line)).toEqual({
-        name: 'greeter',
-        workflows: ['greeter'],
-        activities: ['greet'], // GREETING is a constant, so it is not an activity
-      });
-    } finally {
-      await kill(proc);
-    }
-  }, 30000);
-
   it('redelivers an activity after its lease expires, running it at-least-once', async () => {
     const {url, proc: server} = await spawnServer({
       ACTIVITY_LEASE_MS: '60',

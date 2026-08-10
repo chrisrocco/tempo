@@ -15,7 +15,6 @@
  *   TEMPO_TASK_QUEUE  overrides `taskQueue` (else `default`)
  *   TEMPO_ROLE        overrides `role` — unset runs every role it can
  *   --runtime=MODE    overrides `runtime` — `remote` (default) or `local`
- *   --describe        print {name, workflows, activities} as JSON and exit
  *
  * Running the *same* binary twice with a different `TEMPO_ROLE` is how the two
  * worker tiers are deployed: workflow workers replay workflow code, activity
@@ -440,19 +439,6 @@ function composeLocal(args: {
 export function startWorker(options: StartWorkerOptions): Worker {
   const workflows = callableEntries(options.workflows);
   const activities = callableEntries(options.activities);
-
-  // `--describe` is how `tempo deploy` interrogates a built binary: it must
-  // report what the artifact contains without connecting to anything.
-  if (process.argv.includes('--describe')) {
-    console.log(
-      JSON.stringify({
-        name: options.name,
-        workflows: workflows.map(([exported]) => exported),
-        activities: activities.map(([exported]) => exported),
-      }),
-    );
-    return {name: options.name, roles: [], stop: () => Promise.resolve()};
-  }
 
   const runtime = resolveRuntime(process.argv, options.runtime);
   const role = requestedRole(options.role);

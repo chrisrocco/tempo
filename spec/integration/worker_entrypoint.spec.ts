@@ -228,8 +228,8 @@ describe('worker entrypoint — the real binary, run from a command line', () =>
   /**
    * The flag's other use: boot the shipped artifact with no server anywhere and
    * see whether it comes up at all. Every export registers or the process
-   * throws, which is the check `--describe` cannot make — it reads names
-   * without composing anything.
+   * throws — a smoke test of the artifact's own wiring, needing nothing to
+   * connect to.
    *
    * It exits rather than staying up because nothing outside the process can
    * reach a local runtime, so once the module finishes there is no work left to
@@ -249,22 +249,6 @@ describe('worker entrypoint — the real binary, run from a command line', () =>
 
     expect(code).toBe(1);
     expect(err).toContain('no poll loops to split');
-  }, 30000);
-
-  // `--describe` reports the artifact's contents without composing anything, so
-  // it must keep working under a flag that chooses what to compose.
-  it('still describes itself under a runtime flag, without connecting', async () => {
-    const {code, out} = await runToCompletion([
-      '--runtime=local',
-      '--describe',
-    ]);
-
-    expect(code).toBe(0);
-    expect(JSON.parse(out.trim())).toEqual({
-      name: 'greeter',
-      workflows: ['greeter'],
-      activities: ['greet'],
-    });
   }, 30000);
 });
 
@@ -300,7 +284,7 @@ describe('worker entrypoint — the runtime flag', () => {
 
   it('ignores flags meant for something else', () => {
     expect(
-      resolveRuntime(['--describe', '--runtime-ish=local'], undefined),
+      resolveRuntime(['--role=workflow', '--runtime-ish=local'], undefined),
     ).toBe('remote');
   });
 });
