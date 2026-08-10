@@ -2,15 +2,26 @@
  * @fileoverview
  * The commands a workflow issues in the task that finishes it.
  *
- * One activation can both dispatch and complete — `startChild(worker); return
- * 'done';` — and the terminal dispositions in `applyWorkflowTaskResult` all
- * return early. The batch used to reach them and be discarded: the execution
+ * One activation can both dispatch and complete — `signalWorkflow(parent, done);
+ * return result;` — and the terminal dispositions in `applyWorkflowTaskResult`
+ * all return early. The batch used to reach them and be discarded: the execution
  * completed normally, having silently not done what its last line said, with
  * nothing raised anywhere. The fire-and-forget commands wear it worst, because
  * they are the ones with no promise whose absence would be noticed.
  *
- * The last spec here records what is still dropped. A rollover empties history,
- * so a marker written a moment before it is erased — and an armed timer whose
+ * ## Dispatching is not the same as surviving
+ *
+ * The two child specs below look like a contradiction and are not. Both children
+ * are launched — that is the fix. What happens to each *next* is its
+ * parent-close policy, applied a moment later by the same close: the default
+ * terminates it, `abandon` leaves it running. A child spawned as a workflow's
+ * last act under the default policy is a self-contradiction ("serve me, and I am
+ * done"), and being launched-then-closed is the honest reading of it. `abandon`
+ * is what the fire-and-forget-follow-up shape actually wants, and it is the one
+ * that could not work at all before this.
+ *
+ * The last spec records what is still dropped. A rollover empties history, so a
+ * marker written a moment before it is erased — and an armed timer whose
  * `timerStarted` went with it fires into a fresh run that never issued that seq,
  * which is a nondeterminism error rather than lost work. That is a worse failure
  * than the one being fixed, so `continueAsNew` keeps dropping the batch until it
@@ -26,25 +37,54 @@ import {
   MemoryWorkflowTaskQueue,
   createServerCore,
 } from '../../src/server';
-import {startChild} from '../../src/workflow';
+import {condition, startChild} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
+/** A runtime whose parent spawns one child under `policy` and returns at once. */
+function spawnerRuntime(
+  store: MemoryHistoryStore,
+  childId: string,
+  policy: 'abandon' | undefined,
+) {
+  return createLocalRuntime({historyStore: store})
+    .registerWorkflow('leaf', async () => {
+      await condition(() => false); // never settles on its own
+      return 'unreachable';
+    })
+    .registerWorkflow('spawner', async () => {
+      startChild('leaf', {workflowId: childId, parentClosePolicy: policy});
+      return 'spawned';
+    });
+}
+
 describe('commands issued by the task that finishes a workflow', () => {
-  it('launches a detached child spawned on the way out', async () => {
+  it('launches a fire-and-forget child spawned on the way out', async () => {
     const store = new MemoryHistoryStore();
-    createLocalRuntime({historyStore: store})
-      .registerWorkflow('leaf', async () => 'ran')
-      .registerWorkflow('spawner', async () => {
-        startChild('leaf', {workflowId: 'leaf-1'});
-        return 'spawned';
-      })
-      .start('spawner', [], {workflowId: 'sp-1'});
+    spawnerRuntime(store, 'leaf-1', 'abandon').start('spawner', [], {
+      workflowId: 'sp-1',
+    });
     await wait(200);
 
-    expect((await store.get('leaf-1'))?.status).toBe('completed');
+    expect((await store.get('sp-1'))?.status).toBe('completed');
+    expect((await store.get('leaf-1'))?.status).toBe('running');
+  });
+
+  /**
+   * The same dispatch, under the default policy: launched, then closed by the
+   * parent that launched it. `terminated` rather than absent is the evidence the
+   * command was dispatched at all — a dropped one would leave no record here.
+   */
+  it('closes that child immediately when it was not asked to outlive its parent', async () => {
+    const store = new MemoryHistoryStore();
+    spawnerRuntime(store, 'leaf-2', undefined).start('spawner', [], {
+      workflowId: 'sp-2',
+    });
+    await wait(200);
+
+    expect((await store.get('leaf-2'))?.status).toBe('terminated');
   });
 
   /**
@@ -79,6 +119,7 @@ describe('commands issued by the task that finishes a workflow', () => {
           childName: 'leaf',
           childArgs: [],
           detached: true,
+          parentClosePolicy: 'abandon',
         },
         {type: 'continueAsNew', seq: 1, args: []},
       ],
