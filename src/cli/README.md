@@ -18,38 +18,29 @@ process), and the whole engine. Only the command-line surface is gone.
 
 ---
 
-## The split
+## The shape
 
-Two commands, and the line between them is the point.
+Two commands, and **neither knows what a build system is**.
 
-| Command     | Does                                                                 |
-| ----------- | -------------------------------------------------------------------- |
-| `tempo up`  | Installs and starts the server and the worker. Explicit. Needs root. |
-| `tempo run` | Starts a workflow. Never deploys anything.                           |
+| Command     | Does                                                             |
+| ----------- | ---------------------------------------------------------------- |
+| `tempo up`  | Copies built artifacts into place and starts them. Needs root.   |
+| `tempo run` | Starts a workflow against a server. An RPC client, nothing more. |
 
-`run` deploying on demand was considered and rejected: it put building two
-binaries, writing `/opt/tempo`, and installing systemd units behind a verb that
-reads like "execute this workflow", and made every build, copy, and unit failure
-surface from what the user thinks is one RPC. `up` owning it means `run` can
-fail with one actionable line instead.
+That property is worth stating as a goal rather than noting as an accident,
+because two earlier drafts lost it. `run` was going to deploy on demand, which
+put building binaries and installing systemd units behind a verb meaning
+"execute this workflow". Then `up` was going to take build _targets_ and resolve
+them through a toolchain. Both are gone. The CLI copies files and makes RPCs.
+
+The local-development story is deliberately **not** a CLI feature — see below.
 
 ---
 
-## `tempo up --server=<artifact> --worker=<artifact>`
+## `tempo up --server=<path> --worker=<path>`
 
-Install both, start both, exit. Re-running it is how you deploy a new version.
-
-**One worker to start with.** The layout below is flat because of that, and
-`--worker` is singular for the same reason. Supporting several means a name per
-worker and a directory per name; nothing here forecloses it.
-
-```
-tempo up --server=./dist/server.js --worker=./dist/worker.js
-```
-
-**Both flags take a path to a final `.js` file.** The caller builds; `up` copies.
-That is the whole contract, and it means the CLI knows nothing about build
-systems — Blaze is two ordinary lines with no adapter anywhere:
+Copy both artifacts into place, write systemd units, start both, exit.
+Re-running it is how you deploy a new version.
 
 ```
 blaze build //my:worker //third_party/tempo:server
@@ -57,18 +48,13 @@ tempo up --server=blaze-bin/third_party/tempo/server.js \
          --worker=blaze-bin/my/worker.js
 ```
 
-The alternative — flags taking build _targets_ that `up` resolves through a
-toolchain, as the deleted CLI did — is more convenient per invocation and drags
-the build system back inside. `up` runs rarely and deliberately, so the extra
-line is cheap and worth it.
+**Both flags take a path to a final `.js` file.** The caller builds; `up` copies.
+That is the whole contract, and it is what keeps the build system out of the
+CLI: with Blaze the above is two ordinary lines and no adapter anywhere.
 
-**Copy dereferenced.** `blaze-bin/` is a symlink farm into the output base, so a
-naive copy installs links that dangle the next time someone builds with
-different flags — a deployment that breaks with no deploy having happened.
-
-That a _built_ artifact is the unit of deployment is itself a decision with a
-cost; see question 1. The CLI copies both to a well-known location, writes
-systemd units, and starts them:
+**One worker to start with.** The layout is flat because of that, and `--worker`
+is singular for the same reason. Supporting several means a name per worker and
+a directory per name; nothing here forecloses it.
 
 ```
 /opt/tempo/
@@ -86,57 +72,38 @@ systemd units, and starts them:
 "replace the artifact, keep the history" a non-event.
 
 Neither artifact is self-contained — they are JavaScript, so the units run
-`node /opt/tempo/server.js`. Which `node` is a question the units have to answer
+`node /opt/tempo/server.js`. Which `node` is a question the units answer
 explicitly rather than inherit from whoever ran `tempo up`.
 
-Redeploy is: copy to a temporary path on the same filesystem, `rename(2)` into
-place, `systemctl restart`. A half-copied artifact that systemd restarts into is
-worse than an old one. In-flight activity attempts die with the restart, which
-is acceptable — activities are at-least-once and expected to be idempotent — but
-it is a real consequence and not a silent one.
+**Copy dereferenced.** `blaze-bin/` is a symlink farm into the output base, so a
+naive copy installs links that dangle the next time someone builds with
+different flags — a deployment that breaks with no deploy having happened.
+
+**Install atomically.** Copy to a temporary path on the same filesystem,
+`rename(2)` into place, then `systemctl restart`. A half-copied artifact that
+systemd restarts into is worse than an old one. In-flight activity attempts die
+with the restart, which is acceptable — activities are at-least-once and
+expected to be idempotent — but it is a real consequence and not a silent one.
 
 ---
 
-## `tempo run <name> [args...] [--local=<target>] [--wait]`
+## `tempo run <name> [args...] [--wait]`
 
-Start a workflow. Deploys nothing.
+Start a workflow. Talks to a server and does nothing else.
 
 ```
-tempo run greeter world                     # start it, print the id, exit
-tempo run greeter world --wait              # start it, block, print the result
-tempo run greeter world --local=./worker.ts # whole topology in one process
-tempo run greeter world --local=//my:worker # same, under a build system
+tempo run greeter world           # start it, print the id, exit
+tempo run greeter world --wait    # start it, block, print the result
 ```
 
-With no server reachable, it fails with the `tempo up` command that would fix
-it. That is the whole of its deployment behaviour.
+With no server reachable it fails with the `tempo up` line that would fix it.
 
-### `--local=<target>`
+**`--wait`** blocks until the workflow settles and prints its result. Without it,
+the workflow id is printed and the process exits — the workflow keeps running on
+the server.
 
-A **fresh in-memory runtime in one process**. No server, no port, no
-persistence, nothing installed, nothing left behind. Implies `--wait`, because
-there is nothing to come back to — the runtime dies with the process.
-`--local --no-wait` is an error rather than silently ignored.
-
-`<target>` is the worker, and unlike `up` it is a _source_ target, because this
-is the dev loop:
-
-- **Source:** a `.ts` entrypoint that calls `Tempo.startWorker`, run under `tsx`.
-- **Build system:** a label. `blaze run <target> -- --local …`.
-
-`Tempo.startWorker` sees the local flag and reaches for the in-memory runtime,
-ignoring `TEMPO_SERVER_URL`, port, and data-dir entirely.
-
-### `--wait`
-
-Blocks until the workflow settles and prints its result. Without it, the
-workflow id is printed and the process exits — the workflow keeps running on the
-server.
-
-### Argument parsing
-
-`--` separates the CLI's arguments from the workflow's, so a workflow argument
-starting with `-` is unambiguous:
+**`--`** separates the CLI's arguments from the workflow's, so a workflow
+argument starting with `-` is unambiguous:
 
 ```
 tempo run myWorkflow --wait -- --this-is-an-argument
@@ -144,11 +111,41 @@ tempo run myWorkflow --wait -- --this-is-an-argument
 
 ---
 
+## Running locally is a worker feature, not a CLI one
+
+There is no `--local` flag on `tempo run`. A one-process, in-memory, no-server
+run is had by running the worker binary directly:
+
+```
+blaze run //my:worker -- --local --run=greeter world
+node ./dist/worker.js --local --run=greeter world
+```
+
+The CLI is not in the path at all, which is why it needs no knowledge of `tsx`,
+Blaze labels, or how a target becomes a process. That knowledge was the entire
+reason the deleted `ports/toolchain.ts` existed; with it gone there is nothing
+left for a toolchain abstraction to abstract.
+
+What that leaves is real work, just not _here_. It belongs to `src/tempo.ts`:
+
+- **`Tempo.startWorker` parses `--local` from its own argv** and reaches for the
+  in-memory runtime, ignoring `TEMPO_SERVER_URL`, port, and data-dir.
+- **Argv, not an environment variable**, following the precedent already in that
+  file: a flag has to be typed at the launch site and does not propagate to
+  children. `TEMPO_LOCAL=1` exported in a shell — or inherited by a worker
+  spawned from a test — turns a production worker into one that serves nobody
+  while still looking healthy.
+- **It needs a way to say what to run**: which workflow, with which arguments,
+  and what to print. Nothing parses that output any more, so it can be shaped
+  for a human rather than for a protocol.
+
+---
+
 ## Open questions
 
 ### 1. Built JavaScript means the engine gets a build step, and that is a rule
 
-`AGENTS.md` currently says of `esbuild`:
+`AGENTS.md` says of `esbuild`:
 
 > **It bundles the dashboard's browser code and nothing else**: the engine still
 > runs from source under `tsx`, and adding a build step to it would be its own
@@ -159,9 +156,8 @@ walked past. The rule exists because the last build-shaped thing in this repo
 put a TypeScript compiler in the dashboard's runtime dependencies.
 
 For crossing it: shipping `tsx` and a `node_modules` to a production host to run
-TypeScript from source is worse than shipping one bundled file. A single file
-also makes the atomic-rename install trivial and removes any question about
-symlinks.
+TypeScript from source is worse than shipping one bundled file, and a single
+file makes the atomic-rename install trivial.
 
 If it lands, `AGENTS.md` changes in the same commit — the repo's own rule about
 comments that describe the old design.
@@ -180,61 +176,7 @@ The cheap version: `up` writes a fingerprint of each artifact to `VERSION`, the
 server reports its own, and `run` warns on a mismatch it can name. It does not
 have to fix it. It has to not be silent about it.
 
-An alternative worth considering: this is now the operator's problem by
-construction, since `up` is explicit. Defensible — but only if something,
-somewhere, can answer "what is deployed?"
-
-### 3. `--local` is now the only build-system knowledge left
-
-`up` taking built paths settles the question it was asked, and leaves an
-asymmetry worth deciding on purpose rather than discovering: **`--local` is the
-one flag that still names a source target**, so it is the one place the CLI has
-to know that `.ts` runs under `tsx` and `//my:worker` runs under `blaze run`.
-
-Two ways out:
-
-- **`--local` takes a built `.js` too.** The CLI becomes completely
-  build-system-free and the toolchain seam never comes back. It also puts a
-  build step in the dev loop, which is the one place a build step hurts most.
-- **`--local` keeps source targets.** The dev loop stays fast, and the CLI keeps
-  a small amount of build knowledge.
-
-The second looks right, with one caveat: keep it _small_. The rule is a switch —
-`.ts` under `tsx`, `.js` under `node`, a label under `blaze run`, anything else
-executed directly — not an interface. The deleted `ports/toolchain.ts` existed
-because `up` needed the same knowledge and the two had to agree; with `up` out
-of the build business there is one caller, and a `Toolchain` abstraction for one
-caller is a seam with nothing on the other side of it.
-
-### 4. What is the dev loop now?
-
-The old `tempo up` ran a server and a worker in the foreground, which is what
-you wanted while poking at something. The new one installs services.
-
-`run --local` covers one-shot. It does not cover "leave a server up while I run
-five things against it and read the dashboard". Options: a `--foreground` on
-`up` that skips the install and supervises children instead, or a separate
-`tempo dev`, or accept that the dashboard-and-poke loop needs the installed
-services.
-
-### 5. How does the local flag reach `startWorker`?
-
-**Argv, not an environment variable**, following the precedent in
-`src/tempo.ts`: a flag has to be typed at the launch site and does not propagate
-to children, which is exactly the property a mode switch wants. `TEMPO_LOCAL=1`
-exported in a shell — or inherited by a worker spawned from a test — turns a
-production worker into one that serves nobody while still looking healthy.
-
-### 6. Getting the result back out of `--local`
-
-The workflow runs _inside_ the worker process, so the result comes back over
-stdout — competing with the user's own logging, and under Blaze with the build
-system's chatter. It needs a channel that cannot collide: a single
-`TEMPO_RESULT <json>` line, or a file path passed in for the worker to write and
-the CLI to read. The second is uglier and cannot be corrupted by a stray
-`console.log`.
-
-### 7. First-run setup
+### 3. First-run setup
 
 `/var/lib/tempo` and a `tempo` system user have to exist before the units start.
 Either `up` creates them, or there is a documented prerequisite. Creating them
@@ -246,5 +188,5 @@ is friendlier and is more of what `up` is already doing.
 
 `signal`, `cancel`, `terminate`, `list`, `describe`, `queues` — the read and
 drive commands. All built, all deleted with the rest; none of them were the
-reason for the redesign. They should come back close to as they were once `up`
-and `run` have settled how artifacts, deployment, and waiting work.
+reason for the redesign. They are all RPC clients like `run`, so they should
+come back close to as they were once `up` and `run` have settled.
