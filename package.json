@@ -12,6 +12,7 @@
     "./workflow": "./src/workflow.ts"
   },
   "scripts": {
+    "tempo": "tsx bin/tempo.ts",
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",
     "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard/tsconfig.json && tsc --noEmit -p dashboard/app/tsconfig.json",
     "lint": "tsx tools/lint.ts",
