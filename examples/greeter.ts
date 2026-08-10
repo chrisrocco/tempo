@@ -3,8 +3,8 @@
  * The reference deployable worker, in one file: an activity, a workflow, and the
  * entrypoint that hands both to the library.
  *
- * Run it directly against a server — `TEMPO_SERVER_URL` picks the server and
- * `TEMPO_ROLE` picks a single poll loop (see src/tempo.ts for the full input
+ * Run it directly against a server — `--server=URL` picks the server and
+ * `--role=ROLE` picks a single poll loop (see src/tempo.ts for the full input
  * surface). This is the binary spec/integration/distributed.spec.ts actually
  * runs, so it stays honest.
  *

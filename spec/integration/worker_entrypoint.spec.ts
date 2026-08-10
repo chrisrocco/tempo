@@ -25,7 +25,14 @@ import {
   createRpcServer,
   createServerHost,
 } from '../../src/services';
-import {startWorker} from '../../src/tempo';
+import {DEFAULT_PORT} from '../../src/process_flags';
+import {
+  DEFAULT_SERVER_URL,
+  requestedRole,
+  resolveServerUrl,
+  resolveTaskQueue,
+  startWorker,
+} from '../../src/tempo';
 import {proxyActivities} from '../../src/workflow';
 
 /** The reference shape: a module namespace holding a constant and an activity. */
@@ -70,20 +77,24 @@ async function startServer(): Promise<Harness> {
 }
 
 /**
- * `startWorker` reads `process.env` directly, because a deployed binary has no
+ * `startWorker` reads `process.argv` directly, because a deployed binary has no
  * caller to pass it. Specs that exercise that reading put it back afterwards.
+ *
+ * Note what the test runner's own argv proves incidentally: it carries
+ * `--config=` and, when filtered, `--filter=`, and a worker constructed under it
+ * starts anyway. Unknown flags have to be ignored, which is the constraint
+ * `process_flags.ts` records — a worker that rejected an argv it did not
+ * recognize could not be built inside a spec at all.
  */
-const originalRole = process.env['TEMPO_ROLE'];
-const originalServerUrl = process.env['TEMPO_SERVER_URL'];
+const originalArgv = process.argv;
 
 afterEach(() => {
-  restore('TEMPO_ROLE', originalRole);
-  restore('TEMPO_SERVER_URL', originalServerUrl);
+  process.argv = originalArgv;
 });
 
-function restore(name: string, value: string | undefined): void {
-  if (value === undefined) delete process.env[name];
-  else process.env[name] = value;
+/** Run as if launched with these flags appended to the command line. */
+function launchedWith(...flags: string[]): void {
+  process.argv = [...originalArgv, ...flags];
 }
 
 /**
@@ -168,13 +179,13 @@ describe('worker entrypoint — choosing a server', () => {
 
   /**
    * The precedence that keeps one artifact redeployable: the code's URL is the
-   * default it ships with, and the environment is the deployment. Proven by
-   * pointing the code at a closed port — the work still lands, so the
-   * environment is what was dialled.
+   * default it ships with, and the launch site is the deployment. Proven by
+   * pointing the code at a closed port — the work still lands, so the flag is
+   * what was dialled.
    */
-  it('lets the environment override the server the code shipped with', async () => {
+  it('lets the launch site override the server the code shipped with', async () => {
     const server = await startServer();
-    process.env['TEMPO_SERVER_URL'] = server.url;
+    launchedWith(`--server=${server.url}`);
 
     const worker = startWorker({
       name: 'greeter',
@@ -195,9 +206,50 @@ describe('worker entrypoint — choosing a server', () => {
   });
 });
 
+/**
+ * The precedence rules on their own, without a worker or a global to rewrite.
+ * These are the functions `startWorker` calls, and each takes its argv rather
+ * than reaching for `process.argv` precisely so this block can exist.
+ */
+describe('worker entrypoint — resolving configuration', () => {
+  it('prefers the launch site, then the code, then the default', () => {
+    expect(resolveServerUrl(['--server=http://a:1'], 'http://b:2')).toBe(
+      'http://a:1',
+    );
+    expect(resolveServerUrl([], 'http://b:2')).toBe('http://b:2');
+    expect(resolveServerUrl([], undefined)).toBe(DEFAULT_SERVER_URL);
+  });
+
+  it('applies the same precedence to the queue', () => {
+    expect(resolveTaskQueue(['--queue=fast'], 'slow')).toBe('fast');
+    expect(resolveTaskQueue([], 'slow')).toBe('slow');
+    expect(resolveTaskQueue([], undefined)).toBe('default');
+  });
+
+  it('reports which source asked for a role', () => {
+    expect(requestedRole(['--role=activity'], 'workflow')).toEqual({
+      value: 'activity',
+      source: '--role',
+    });
+    expect(requestedRole([], 'workflow')).toEqual({
+      value: 'workflow',
+      source: 'role',
+    });
+    expect(requestedRole([], undefined)).toBeUndefined();
+  });
+
+  // The port both sides of a deployment have to agree on. A worker dialling one
+  // number while the server binds another is a deployment where every process is
+  // healthy and no work ever moves.
+  it('defaults to the port the server defaults to binding', () => {
+    expect(DEFAULT_SERVER_URL).toBe(`http://127.0.0.1:${DEFAULT_PORT}`);
+    expect(DEFAULT_PORT).toBe(7777);
+  });
+});
+
 describe('worker entrypoint — what it refuses', () => {
   it('refuses a role the binary cannot serve', () => {
-    process.env['TEMPO_ROLE'] = 'activity';
+    launchedWith('--role=activity');
 
     expect(() => startWorker({name: 'workflows-only', workflows})).toThrowError(
       /registers no activities/,
@@ -210,22 +262,30 @@ describe('worker entrypoint — what it refuses', () => {
     );
   });
 
-  // The error has to name where the ask was written, because "this binary
-  // cannot serve that role" is only actionable if you know which file to open.
-  it('names the environment or the options object, whichever asked', () => {
+  it('refuses a role that is not one of the two', () => {
+    launchedWith('--role=cluster');
+
+    expect(() =>
+      startWorker({name: 'greeter', workflows, activities}),
+    ).toThrowError(/must be "workflow" or "activity".*cluster/);
+  });
+
+  // A unit file and a source file are very different things to go and fix, so
+  // "this binary cannot serve that role" is only actionable if it says which.
+  it('names the flag or the options object, whichever asked', () => {
     expect(() =>
       startWorker({name: 'workflows-only', role: 'activity', workflows}),
     ).toThrowError(/started as role=activity/);
 
-    process.env['TEMPO_ROLE'] = 'activity';
+    launchedWith('--role=activity');
     expect(() => startWorker({name: 'workflows-only', workflows})).toThrowError(
-      /started as TEMPO_ROLE=activity/,
+      /started as --role=activity/,
     );
   });
 });
 
 describe('worker entrypoint — the options object is the configuration', () => {
-  it('takes the role from code, with no environment variable in sight', () => {
+  it('takes the role from code, with no flag in sight', () => {
     const worker = startWorker({
       name: 'greeter',
       role: 'workflow',
@@ -239,8 +299,8 @@ describe('worker entrypoint — the options object is the configuration', () => 
   });
 
   // The exception, and the only reason it exists: one artifact, two services.
-  it('lets the environment override the role the code shipped with', () => {
-    process.env['TEMPO_ROLE'] = 'activity';
+  it('lets the launch site override the role the code shipped with', () => {
+    launchedWith('--role=activity');
 
     const worker = startWorker({
       name: 'greeter',
@@ -255,7 +315,7 @@ describe('worker entrypoint — the options object is the configuration', () => 
   });
 
   /**
-   * `identity` is the config that has no environment variable on purpose — a
+   * `identity` is the config with no launch-site override on purpose — a
    * container passes `process.env['HOSTNAME']` through the options object
    * instead. So the thing worth proving is that it travels: the name a
    * deployment chooses is the name an operator reads back out of `tempo

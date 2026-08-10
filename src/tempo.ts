@@ -11,20 +11,20 @@
  * configuration" below. Everything else is what can reach a worker from outside
  * that object, and there is deliberately little of it:
  *
- *   TEMPO_SERVER_URL  overrides `serverUrl` (else 127.0.0.1:7233)
- *   TEMPO_TASK_QUEUE  overrides `taskQueue` (else `default`)
- *   TEMPO_ROLE        overrides `role` — unset runs every role it can
+ *   --server=URL   overrides `serverUrl` (else 127.0.0.1:7777)
+ *   --queue=NAME   overrides `taskQueue` (else `default`)
+ *   --role=ROLE    overrides `role` — unset runs every role it can
  *
- * Running the *same* binary twice with a different `TEMPO_ROLE` is how the two
- * worker tiers are deployed: workflow workers replay workflow code, activity
- * workers run activities (the only I/O in the system), and each scales
- * independently against one server.
+ * Running the *same* binary twice with a different `--role` is how the two worker
+ * tiers are deployed: workflow workers replay workflow code, activity workers run
+ * activities (the only I/O in the system), and each scales independently against
+ * one server. `tempo up` writes exactly that — one unit per role, one artifact.
  *
- * `TEMPO_TASK_QUEUE` is what lets more than one application share a server. A
- * queue name is a contract — every worker on it must register the same workflows
- * and activities — and it is not optional once a second app exists: with one
- * global queue, whichever worker wins a poll decides whether the task can run at
- * all, and one that cannot serve it fails the task rather than passing it on.
+ * `--queue` is what lets more than one application share a server. A queue name
+ * is a contract — every worker on it must register the same workflows and
+ * activities — and it is not optional once a second app exists: with one global
+ * queue, whichever worker wins a poll decides whether the task can run at all,
+ * and one that cannot serve it fails the task rather than passing it on.
  *
  * ## This entrypoint composes one thing: a worker that polls a server
  *
@@ -52,34 +52,42 @@
  * one object is reading the deployment, in a file that is type-checked, diffed,
  * and reviewed. It is the config file; it just happens to be TypeScript.
  *
- * **Three values can be overridden from the environment, and that is the
+ * **Three values can be overridden from the command line, and that is the
  * exception rather than the pattern**:
  *
- *   TEMPO_SERVER_URL  which server
- *   TEMPO_TASK_QUEUE  which pool
- *   TEMPO_ROLE        which half of the worker pair
+ *   --server=URL   which server
+ *   --queue=NAME   which pool
+ *   --role=ROLE    which half of the worker pair
  *
  * Those three are what a *deployment* changes about an artifact it did not
  * build: the same binary rolled into staging, into a second pool, or into the
- * two-tier split. An override wins when it is set — that is what makes it an
+ * two-tier split. An override wins when it is given — that is what makes it an
  * override — so code supplies the default the application ships with and the
- * environment supplies the deviation.
+ * launch site supplies the deviation.
+ *
+ * They used to be `TEMPO_SERVER_URL`, `TEMPO_TASK_QUEUE`, and `TEMPO_ROLE`. The
+ * reason they are flags is in `process_flags.ts` and is the same reason the
+ * `--runtime` flag that used to live here was a flag: **an environment variable
+ * is inherited and a flag is not**, and one stale `TEMPO_SERVER_URL` in a shell
+ * turns the next worker launched from it into a process that serves nobody while
+ * printing `WORKER_READY` and looking healthy to its supervisor.
  *
  * Everything else is code only, deliberately. A value that changes only when the
  * code changes has no business being ambient, where it is invisible at the call
- * site and inherited by every child process. `identity` is the case that looks
- * like it wants an environment variable and does not: a container already has
- * its name in the environment, so write `identity: process.env['HOSTNAME']` in
- * the options object, where a reader can see where it came from, rather than
- * growing a second ambient surface that only some deployments set.
+ * site. `identity` is the case that looks like it wants to be ambient and does
+ * not: a container already has its name in the environment, so write
+ * `identity: process.env['HOSTNAME']` in the options object, where a reader can
+ * see where it came from, rather than growing an ambient surface that only some
+ * deployments set.
  *
  * The shape follows Temporal's client, where the address is a connection
  * argument rather than ambient state — and it is what the older "deployment
- * config is never passed in code" rule was really protecting, since the
- * environment still overrides the three values a redeploy needs.
+ * config is never passed in code" rule was really protecting, since the launch
+ * site still overrides the three values a redeploy needs.
  */
 
 import type {WorkflowFn} from './core';
+import {DEFAULT_PORT, flagValue} from './process_flags';
 import {DEFAULT_TASK_QUEUE} from './protocol';
 import {createJsonLogger} from './server';
 import {createRemoteService} from './services';
@@ -95,14 +103,20 @@ import {
   type WorkerLoopOptions,
 } from './worker';
 
-/** Where a worker looks for its server when `TEMPO_SERVER_URL` is unset. */
-export const DEFAULT_SERVER_URL = 'http://127.0.0.1:7233';
+/**
+ * Where a worker looks for its server when `--server` was not given.
+ *
+ * Built from `DEFAULT_PORT` rather than spelling the number again: a worker
+ * dialling one port while the server binds another is a deployment in which
+ * every process is healthy and no work ever moves.
+ */
+export const DEFAULT_SERVER_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 
 /**
  * Which poll loop a worker process runs. Deployments split the two into separate
  * services so that an activity blocking the event loop cannot stall workflow
- * replay into a lease expiry; with `TEMPO_ROLE` unset a single process runs both,
- * which is what `tempo up` and a hand-run binary want.
+ * replay into a lease expiry; with `--role` unset a single process runs both,
+ * which is what a hand-run binary wants.
  */
 export type WorkerRole = 'workflow' | 'activity';
 
@@ -110,13 +124,13 @@ export interface StartWorkerOptions {
   /** Service identity: the unit name, the `tempo status` row, the `tempo logs` target. */
   name: string;
   /**
-   * Which server to connect to. `TEMPO_SERVER_URL` overrides it, so this is the
-   * default the application ships with rather than its deployment.
+   * Which server to connect to. `--server` overrides it, so this is the default
+   * the application ships with rather than its deployment.
    */
   serverUrl?: string;
   /**
-   * Which pool this worker serves. `TEMPO_TASK_QUEUE` overrides it, so one binary
-   * can be deployed into several pools.
+   * Which pool this worker serves. `--queue` overrides it, so one binary can be
+   * deployed into several pools.
    *
    * A queue name is a **contract**: every worker on it must register the same
    * workflows and activities. Two different applications sharing one queue is the
@@ -125,13 +139,14 @@ export interface StartWorkerOptions {
    */
   taskQueue?: string;
   /**
-   * Which poll loop to run. `TEMPO_ROLE` overrides it, which is how the same
-   * artifact is deployed twice — one service per role, scaled independently.
+   * Which poll loop to run. `--role` overrides it, which is how the same artifact
+   * is deployed twice — one service per role, scaled independently, which is
+   * exactly what `tempo up` writes.
    *
    * Omitted runs every role the binary has definitions for, which is what a
-   * hand-run binary and `tempo up` want. Naming a role the binary cannot serve
-   * is a startup error rather than a process that polls forever for work it
-   * could never complete.
+   * hand-run binary wants. Naming a role the binary cannot serve is a startup
+   * error rather than a process that polls forever for work it could never
+   * complete.
    */
   role?: WorkerRole;
   /**
@@ -184,31 +199,48 @@ function callableEntries(source: object | undefined): [string, AnyFn][] {
 }
 
 /**
- * Where a remote worker connects. The environment wins over the code, so the
+ * Where a remote worker connects. The launch site wins over the code, so the
  * artifact redeploys against another server without a rebuild; the code's value
  * is the default it ships with.
+ *
+ * Takes `argv` rather than reading `process.argv` so the precedence is statable
+ * by a spec without rewriting a global — the same reason `resolveRoles` takes
+ * what it was asked for rather than going and finding it.
  */
-function resolveServerUrl(option: string | undefined): string {
-  return process.env['TEMPO_SERVER_URL'] ?? option ?? DEFAULT_SERVER_URL;
+export function resolveServerUrl(
+  argv: readonly string[],
+  option: string | undefined,
+): string {
+  return flagValue(argv, 'server') ?? option ?? DEFAULT_SERVER_URL;
+}
+
+/** Which pool a worker serves: the launch site, else the code, else `default`. */
+export function resolveTaskQueue(
+  argv: readonly string[],
+  option: string | undefined,
+): string {
+  return flagValue(argv, 'queue') ?? option ?? DEFAULT_TASK_QUEUE;
 }
 
 /** A configured role and where it came from, so an error can name its source. */
 interface RequestedRole {
   value: string;
-  source: 'TEMPO_ROLE' | 'role';
+  source: '--role' | 'role';
 }
 
 /**
- * The role the deployment asked for: the environment if it overrode, else the
- * options object, else none. Trimmed and returned with its origin, because "you
- * asked for a role this binary cannot serve" is only actionable if it says
- * *where* the ask was written.
+ * The role the deployment asked for: the flag if it overrode, else the options
+ * object, else none. Trimmed and returned with its origin, because "you asked for
+ * a role this binary cannot serve" is only actionable if it says *where* the ask
+ * was written — a unit file or a source file are very different things to go and
+ * fix.
  */
-function requestedRole(
+export function requestedRole(
+  argv: readonly string[],
   option: WorkerRole | undefined,
 ): RequestedRole | undefined {
-  const fromEnvironment = process.env['TEMPO_ROLE']?.trim();
-  if (fromEnvironment) return {value: fromEnvironment, source: 'TEMPO_ROLE'};
+  const fromFlag = flagValue(argv, 'role')?.trim();
+  if (fromFlag) return {value: fromFlag, source: '--role'};
   if (option) return {value: option, source: 'role'};
   return undefined;
 }
@@ -321,19 +353,21 @@ export function startWorker(options: StartWorkerOptions): Worker {
   const workflows = callableEntries(options.workflows);
   const activities = callableEntries(options.activities);
 
+  // Read once, from the process's own arguments past the interpreter and script.
+  const argv = process.argv.slice(2);
+
   const roles = resolveRoles(
-    requestedRole(options.role),
+    requestedRole(argv, options.role),
     options.name,
     workflows.length > 0,
     activities.length > 0,
   );
 
-  const taskQueue =
-    process.env['TEMPO_TASK_QUEUE'] ?? options.taskQueue ?? DEFAULT_TASK_QUEUE;
+  const taskQueue = resolveTaskQueue(argv, options.taskQueue);
 
   const composition = composeRemote({
     name: options.name,
-    serverUrl: resolveServerUrl(options.serverUrl),
+    serverUrl: resolveServerUrl(argv, options.serverUrl),
     taskQueue,
     roles,
     // Straight through: what the poll loops take, this entrypoint passes.

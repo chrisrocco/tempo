@@ -94,19 +94,22 @@ rt.shutdown(); // stop background timers so the process exits
 ```
 
 Or run the pieces separately — a server process and one or more workers. **The
-CLI that drove this is being redesigned and is not currently present**; see
-[`src/cli/README.md`](src/cli/README.md) for the shape it is coming back in.
-Until it lands, run the server and a worker directly:
+CLI is being rebuilt**: `start` and `result` are back, and `up`, `down`, and
+`status` are on the way — see [`src/cli/README.md`](src/cli/README.md). Run the
+server and a worker directly, then drive them:
 
 ```bash
-tsx bin/server-main.ts &            # PORT, HOST, DATA_DIR from the environment
-TEMPO_SERVER_URL=http://127.0.0.1:7233 tsx examples/greeter.ts
+tsx bin/server-main.ts &                                  # --port=7777 by default
+tsx examples/greeter.ts --server=http://127.0.0.1:7777 &  # --role= picks one loop
+npm run tempo -- start greeter world --wait
 ```
+
+Configuration is flags with defaults, never the environment — see
+[`src/process_flags.ts`](src/process_flags.ts) for why.
 
 Going distributed does not change the workflow code, only how it is hosted. See
 [`bin/server-main.ts`](bin/server-main.ts) for the server process and
-[`src/tempo.ts`](src/tempo.ts) for the worker entrypoint and its environment
-contract.
+[`src/tempo.ts`](src/tempo.ts) for the worker entrypoint and its input contract.
 
 ## How it works
 

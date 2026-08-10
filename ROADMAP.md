@@ -200,8 +200,8 @@ A could be claimed by an app B worker, which has no such workflow registered —
 that used to **settle the execution as failed**, nondeterministically, depending
 on which worker won the poll.
 
-Work is now routed by queue name: workers declare theirs (`TEMPO_TASK_QUEUE`),
-callers pick one (`--task-queue`), and activities and children inherit their
+Work is now routed by queue name: workers declare theirs (`--queue`), callers
+pick one (`tempo start --queue`), and activities and children inherit their
 execution's. An unregistered workflow type is now a _task_ failure rather than an
 execution failure — it usually means a deploy still rolling, and recovering when
 the right version lands is worth more than failing fast, which is the poison-task

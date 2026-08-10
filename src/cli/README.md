@@ -73,18 +73,19 @@ one command. An env file shared by server and workers had two sources of truth
 for the port (`PORT` for the server, a URL containing it for the workers) that
 an operator kept in step by hand.
 
-It also removes two defaults that made a _successful_ deploy silently broken:
+It also removed two defaults that made a _successful_ deploy silently broken:
 
-- `bin/server-main.ts` defaults `PORT` to **0** — a random port — while workers
-  default to `7233`. With no env file, `up` would have started a server nothing
+- `bin/server-main.ts` defaulted `PORT` to **0** — a random port — while workers
+  dialled `7233`. With no env file, `up` would have started a server nothing
   could find, with both units reading healthy.
 - `DATA_DIR` unset means in-memory. History would silently not persist,
   `/var/lib/tempo` would stay empty, and everything would look fine until the
   first restart.
 
-Under flags-with-defaults, `up` passes `--port=7777` and
-`--data-dir=/var/lib/tempo` explicitly, and the failure mode is gone rather than
-documented.
+`up` passes `--port=7777` and `--data-dir=/var/lib/tempo` explicitly, so the
+first is gone rather than documented. The second still has teeth — an operator
+running the server by hand gets an in-memory one — but the unit `up` writes
+cannot.
 
 **What this costs, recorded so it can be reopened knowingly:** a container
 orchestrator configures processes through the environment, so a Kubernetes
@@ -93,12 +94,14 @@ That is a real cost and the reason someone might come back here — but it is a
 cost paid by a deployment shape this repo does not have yet, and the failure
 above was being paid by the one it does.
 
-This changes three files that currently read the environment: `bin/server-main.ts`
-(`HOST`, `PORT`, `DATA_DIR`, `ACTIVITY_LEASE_MS`), `src/tempo.ts`
-(`TEMPO_SERVER_URL`, `TEMPO_TASK_QUEUE`, `TEMPO_ROLE`), and
-`spec/integration/distributed.spec.ts`, which spawns both through env today. The
-fileoverviews in the first two argue for the environment overrides at some
-length; they change in the same commit.
+**Landed.** `src/process_flags.ts` holds the reading and the reasoning;
+`bin/server-main.ts` takes `--host`, `--port`, `--data-dir`, and
+`--activity-lease-ms`; `src/tempo.ts` takes `--server`, `--queue`, and `--role`.
+One thing had to give: **unknown flags are ignored rather than rejected**,
+because `startWorker` is constructed in-process by specs running under a test
+runner whose own argv carries `--config=` and `--filter=`. Values are validated,
+so a bare `--data-dir` or a `--port=nonsense` fails at startup; a flag spelled
+wrong is still silently absent, exactly as a misspelled environment variable was.
 
 ---
 
