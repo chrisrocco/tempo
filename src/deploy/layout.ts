@@ -61,8 +61,8 @@ export const NODE_BIN = '/usr/bin/node';
  * directories, so the install root, the state directory, and the units all sit
  * under one recognisable name.
  *
- * Not passed to systemd as `StateDirectory=` — see `units.ts` for why that is
- * unsafe in a user unit, and `up` for what creates the directory instead.
+ * Not handed to systemd as `StateDirectory=` — see `units.ts` for why naming the
+ * state directory twice is the risk, and `up` for what creates it instead.
  */
 export const DEPLOYMENT_NAME = 'tempo';
 
@@ -129,8 +129,9 @@ export interface Layout {
    * Where history goes: `$XDG_STATE_HOME/tempo`. The server is told this as
    * `--data-dir` and `up` creates it.
    *
-   * **The single source of truth for it**, deliberately not delegated to systemd's
-   * `StateDirectory=` — see `units.ts` for why that is unsafe in a user unit.
+   * **The single source of truth for it**, deliberately not also declared as
+   * `StateDirectory=` in the units — see `units.ts` for why naming it twice is the
+   * risk.
    */
   stateDir: string;
   /** Where systemd reads this user's unit files: `$XDG_CONFIG_HOME/systemd/user`. */

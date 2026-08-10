@@ -128,9 +128,9 @@ export async function up(options: UpOptions, host: Host): Promise<UpResult> {
   const layout = resolveLayout(host);
 
   await host.makeDirectory(layout.installRoot);
-  // Created here rather than left to `StateDirectory=`, which in a user unit
-  // resolves beneath an XDG directory that has moved between systemd versions —
-  // see `units.ts`. One source of truth for where history lives.
+  // Created here rather than by a `StateDirectory=` in the units, so that the path
+  // history lives at is stated exactly once — see `units.ts`. Belt and braces
+  // either way: the store also creates it on open.
   await host.makeDirectory(layout.stateDir);
   await host.installFile(options.server, layout.serverArtifact);
   await host.installFile(options.worker, layout.workerArtifact);

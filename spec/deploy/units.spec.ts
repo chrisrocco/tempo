@@ -221,19 +221,22 @@ describe('deploy units — staying running', () => {
   });
 
   /**
-   * A system unit could safely say `StateDirectory=tempo` — it resolves to
-   * `/var/lib/tempo`, full stop. In a *user* unit it resolves beneath an XDG base
-   * directory whose mapping has not been stable across systemd versions, so if
-   * systemd's answer ever differed from the `--data-dir` these units carry, the
-   * server would persist history to one directory while systemd prepared another.
-   * `Layout.stateDir` is the one source of truth and `up` creates it.
+   * `StateDirectory=` would make the unit name the state directory **twice** — once
+   * for systemd to create, once as the `--data-dir` the server is launched with —
+   * and in a user unit the first resolves beneath an XDG base directory it would be
+   * unwise to assume. If they ever differed the server would write history to its
+   * path while systemd maintained an empty directory at the other, with everything
+   * looking healthy, and the bite would come when a backup or a restore trusted the
+   * unit file and copied the empty one.
+   *
+   * Nothing is given up: `server/file` calls `mkdir -p` on open, so the directory
+   * gets created on every start anyway.
    */
-  it('does not delegate the state directory to systemd', () => {
+  it('does not name the state directory twice', () => {
     for (const unit of units) expect(unit).not.toContain('StateDirectory');
   });
 
-  // The counterpart: the path the server is actually told has to be the resolved
-  // one, since nothing else now creates or names it.
+  // The one place it is named, and the path the server actually writes to.
   it('tells the server the state directory the layout resolved', () => {
     expect(serverUnit(layout, config)).toContain(
       `--data-dir=${layout.stateDir}`,

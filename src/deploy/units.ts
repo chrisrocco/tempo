@@ -143,18 +143,24 @@ function unitSection(): string {
  * `User=` here would either be a no-op or an error, and would read as though the
  * service could run as someone else.
  *
- * **No `StateDirectory=` either, and that is a deliberate reversal.** A system unit
- * can use it safely: it resolves to `/var/lib/<name>`, full stop. In a *user* unit
- * it resolves beneath an XDG base directory, and which one has not been stable
- * across systemd versions. If systemd's answer ever differs from the path this
- * writes into `--data-dir`, the server persists history to one directory while
- * systemd carefully prepares another — a split nobody would notice until a restore
- * came up empty.
+ * **No `StateDirectory=` either, and it costs nothing to leave out.** That directive
+ * asks systemd to create the service's state directory for it. A system unit can
+ * rely on it: it means `/var/lib/<name>`, full stop. In a *user* unit it resolves
+ * beneath one of the XDG base directories, and exactly which is not something to
+ * bet a deployment on.
  *
- * So the state directory has exactly one source of truth, `Layout.stateDir`, and
- * `up` creates it. The cost is the property that made `StateDirectory=` attractive:
- * systemd no longer recreates the directory if someone deletes it between deploys.
- * A wrong-but-tidy path is worse than a right one that needs recreating.
+ * The risk is not that systemd would fail — it is that the unit would then name the
+ * state directory **twice**, once as `StateDirectory=` and once as the `--data-dir`
+ * the server is actually launched with. If those two ever resolved differently the
+ * server would write history to its path while systemd maintained an empty
+ * directory at the other, and everything would look healthy. The bite comes when
+ * something later trusts the unit file — a backup, a restore onto a new machine —
+ * and copies the empty one.
+ *
+ * So `Layout.stateDir` is the single source of truth and `up` creates it. Nothing is
+ * given up by doing so: `server/file` calls `mkdir -p` when it opens the store, so
+ * the directory is created on every start regardless. The convenience
+ * `StateDirectory=` offers was already covered.
  */
 function serviceSection(layout: Layout): string {
   return [
