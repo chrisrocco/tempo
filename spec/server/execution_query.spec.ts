@@ -55,6 +55,72 @@ function drain(
   throw new Error('cursor never reached the end');
 }
 
+describe('listing — lineage', () => {
+  const parent = record('order-1');
+  const childA = record('ship-1', {
+    parent: {workflowId: 'order-1', seq: 3},
+    status: 'completed',
+  });
+  const childB = record('bill-1', {parent: {workflowId: 'order-1', seq: 4}});
+  const other = record('ship-2', {parent: {workflowId: 'order-2', seq: 3}});
+  const all = [parent, childA, childB, other];
+
+  it('returns the children of one execution', () => {
+    const page = queryExecutions(all, {parentWorkflowId: 'order-1'});
+
+    expect(page.executions.map((e) => e.workflowId).sort()).toEqual([
+      'bill-1',
+      'ship-1',
+    ]);
+  });
+
+  it('includes children that have already finished', () => {
+    // The reason this filter exists. `ExecutionDetail.pending.children` lists
+    // what the parent is still waiting on, so a child drops out of it the moment
+    // it succeeds — which makes it the wrong tool for "what did this execution
+    // do". `ship-1` is completed and must still be here.
+    const page = queryExecutions(all, {parentWorkflowId: 'order-1'});
+
+    expect(page.executions.find((e) => e.workflowId === 'ship-1')?.status).toBe(
+      'completed',
+    );
+  });
+
+  it('excludes the parent itself', () => {
+    const page = queryExecutions(all, {parentWorkflowId: 'order-1'});
+
+    expect(page.executions.map((e) => e.workflowId)).not.toContain('order-1');
+  });
+
+  it('returns nothing for an execution with no children', () => {
+    // Not an error: an execution that started none and an id that does not exist
+    // are the same answer to this question, and a lineage view renders both as
+    // a leaf.
+    expect(
+      queryExecutions(all, {parentWorkflowId: 'ship-1'}).executions,
+    ).toEqual([]);
+    expect(
+      queryExecutions(all, {parentWorkflowId: 'nonexistent'}).executions,
+    ).toEqual([]);
+  });
+
+  it('combines with the other filters rather than replacing them', () => {
+    // A tree view narrowed to the broken branch is the case that matters: asking
+    // for children *and* a status has to mean both, or the filter is only usable
+    // on its own.
+    const page = queryExecutions(all, {
+      parentWorkflowId: 'order-1',
+      status: 'running',
+    });
+
+    expect(page.executions.map((e) => e.workflowId)).toEqual(['bill-1']);
+  });
+
+  it('leaves the listing alone when it is not asked for', () => {
+    expect(queryExecutions(all, {}).executions.length).toBe(4);
+  });
+});
+
 describe('queryExecutions — filtering', () => {
   const records = [
     record('a', {status: 'completed', name: 'greeter', taskQueue: 'default'}),

@@ -18,7 +18,7 @@ import {
   ANY_TASK_QUEUE,
   QUEUE_STALE_MS,
   isQueueServed,
-  type QueueWorkers,
+  type QueueLiveness,
 } from '../../src/protocol';
 import {createWorkerRegistry} from '../../src/server';
 import {createServerHost} from '../../src/services';
@@ -86,7 +86,7 @@ describe('worker registry — recording polls', () => {
 });
 
 describe('worker registry — reading liveness', () => {
-  const at = (ms: number): QueueWorkers[] => [
+  const at = (ms: number): QueueLiveness[] => [
     {
       taskQueue: 'email',
       workflowPolledAt: ms,
@@ -116,7 +116,7 @@ describe('worker registry — reading liveness', () => {
   });
 
   it('does not let one role vouch for the other', () => {
-    const queues: QueueWorkers[] = [
+    const queues: QueueLiveness[] = [
       {taskQueue: 'email', workflowPolledAt: 1_000, workers: []},
     ];
 
@@ -130,7 +130,7 @@ describe('worker registry — reading liveness', () => {
 
   it('treats a worker polling every queue as serving this one', () => {
     // The in-process runtime, which polls with no queue at all.
-    const queues: QueueWorkers[] = [
+    const queues: QueueLiveness[] = [
       {taskQueue: ANY_TASK_QUEUE, workflowPolledAt: 1_000, workers: []},
     ];
 
@@ -138,7 +138,7 @@ describe('worker registry — reading liveness', () => {
   });
 
   it('lets a stale wildcard poll go stale like any other', () => {
-    const queues: QueueWorkers[] = [
+    const queues: QueueLiveness[] = [
       {taskQueue: ANY_TASK_QUEUE, workflowPolledAt: 1_000, workers: []},
     ];
     const now = 1_000 + QUEUE_STALE_MS + 1;

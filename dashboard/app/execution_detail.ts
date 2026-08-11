@@ -66,6 +66,7 @@ import {
   isQueueServed,
   isStuck,
   type ExecutionDetail as Detail,
+  type ExecutionPage,
   type PendingActivityView,
   type QueueWorkers,
   type WorkerRole,
@@ -156,6 +157,22 @@ export class ExecutionDetailView extends LitElement {
     client.listQueues(signal),
   );
 
+  /**
+   * Every child this execution started, finished ones included.
+   *
+   * Not derivable from the detail. `pending.children` is what the execution is
+   * still *waiting on*, so a child drops out of it the moment it succeeds —
+   * which makes the panel below go empty precisely when the run went well. This
+   * asks the listing instead, which keeps children after they settle.
+   *
+   * Its own poller for the reason the queues one has its own: paging the history
+   * replaces the detail request, and a child list folded into it would be
+   * re-fetched on every page turn.
+   */
+  private readonly childExecutions = new Poller<ExecutionPage>(this, (signal) =>
+    client.listExecutions({parentWorkflowId: this.workflowId}, signal),
+  );
+
   private polling = '';
 
   constructor() {
@@ -186,6 +203,12 @@ export class ExecutionDetailView extends LitElement {
       );
     if (sameExecution) this.poller.replaceTaskKeepingValue(task);
     else this.poller.replaceTask(task);
+    // Only on a genuine change of execution: the child list does not depend on
+    // which page of history is being read, so paging must not disturb it.
+    if (!sameExecution)
+      this.childExecutions.replaceTask((signal) =>
+        client.listExecutions({parentWorkflowId: this.workflowId}, signal),
+      );
   }
 
   static override styles = [
@@ -423,6 +446,7 @@ export class ExecutionDetailView extends LitElement {
 
       ${this.stuckPanel(detail)} ${this.failurePanel(detail)}
       ${this.resultPanel(detail)} ${this.pendingPanel(detail)}
+      ${this.childrenPanel()}
 
       <action-bar
         .execution=${detail}
@@ -917,6 +941,59 @@ export class ExecutionDetailView extends LitElement {
                 </tbody>
               </table>
             `
+        }
+      </div>
+    `;
+  }
+
+  /**
+   * Every child this execution started, with what became of each.
+   *
+   * Separate from the "waiting on" table above, which lists outstanding children
+   * only. Both are worth having and they answer different questions: that one is
+   * "why is this not finished", this one is "what did it do". A workflow that
+   * fanned out twenty children and completed shows nothing at all up there.
+   *
+   * Absent when there are none, rather than an empty table — most executions
+   * have no children, and a permanent empty panel on every detail page would be
+   * a cost paid by the common case to serve the rare one.
+   */
+  private childrenPanel(): TemplateResult | typeof nothing {
+    const page = this.childExecutions.value;
+    if (page === undefined || page.executions.length === 0) return nothing;
+
+    return html`
+      <div class="panel">
+        <h2>Children</h2>
+        <table class="pending">
+          <tbody>
+            ${page.executions.map(
+              (child) => html`
+                <tr>
+                  <td class="mono">
+                    <a href=${executionHref(child.workflowId)}
+                      >${child.workflowId}</a
+                    >
+                  </td>
+                  <td>${child.name}</td>
+                  <td>
+                    <status-badge .execution=${child}></status-badge>
+                  </td>
+                  <td class="when" title=${absoluteTime(child.createdAt)}>
+                    ${relativeTime(child.createdAt)}
+                  </td>
+                </tr>
+              `,
+            )}
+          </tbody>
+        </table>
+        ${
+          page.nextCursor === undefined
+            ? nothing
+            : html`<div class="footnote">
+              Showing the first page — this execution has more children than one
+              listing returns.
+            </div>`
         }
       </div>
     `;

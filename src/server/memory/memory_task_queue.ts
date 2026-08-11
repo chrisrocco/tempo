@@ -55,6 +55,19 @@ export class MemoryTaskQueue implements TaskQueue {
     return this.leases.holders();
   }
 
+  backlog(): ReadonlyMap<string, number> {
+    const counts = new Map<string, number>();
+    const count = (taskQueue: string): void => {
+      counts.set(taskQueue, (counts.get(taskQueue) ?? 0) + 1);
+    };
+    for (const entry of this.queue) count(entry.taskQueue);
+    // Lapsed leases are queued again on the next poll, so they are waiting even
+    // though they are not in `queue` yet. Read rather than reclaimed: counting
+    // must not be what redelivers a task. See `LeaseTable.expired`.
+    for (const entry of this.leases.expired()) count(entry.taskQueue);
+    return counts;
+  }
+
   complete(token: TaskToken): void {
     this.leases.ack(token); // expired token → no-op (task already redelivered)
   }

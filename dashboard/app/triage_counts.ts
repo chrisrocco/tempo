@@ -25,7 +25,7 @@
 import {
   isQueueServed,
   type ExecutionGroups,
-  type QueueWorkers,
+  type QueueLiveness,
 } from 'workflow-engine/protocol';
 
 /** What the strip shows. */
@@ -53,7 +53,7 @@ export interface TriageCounts {
  */
 export function triageCounts(
   groups: ExecutionGroups | undefined,
-  queues: QueueWorkers[] | undefined,
+  queues: QueueLiveness[] | undefined,
   now: number,
 ): TriageCounts | undefined {
   if (groups === undefined) return undefined;
@@ -91,7 +91,7 @@ export function triageCounts(
  */
 function unserved(
   groups: ExecutionGroups,
-  queues: QueueWorkers[] | undefined,
+  queues: QueueLiveness[] | undefined,
   now: number,
 ): number | undefined {
   if (queues === undefined) return undefined;

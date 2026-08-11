@@ -43,6 +43,23 @@ export class MemoryWorkflowTaskQueue implements WorkflowTaskQueue {
     return this.leases.holders();
   }
 
+  backlog(): ReadonlyMap<string, number> {
+    const counts = new Map<string, number>();
+    // The same resolution `poll` uses, so the count and the matching cannot
+    // disagree: an execution enqueued without a queue name is served by, and
+    // therefore counted on, `default`.
+    const count = (workflowId: string): void => {
+      const taskQueue = this.queueOf.get(workflowId) ?? DEFAULT_TASK_QUEUE;
+      counts.set(taskQueue, (counts.get(taskQueue) ?? 0) + 1);
+    };
+    for (const workflowId of this.pending) count(workflowId);
+    // Lapsed leases go back to pending on the next poll. `rerun` is deliberately
+    // not counted: those executions are in flight, and their re-run is a
+    // consequence of the task that is already running rather than a queue depth.
+    for (const workflowId of this.leases.expired()) count(workflowId);
+    return counts;
+  }
+
   poll(
     taskQueue?: string,
     identity?: string,

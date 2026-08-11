@@ -83,6 +83,28 @@ export class LeaseTable<T> {
     return lease.item;
   }
 
+  /**
+   * The items whose leases have lapsed, **without** reclaiming them.
+   *
+   * The read-only counterpart to `reclaimExpired`, and it exists for the same
+   * reason `holders` filters by deadline rather than trusting the map: expired
+   * leases are only swept on the next poll, so on a queue nothing is polling
+   * they sit indefinitely. To `holders` that would mean a dead worker vouching
+   * for itself forever; to a backlog count it means work that is waiting to be
+   * redelivered reading as work in progress — on exactly the queue where nobody
+   * is coming to sweep it.
+   *
+   * Separate from `reclaimExpired` because a caller answering a question must
+   * not have the side effect of a caller doing work: counting the backlog cannot
+   * be the thing that redelivers a task.
+   */
+  expired(now = Date.now()): T[] {
+    const lapsed: T[] = [];
+    for (const lease of this.leases.values())
+      if (lease.deadline <= now) lapsed.push(lease.item);
+    return lapsed;
+  }
+
   /** Remove and return the items whose leases have expired (for redelivery). */
   reclaimExpired(now = Date.now()): T[] {
     const expired: T[] = [];

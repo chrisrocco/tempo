@@ -46,7 +46,7 @@
 
 import {
   ANY_TASK_QUEUE,
-  type QueueWorkers,
+  type WorkerInfo,
   type WorkerRole,
 } from '../protocol/service';
 
@@ -69,11 +69,33 @@ export interface WorkerRegistry {
    * Every queue that has ever been polled, in the order first seen, each with
    * the workers seen on it.
    *
-   * `busy` is always `false` here — this table cannot know, and says so by
-   * reporting the conservative value rather than omitting the field. The caller
-   * that can know fills it in; see `server_core.listQueues`.
+   * Returns `ObservedQueue`, not `QueueWorkers`: what a table of polls can say
+   * is strictly less than what the server reports, and the difference is not
+   * cosmetic. `busy` needs the lease tables and backlog needs the task queues;
+   * neither is knowable here. This used to return the wire type with
+   * `busy: false` filled in — a conservative placeholder, but still a row
+   * asserting something it had not observed. Saying it in the type instead makes
+   * the gap impossible to read past, and it is `server_core.listQueues` that
+   * closes it.
    */
-  queues(): QueueWorkers[];
+  queues(): ObservedQueue[];
+}
+
+/** A worker as polls alone can describe it: everything but whether it is busy. */
+export type ObservedWorker = Omit<WorkerInfo, 'busy'>;
+
+/**
+ * A queue as polls alone can describe it: who asked, and when.
+ *
+ * The same shape as `QueueWorkers` minus every field that needs a source this
+ * module does not have. Deliberately not `Partial<QueueWorkers>`, which would
+ * make the missing fields look optional rather than unknowable.
+ */
+export interface ObservedQueue {
+  taskQueue: string;
+  workflowPolledAt?: number;
+  activityPolledAt?: number;
+  workers: ObservedWorker[];
 }
 
 /** A worker row, before anything knows whether it is busy. */
@@ -88,7 +110,7 @@ export function createWorkerRegistry(
 ): WorkerRegistry {
   // Insertion-ordered, which is what a Map gives us, so a listing is stable
   // between reads rather than reshuffling under a polling dashboard.
-  const seen = new Map<string, QueueWorkers>();
+  const seen = new Map<string, ObservedQueue>();
   // Keyed by queue, then by role and identity together — a row per role,
   // because a process running both loops fails at them independently. The
   // composite is only ever a key: both halves are kept on the value rather than
@@ -138,7 +160,6 @@ export function createWorkerRegistry(
             role: observed.role,
             taskQueue: q.taskQueue,
             lastPolledAt: observed.lastPolledAt,
-            busy: false,
           }))
           // Newest poll first, tie-broken by identity so two reads of an idle
           // fleet cannot disagree about the order.
