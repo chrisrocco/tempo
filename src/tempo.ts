@@ -14,6 +14,8 @@
  *   --server=URL   overrides `serverUrl` (else 127.0.0.1:7777)
  *   --queue=NAME   overrides `taskQueue` (else `default`)
  *   --role=ROLE    overrides `role` — unset runs every role it can
+ *   --local=NAME   run that workflow once with no server, print, exit
+ *   --args=JSON    its arguments, as a JSON array (with `--local` only)
  *
  * Running the *same* binary twice with a different `--role` is how the two worker
  * tiers are deployed: workflow workers replay workflow code, activity workers run
@@ -30,16 +32,7 @@
  * ## This entrypoint composes one thing: a worker that polls a server
  *
  * A `RemoteService` over the RPC, and one poll loop per role claiming work from
- * a server in another process. That is the only shape it builds.
- *
- * It used to build a second one. `--runtime=local` composed
- * `createLocalRuntime()` instead — server, workers, and client in one process,
- * dispatching by function call — so that a spec could exercise this entrypoint
- * without a port to pick or a child to wait on. It is gone, because running
- * locally and running deployed differ by more than a composition: a local run
- * needs no build and no deployment, and folding it in here made a *deployable
- * artifact's* startup path branch on which of the two it was. `createLocalRuntime`
- * is the local shape and this file is about the deployed worker only.
+ * a server in another process. That is the only *service* shape it builds.
  *
  * The server this worker dials has a matching entrypoint —
  * [`startServer`](server_main.ts) — and the pair is the whole of what this
@@ -47,9 +40,64 @@
  * installing, supervising, or restarting them belongs to whoever runs them (see
  * `README.md`, "Running it yourself").
  *
- * `createLocalRuntime` itself is untouched and is still the fast in-process
- * runtime — see `local_runtime.ts` and `spec/integration/local.spec.ts`. What
- * went away is this entrypoint's ability to compose it.
+ * ## `--local=NAME` runs one workflow and exits
+ *
+ *   node worker.js --local=greeter --args='["world"]'
+ *
+ * No server, no port, no data directory, no poll loops: `createLocalRuntime()`
+ * gets the same registries `startWorker` was handed, runs the named workflow to
+ * completion, prints its result as JSON on stdout, and the process exits — 0 on
+ * success, 1 on failure.
+ *
+ * **This is deliberately a second composition inside a deployable artifact,
+ * which an earlier version of this file removed for being exactly that.** The
+ * removal was right at the time and the reasoning is worth keeping, because what
+ * changed is the circumstances rather than the argument:
+ *
+ * - The old `--runtime=local` made the artifact *become* a long-lived local
+ *   runtime — two services to keep working, and a startup path that branched on
+ *   which one it was. This one is **terminal**: it runs, it prints, it exits.
+ *   There is no second long-lived thing, and no state in which a process is half
+ *   a worker.
+ * - The capability was going to come back as `tempo run-local`, a command of the
+ *   CLI. That CLI is gone for good (#64), so there is no other home left. The
+ *   choice is this or nothing.
+ * - The objection that it "can only run what its own binary compiled in" still
+ *   stands, and is now the *point*: it runs the shipped artifact, so it proves
+ *   the workflow is registered in the bundle a deployment would install. That
+ *   check had no home after `--runtime=local` went, and an artifact whose
+ *   workflows were never registered otherwise reports nothing until executions
+ *   park on a queue whose workers reject every task.
+ *
+ * **It refuses `--server` and `--role`** rather than quietly winning over them.
+ * Both are contradictions at the launch site: there is no server to dial, and one
+ * in-process pair serves every queue, so a role would park the execution on work
+ * nothing claims. The *options object* is not refused — `serverUrl` and `role`
+ * there are the artifact's shipped defaults, and `--local` says this run is not a
+ * deployment, so the deployment's defaults are simply not consulted.
+ *
+ * **The hazard, stated where someone will find it.** A `--local` left in a
+ * supervisor's command line is worse than a typo'd flag: the service runs one
+ * workflow, exits, and — under `Restart=always` — runs it again, forever, with
+ * real activities doing real I/O. Nothing here can detect that, because detecting
+ * it means knowing the supervisor, which is the knowledge this repo deliberately
+ * does not carry (`README.md`). What it does instead is **say so on every run**:
+ * a `LOCAL RUN` line goes to stderr before the workflow starts, so a
+ * crash-looping unit's log says what is wrong on every iteration rather than
+ * looking like an application that keeps failing.
+ *
+ * **`createLocalRuntime` is still the way to run the engine in-process from
+ * code** — see `local_runtime.ts` and `spec/integration/local.spec.ts`. `--local`
+ * is not a replacement for it and does not try to be: it takes a workflow *name*
+ * and a JSON array off a command line, so it can only run what the artifact
+ * already registered, and it cannot assert, inspect, or signal. It is the way to
+ * run a *binary* once; `createLocalRuntime` is the way to write a test.
+ *
+ * The cost of having it here, stated because it is paid by every deployment: a
+ * worker artifact now bundles the engine it uses only in this mode. Measured on
+ * the reference consumer, that is 24 KB to 81 KB. Small in absolute terms, real
+ * as a multiple, and unavoidable — running a workflow with no server means the
+ * engine has to be in the process that runs it.
  *
  * ## The options object is the configuration
  *
@@ -93,6 +141,7 @@
  */
 
 import type {WorkflowFn} from './core';
+import {createLocalRuntime} from './local_runtime';
 import {DEFAULT_PORT, WORKER_FLAG, flagValue} from './process_flags';
 import {DEFAULT_TASK_QUEUE} from './protocol';
 import {createJsonLogger} from './server';
@@ -285,6 +334,93 @@ function resolveRoles(
   return roles;
 }
 
+/** What `--local` asked for: one workflow, and the arguments to run it with. */
+export interface LocalRun {
+  workflow: string;
+  args: readonly unknown[];
+}
+
+/**
+ * What `--local` was asked to run, or `undefined` when it was not given.
+ *
+ * Throws rather than resolving a contradiction, because every contradiction here
+ * is a launch site that believes it is doing something it is not:
+ *
+ * - **`--server` with `--local`** — one of the two is wrong, and guessing which
+ *   means either running a workflow the caller wanted sent to a server, or
+ *   ignoring a server they named.
+ * - **`--role` with `--local`** — a local run has one in-process pair serving
+ *   every queue, so a role could only narrow it into parking the execution on
+ *   work nothing will claim.
+ * - **`--args` that is not a JSON array** — the arguments are spread into the
+ *   workflow's parameters, so a bare string or an object is a workflow called
+ *   with one argument it did not expect, failing somewhere inside rather than
+ *   here.
+ *
+ * The options object is deliberately not consulted: `--local` says this run is
+ * not a deployment, and `serverUrl`/`role` in code are the deployment's defaults.
+ */
+export function resolveLocalRun(argv: readonly string[]): LocalRun | undefined {
+  // `flagValue` already rejects `--local` and `--local=` with "needs a value",
+  // which is the right answer: there are no boolean flags here, and a local run
+  // has to know which workflow to run.
+  const workflow = flagValue(argv, WORKER_FLAG.local)?.trim();
+  if (!workflow) return undefined;
+
+  for (const contradicted of [WORKER_FLAG.server, WORKER_FLAG.role] as const)
+    if (flagValue(argv, contradicted) !== undefined)
+      throw new Error(
+        `--${contradicted} cannot be combined with --local: a local run has no server and runs every role in one process`,
+      );
+
+  const raw = flagValue(argv, WORKER_FLAG.args);
+  if (raw === undefined) return {workflow, args: []};
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`--args must be JSON (got ${raw})`);
+  }
+  if (!Array.isArray(parsed))
+    throw new Error(
+      `--args must be a JSON array of the workflow's arguments, as --args='["world"]' (got ${raw})`,
+    );
+  return {workflow, args: parsed};
+}
+
+/**
+ * Run one workflow to completion in this process and return its result.
+ *
+ * Separated from the flag reading and the printing so a spec can drive it
+ * directly — the composition is the part worth pinning, and a function that also
+ * owned argv and stdout could only be tested by spawning something.
+ *
+ * Shuts the runtime down on the way out either way, so the process can exit
+ * rather than being held open by the timers of a run that already finished.
+ */
+export async function runLocally(
+  run: LocalRun,
+  registrations: {
+    workflows: readonly [string, AnyFn][];
+    activities: readonly [string, AnyFn][];
+  },
+): Promise<unknown> {
+  const runtime = createLocalRuntime();
+  for (const [name, fn] of registrations.workflows)
+    runtime.registerWorkflow(name, fn as WorkflowFn);
+  for (const [name, fn] of registrations.activities)
+    runtime.registerActivity(name, fn as ActivityFn);
+
+  try {
+    // `start` throws "no workflow registered as …" for a name the artifact does
+    // not have, which is the smoke test this whole flag exists to make possible.
+    return await runtime.start(run.workflow, [...run.args]).result();
+  } finally {
+    runtime.shutdown();
+  }
+}
+
 /**
  * The pass-through half of the configuration: what the poll loops take and this
  * entrypoint has no opinion about. Named rather than spread inline so adding a
@@ -362,6 +498,12 @@ export function startWorker(options: StartWorkerOptions): Worker {
   // Read once, from the process's own arguments past the interpreter and script.
   const argv = process.argv.slice(2);
 
+  // Before any of the deployment wiring, because a local run consults none of it
+  // — not the roles, not the queue, not the server. See the fileoverview.
+  const localRun = resolveLocalRun(argv);
+  if (localRun)
+    return startLocalRun(options.name, localRun, {workflows, activities});
+
   const roles = resolveRoles(
     requestedRole(argv, options.role),
     options.name,
@@ -415,6 +557,57 @@ export function startWorker(options: StartWorkerOptions): Worker {
   process.on('SIGINT', shutdown);
 
   return worker;
+}
+
+/**
+ * The `--local` half of `startWorker`: run it, report it, arrange to exit.
+ *
+ * **Sets `process.exitCode` rather than calling `process.exit`.** Exiting
+ * outright can truncate a stdout that is a pipe — which it is for every caller
+ * that wants the result, a spec or a shell substitution alike — and the result
+ * line is the whole output of this mode. The runtime's timers are stopped by
+ * `runLocally`, and no signal handlers are registered here, so nothing holds the
+ * event loop open and the process ends on its own with the code set below.
+ *
+ * The `Worker` returned is inert and says so: no roles, and a `stop` with nothing
+ * to stop. Nothing observes it — the process is on its way out — but the return
+ * type is what it is, and a plausible-looking worker would be a lie about a
+ * process that is not polling anything.
+ */
+function startLocalRun(
+  name: string,
+  run: LocalRun,
+  registrations: {
+    workflows: readonly [string, AnyFn][];
+    activities: readonly [string, AnyFn][];
+  },
+): Worker {
+  // On stderr, before the workflow runs, on every run. This is the only defence
+  // against a `--local` left in a supervisor's command line, where the symptom is
+  // a service that runs one workflow and exits and is restarted forever — see the
+  // fileoverview. stdout stays reserved for the result.
+  console.error(
+    `LOCAL RUN ${name} ${run.workflow} — one workflow, then exit. Not a deployment: no server, no durability.`,
+  );
+
+  void runLocally(run, registrations).then(
+    (result) => {
+      // JSON so the output is unambiguous and parseable; `null` for a workflow
+      // that returns nothing, rather than the word "undefined".
+      console.log(JSON.stringify(result ?? null));
+      process.exitCode = 0;
+    },
+    (error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    },
+  );
+
+  return {
+    name,
+    roles: [],
+    stop: () => Promise.resolve(),
+  };
 }
 
 /** The namespace a worker entrypoint imports: `Tempo.startWorker({...})`. */

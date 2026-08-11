@@ -52,19 +52,14 @@ on npm and makes no stability promises — clone it, read it, run it.
   can share one server; activities and children inherit their execution's
   queue
 
-The same workflow code runs three ways, with no changes:
+The same workflow code runs four ways, with no changes:
 
-| Mode                                  | How                        | For                   |
-| ------------------------------------- | -------------------------- | --------------------- |
-| In-memory                             | `createLocalRuntime()`     | Tests, the fast inner |
-| : : : loop :                          |
-| Durable single-binary                 | `createLocalRuntime({      | One process, survives |
-| : : historyStore\: await : restarts : |
-| : : FileHistoryStore.open(dir) : :    |
-| : : })` : :                           |
-| Distributed                           | Server + workflow/activity | Horizontal scale      |
-| : : worker processes over HTTP : :    |
-| : : RPC : :                           |
+| Mode                    | How                                                                    | For                            |
+| ----------------------- | ---------------------------------------------------------------------- | ------------------------------ |
+| In-memory               | `createLocalRuntime()`                                                 | Tests, the fast inner loop     |
+| One workflow, no server | `worker.js --local=NAME`                                               | Trying a change; build checks  |
+| Durable single-binary   | `createLocalRuntime({historyStore: await FileHistoryStore.open(dir)})` | One process, survives restarts |
+| Distributed             | Server + workflow/activity worker processes over HTTP RPC              | Horizontal scale               |
 
 ## Requirements
 
@@ -92,6 +87,25 @@ const rt = createLocalRuntime()
 console.log(await rt.start<string>('greeter', ['world']).result());
 rt.shutdown(); // stop background timers so the process exits
 ```
+
+Or run one workflow through your worker binary, with no server at all:
+
+```bash
+tsx examples/greeter.ts --local=greeter --args='["world"]'
+# LOCAL RUN greeter greeter — one workflow, then exit. Not a deployment: …
+# "Hello, world!"
+```
+
+`--local=NAME` runs that workflow to completion in-process, prints its result as
+JSON, and exits — 0 on success, 1 if the workflow failed or the artifact does not
+register it. That last part is the other reason it exists: it is the cheapest way
+to prove a _built_ worker actually registered its workflows, which otherwise
+surfaces only as executions parking on a queue whose workers reject every task.
+
+**Never put `--local` in a supervisor's command line.** The process runs one
+workflow and exits, so a supervisor that restarts it will run that workflow
+again, forever, with real activities doing real I/O. It announces itself on
+stderr on every run for exactly this reason.
 
 Or run the real thing — a server and the two worker tiers, each its own process:
 
@@ -161,6 +175,11 @@ hardcoding strings:
 import { SERVER_FLAG, formatFlag } from 'workflow-engine';
 formatFlag(SERVER_FLAG.dataDir, '/var/lib/tempo'); // --data-dir=/var/lib/tempo
 ```
+
+The worker is checkable before it is deployed: `node worker.js --local=NAME` runs
+one workflow through the built artifact and exits non-zero if it is not
+registered, which is worth a CI step — a worker that registered nothing installs
+happily and reports nothing until executions park on a queue it never serves.
 
 The rest is ordinary process supervision, and the shape is always the same: one
 server, one workflow worker (`--role=workflow`), one activity worker
@@ -257,25 +276,17 @@ warm executions on the worker is planned but not built.
 
 ### Terms
 
-| Term                                     | Meaning                                                  |
-| ---------------------------------------- | -------------------------------------------------------- |
-| **Command**                              | A request emitted by workflow code during a task,        |
-| : : carrying a deterministic `seq` :     |
-| **History event**                        | The durable record of something that happened; history   |
-| : : is the source of truth :             |
-| **seq**                                  | Sequence number assigned to each command in call order — |
-| : : how a completion finds its promise : |
-| **Activation**                           | One batch of new events applied to advance a workflow (a |
-| : : "workflow task") :                   |
-| **Replay**                               | Re-running the workflow from the top against recorded    |
-| : : history to rebuild lost state :      |
-| **Live edge**                            | The boundary between catching up and producing new       |
-| : : commands :                           |
-| **Marker event**                         | A record that work was _dispatched_; resolves nothing,   |
-| : : but stops re-dispatch on replay :    |
-| **Wake**                                 | Enqueuing a workflow task for an execution               |
-| **Execution**                            | One running instance of a workflow (a `workflowId`, plus |
-| : : a `runId` per run) :                 |
+| Term              | Meaning                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| **Command**       | A request emitted by workflow code during a task, carrying a deterministic `seq`            |
+| **History event** | The durable record of something that happened; history is the source of truth               |
+| **seq**           | Sequence number assigned to each command in call order — how a completion finds its promise |
+| **Activation**    | One batch of new events applied to advance a workflow (a "workflow task")                   |
+| **Replay**        | Re-running the workflow from the top against recorded history to rebuild lost state         |
+| **Live edge**     | The boundary between catching up and producing new commands                                 |
+| **Marker event**  | A record that work was _dispatched_; resolves nothing, but stops re-dispatch on replay      |
+| **Wake**          | Enqueuing a workflow task for an execution                                                  |
+| **Execution**     | One running instance of a workflow (a `workflowId`, plus a `runId` per run)                 |
 
 ## Project layout
 
@@ -356,6 +367,7 @@ understand what the engine does.
 | [`integration/remote`](spec/integration/remote.spec.ts)                       | Client → RemoteService → HTTP → server → workers, one process         |
 | [`integration/distributed`](spec/integration/distributed.spec.ts)             | Real spawned processes; crash redelivery / at-least-once              |
 | [`integration/server_entrypoint`](spec/integration/server_entrypoint.spec.ts) | `startServer`: bind, persist, refuse, override                        |
+| [`integration/local_run`](spec/integration/local_run.spec.ts)                 | `--local`: one workflow, no server, and what it refuses               |
 | [`integration/worker_entrypoint`](spec/integration/worker_entrypoint.spec.ts) | `startWorker`: what it registers, connects to, refuses                |
 | [`server/concurrency`](spec/server/concurrency.spec.ts)                       | Version CAS, lease expiry, lease-race rejection, late-ack dedup       |
 | [`server/pending_work`](spec/server/pending_work.spec.ts)                     | What an execution still awaits — shared by recovery and `describe`    |

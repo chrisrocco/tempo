@@ -5,8 +5,12 @@
  *
  * Run it directly against a server — `--server=URL` picks the server and
  * `--role=ROLE` picks a single poll loop (see src/tempo.ts for the full input
- * surface). This is the binary spec/integration/distributed.spec.ts actually
- * runs, so it stays honest.
+ * surface). Or run one workflow through it with no server at all:
+ *
+ *   tsx examples/greeter.ts --local=greeter --args='["world"]'
+ *
+ * This is the binary spec/integration/distributed.spec.ts and
+ * spec/integration/local_run.spec.ts actually run, so it stays honest.
  *
  * Real projects should split activities and workflows into separate modules: a
  * workflow module that imports activities with `import type * as` keeps their
