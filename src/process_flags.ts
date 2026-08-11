@@ -84,11 +84,22 @@ export const SERVER_FLAG = {
   activityLeaseMs: 'activity-lease-ms',
 } as const;
 
-/** The flags `startWorker` reads, shared with a launcher for the same reason. */
+/**
+ * The flags `startWorker` reads, shared with a launcher for the same reason.
+ *
+ * `local` and `args` are the odd pair out: they are not deployment overrides at
+ * all — nothing that supervises a worker should ever set them — but a way to run
+ * the built artifact once, by hand, with no server. They live here because they
+ * are read from the same argv by the same helpers, and because a launcher needs
+ * to be able to name them in order to be sure it is *not* passing them. See
+ * `tempo.ts`.
+ */
 export const WORKER_FLAG = {
   server: 'server',
   queue: 'queue',
   role: 'role',
+  local: 'local',
+  args: 'args',
 } as const;
 
 /** `--name=value`, the only spelling anything here writes or reads. */
