@@ -12,7 +12,7 @@ document.
 **Organize by responsibility, not by technical kind.** The top-level split is
 `protocol/`, `core/`, `server/`, `services/`, `worker/`, `client/` — each a job
 the system does. Resist `types/`, `utils/`, `helpers/`, `handlers/`: those group
-files by what they *are* rather than what they are *for*, and a concept spread
+files by what they _are_ rather than what they are _for_, and a concept spread
 across them belongs to no one.
 
 **One module, one idea — nameable in a sentence.** If you can't finish "this
@@ -43,7 +43,7 @@ fine; doing it in the same commit that needs it, with a reason, is the point.
 
 **There is a bundler now, and there did not used to be.** The old rule was that
 `tsx` was the only thing that executed TypeScript, and the dashboard paid for it:
-it shipped a server that compiled TypeScript *per request* and generated an
+it shipped a server that compiled TypeScript _per request_ and generated an
 import map at page load, which put the TypeScript compiler in its runtime
 dependencies. "Compile when asked" is not something a build system can express,
 so the no-bundler rule was the thing standing between this repo and one.
@@ -97,22 +97,20 @@ one back is not the answer to "where should this go?"
 
 Two reasons this is worth the discipline:
 
--   **Discoverability.** You find the explanation because you opened the file it
-    describes, not because you knew a doc existed and went looking.
--   **It stays true.** A comment next to the code is in the same diff when
-    behavior changes, so review catches drift. A parallel doc tree has no such
-    forcing function and rots silently.
+- **Discoverability.** You find the explanation because you opened the file it
+  describes, not because you knew a doc existed and went looking.
+- **It stays true.** A comment next to the code is in the same diff when
+  behavior changes, so review catches drift. A parallel doc tree has no such
+  forcing function and rots silently.
 
 ### Where each kind of thing goes
 
-| Kind                                | Home                                   |
-| ----------------------------------- | -------------------------------------- |
-| What a module is, why it's shaped   | `@fileoverview` at the top of the      |
-: that way, its caveats               : module                                 :
-| The contract of one exported symbol | JSDoc on that symbol                   |
-| Non-obvious local reasoning         | An inline comment at the point it      |
-:                                     : applies                                :
-| What the system guarantees          | A spec — executable, and it runs in CI |
+| Kind                                                    | Home                                      |
+| ------------------------------------------------------- | ----------------------------------------- |
+| What a module is, why it's shaped that way, its caveats | `@fileoverview` at the top of the module  |
+| The contract of one exported symbol                     | JSDoc on that symbol                      |
+| Non-obvious local reasoning                             | An inline comment at the point it applies |
+| What the system guarantees                              | A spec — executable, and it runs in CI    |
 
 An idea spanning several modules gets **one home**: the module that owns it;
 others refer to it by path. The determinism boundary is owned by
@@ -125,33 +123,33 @@ A decision is documentation with a shape of its own, and the rule above is not
 enough by itself: "design rationale" says the choice was explained, not that the
 **alternatives** were. Record what was rejected and why — that is the half that
 stops the next reader relitigating something already settled, and the half that
-tells them when reopening it *would* be right.
+tells them when reopening it _would_ be right.
 
--   **The decision lives with the code it constrains**, in the `@fileoverview`
-    of the module that owns the idea. Why the listing's order is not
-    configurable is in `server/execution_query.ts`; why the URL carries a
-    duration rather than an instant is in `dashboard/app/time_range.ts`. If you
-    can't name the owning module, re-read
-    [Homeless documentation is a design smell](#homeless-documentation-is-a-design-smell)
-    — it's the same signal.
--   **Say what it cost to decide, not only what was decided.** "No sort control"
-    is a note. "No sort control, because the cursor *is* the sort key, so a
-    second ordering silently resolves old links into a differently-ordered set"
-    is a decision — it survives someone who disagrees.
--   **An issue that lands says what shipped**, including any deviation from the
-    shape it proposed and what was deliberately left undone. The issue keeps the
-    problem statement, the code keeps the rationale, and the closing note is the
-    link between them. See
-    [#50](https://github.com/chrisrocco/tempo/issues/50).
--   **A decision *not* to build something still lands**, with the reasoning that
-    made waiting the cheap option. Nothing was built, so no module can host it —
-    which makes the issue its only home, and a reason to close it as
-    `not_planned` rather than delete the thinking. See
-    [#51](https://github.com/chrisrocco/tempo/issues/51) and
-    [#48](https://github.com/chrisrocco/tempo/issues/48).
--   **When a decision outgrows a fileoverview, it belongs in the issue**, not in
-    a design document that no code change will ever force someone to revisit.
-    See [#33](https://github.com/chrisrocco/tempo/issues/33).
+- **The decision lives with the code it constrains**, in the `@fileoverview`
+  of the module that owns the idea. Why the listing's order is not
+  configurable is in `server/execution_query.ts`; why the URL carries a
+  duration rather than an instant is in `dashboard/app/time_range.ts`. If you
+  can't name the owning module, re-read
+  [Homeless documentation is a design smell](#homeless-documentation-is-a-design-smell)
+  — it's the same signal.
+- **Say what it cost to decide, not only what was decided.** "No sort control"
+  is a note. "No sort control, because the cursor _is_ the sort key, so a
+  second ordering silently resolves old links into a differently-ordered set"
+  is a decision — it survives someone who disagrees.
+- **An issue that lands says what shipped**, including any deviation from the
+  shape it proposed and what was deliberately left undone. The issue keeps the
+  problem statement, the code keeps the rationale, and the closing note is the
+  link between them. See
+  [#50](https://github.com/chrisrocco/tempo/issues/50).
+- **A decision _not_ to build something still lands**, with the reasoning that
+  made waiting the cheap option. Nothing was built, so no module can host it —
+  which makes the issue its only home, and a reason to close it as
+  `not_planned` rather than delete the thinking. See
+  [#51](https://github.com/chrisrocco/tempo/issues/51) and
+  [#48](https://github.com/chrisrocco/tempo/issues/48).
+- **When a decision outgrows a fileoverview, it belongs in the issue**, not in
+  a design document that no code change will ever force someone to revisit.
+  See [#33](https://github.com/chrisrocco/tempo/issues/33).
 
 The forcing function is the one the rest of this section relies on: a decision
 recorded beside the code it governs is in the diff when that code changes, so
@@ -163,14 +161,14 @@ Find the module that owns the idea and put it there. If genuinely no module owns
 it, that is a signal about what kind of thing it actually is — and it belongs in
 one of the few places that legitimately sit outside the code:
 
--   **[`README.md`](README.md)** — what the project is, the layout, current
-    status, and the reading order. The front door, for someone who has read
-    nothing.
--   **[`ROADMAP.md`](ROADMAP.md)** — what is not built yet, and the invariants
-    that hold while building it.
--   **GitHub issues** — in-flight design work: proposals, scoping, and decisions
-    about code that doesn't exist yet, so there's no module to host them.
--   **This file** — contributor conventions: process, not implementation.
+- **[`README.md`](README.md)** — what the project is, the layout, current
+  status, and the reading order. The front door, for someone who has read
+  nothing.
+- **[`ROADMAP.md`](ROADMAP.md)** — what is not built yet, and the invariants
+  that hold while building it.
+- **GitHub issues** — in-flight design work: proposals, scoping, and decisions
+  about code that doesn't exist yet, so there's no module to host them.
+- **This file** — contributor conventions: process, not implementation.
 
 ### Keeping it honest
 
@@ -182,22 +180,14 @@ to something that no longer exists.
 
 ### Start here when orienting
 
-| Read                                      | For                             |
-| ----------------------------------------- | ------------------------------- |
-| `src/workflow.ts`                         | The determinism boundary — the  |
-:                                           : organizing idea, and the author :
-:                                           : rules                           :
-| `src/core/replay.ts`                      | Activation vs. replay, what     |
-:                                           : suppresses a command,           :
-:                                           : observe-don't-await             :
-| `src/core/condition.ts`                   | How a workflow waits, and why   |
-:                                           : `condition` exists              :
-| `src/server/ports/workflow_task_queue.ts` | The two concurrency bugs the    |
-:                                           : queue design prevents           :
-| `src/services/local_service.ts`           | Local vs. distributed, and the  |
-:                                           : failure-semantics caveat        :
-| `spec/integration/local.spec.ts`          | The whole programming model,    |
-:                                           : executable                      :
+| Read                                      | For                                                                   |
+| ----------------------------------------- | --------------------------------------------------------------------- |
+| `src/workflow.ts`                         | The determinism boundary — the organizing idea, and the author rules  |
+| `src/core/replay.ts`                      | Activation vs. replay, what suppresses a command, observe-don't-await |
+| `src/core/condition.ts`                   | How a workflow waits, and why `condition` exists                      |
+| `src/server/ports/workflow_task_queue.ts` | The two concurrency bugs the queue design prevents                    |
+| `src/services/local_service.ts`           | Local vs. distributed, and the failure-semantics caveat               |
+| `spec/integration/local.spec.ts`          | The whole programming model, executable                               |
 
 ## Code style
 
@@ -210,78 +200,78 @@ up with its formatting (80 columns, two spaces, single quotes, semicolons,
 trailing commas). Two rules need local judgement rather than literal
 application:
 
--   **`any` in rest-parameter positions is correct here and must stay.**
-    `WorkflowFn`, `ActivityFn`, and `AnyFn` take `(...args: any[])` because
-    `strictFunctionTypes` makes parameters contravariant: a real `(name: string)
-    => Promise<string>` is *not* assignable to `(...args: unknown[]) => …`, so a
-    registry typed that way would accept nothing anyone writes. Return types
-    carry no such constraint and stay `unknown`. Each such `any` is documented
-    at its declaration — Google's rule is to justify it, not to pretend it is
-    avoidable.
--   **A `switch` over a discriminated union ends in `default: assertNever(x)`**,
-    not a bare `default`. Google requires a default case; an empty one would
-    defeat the exhaustiveness check that makes an unhandled variant a compile
-    error. See `services/rpc_server.ts`, where the alternative was a new RPC
-    method silently returning `null` on the wire.
+- **`any` in rest-parameter positions is correct here and must stay.**
+  `WorkflowFn`, `ActivityFn`, and `AnyFn` take `(...args: any[])` because
+  `strictFunctionTypes` makes parameters contravariant: a real `(name: string)
+=> Promise<string>` is _not_ assignable to `(...args: unknown[]) => …`, so a
+  registry typed that way would accept nothing anyone writes. Return types
+  carry no such constraint and stay `unknown`. Each such `any` is documented
+  at its declaration — Google's rule is to justify it, not to pretend it is
+  avoidable.
+- **A `switch` over a discriminated union ends in `default: assertNever(x)`**,
+  not a bare `default`. Google requires a default case; an empty one would
+  defeat the exhaustiveness check that makes an unhandled variant a compile
+  error. See `services/rpc_server.ts`, where the alternative was a new RPC
+  method silently returning `null` on the wire.
 
 Prettier owns mechanical formatting — line width, indentation, quotes, trailing
 commas (`.prettierrc.json`: `printWidth: 80`, `singleQuote: true`). Run `npm run
 format`. What neither Prettier nor the Google guide enforces, apply yourself:
 
--   **Every module opens with an `@fileoverview`** JSDoc block, blank line after
-    it — not a plain `//` header. For what goes *in* it, see
-    [Documentation lives in the code](#documentation-lives-in-the-code).
--   **Every exported symbol carries a JSDoc comment**, unless the module's
-    `@fileoverview` already documents it — a single-purpose module named after
-    the thing it exports needs no second copy (`condition.ts`,
-    `microtask_scheduler.ts`).
--   **Namespace imports, never default imports.** `import * as path from
-    'node:path'`, not `import path from 'node:path'` — and the same for packages
-    (`import * as ts from 'typescript'`). A default import of a CommonJS module
-    is a binding `esModuleInterop` *invents* rather than one the module exports,
-    so the same line means different things under different compiler settings,
-    and the same module ends up spelled two ways in one repo — which is how this
-    was found, `tools/style.ts` importing `* as path` while `tools/boundaries.ts`
-    next door imported the default. Named imports (`import {readFileSync} from
-    'node:fs'`), type-only imports, and side-effect imports are untouched by
-    this. **Checked** — see below.
--   **A spec under `spec/dashboard/` opens with `import 'jasmine';`.**
-    `describe`/`it`/`expect` otherwise arrive as ambient globals from the root
-    `tsconfig.json`'s `types`, which is a fact about the config rather than about
-    the file. These are the specs sitting against the browser boundary —
-    `dashboard/app/tsconfig.json` already sets `types: []` so ambient globals
-    stop leaking into code that must not have them — so they name their harness
-    and keep type-checking under a config that declares none. The rest of the
-    suite still leans on the root config. **Checked** — see below.
--   **DOM sink writes use bracket notation.** In `dashboard/app/`, a write to
-    `innerHTML`, `href`, `src`, `download` and friends is spelled
-    `anchor['href'] = url`. A DOM security scanner matches `.href =` by *syntax*,
-    so bracket notation is what separates a reviewed write from an unreviewed one
-    — which makes it a claim, and the claim has to be true. It changes what a
-    scanner matches, not what the browser does: say why the value is safe in a
-    comment at the assignment. The export anchor in
-    `dashboard/app/execution_detail.ts` is the worked example. **Checked** — see
-    below.
--   **Browser globals are qualified with `window.`** in `dashboard/app/`:
-    `window.localStorage`, `window.location.hash`, `window.document`,
-    `window.setTimeout`, `window.fetch`. Bare, each of these is
-    indistinguishable at the call site from an import or a local, and the
-    dashboard's other half is Node — where `fetch`, `setTimeout`, and
-    `navigator` all exist with different types and behaviour, and the two halves
-    get edited in the same sitting. The list is window-owned *state and
-    services*, not global constructors: `new URL(…)` and `new Blob(…)` stay as
-    they are, because `new window.Blob()` reads as a mistake and nothing about a
-    constructor is ambient. See `WINDOW_GLOBALS` in
-    [`tools/style.ts`](tools/style.ts) for the exact set. **Checked** — see
-    below.
--   **`function` over arrow functions** for statement functions — including
-    helpers in specs, which is where the exceptions used to collect. A `const`
-    bound to an arrow is still right when the arrow is a *value* satisfying a
-    declared type (`export const silentLogger: Logger = () => {};`); the rule is
-    about functions declared to be called, not about every arrow. That
-    distinction is why this one is not machine-checked: a blanket check cannot
-    tell the two apart.
--   **`while (true)`, never `for (;;)`.**
+- **Every module opens with an `@fileoverview`** JSDoc block, blank line after
+  it — not a plain `//` header. For what goes _in_ it, see
+  [Documentation lives in the code](#documentation-lives-in-the-code).
+- **Every exported symbol carries a JSDoc comment**, unless the module's
+  `@fileoverview` already documents it — a single-purpose module named after
+  the thing it exports needs no second copy (`condition.ts`,
+  `microtask_scheduler.ts`).
+- **Namespace imports, never default imports.** `import * as path from
+'node:path'`, not `import path from 'node:path'` — and the same for packages
+  (`import * as ts from 'typescript'`). A default import of a CommonJS module
+  is a binding `esModuleInterop` _invents_ rather than one the module exports,
+  so the same line means different things under different compiler settings,
+  and the same module ends up spelled two ways in one repo — which is how this
+  was found, `tools/style.ts` importing `* as path` while `tools/boundaries.ts`
+  next door imported the default. Named imports (`import {readFileSync} from
+'node:fs'`), type-only imports, and side-effect imports are untouched by
+  this. **Checked** — see below.
+- **A spec under `spec/dashboard/` opens with `import 'jasmine';`.**
+  `describe`/`it`/`expect` otherwise arrive as ambient globals from the root
+  `tsconfig.json`'s `types`, which is a fact about the config rather than about
+  the file. These are the specs sitting against the browser boundary —
+  `dashboard/app/tsconfig.json` already sets `types: []` so ambient globals
+  stop leaking into code that must not have them — so they name their harness
+  and keep type-checking under a config that declares none. The rest of the
+  suite still leans on the root config. **Checked** — see below.
+- **DOM sink writes use bracket notation.** In `dashboard/app/`, a write to
+  `innerHTML`, `href`, `src`, `download` and friends is spelled
+  `anchor['href'] = url`. A DOM security scanner matches `.href =` by _syntax_,
+  so bracket notation is what separates a reviewed write from an unreviewed one
+  — which makes it a claim, and the claim has to be true. It changes what a
+  scanner matches, not what the browser does: say why the value is safe in a
+  comment at the assignment. The export anchor in
+  `dashboard/app/execution_detail.ts` is the worked example. **Checked** — see
+  below.
+- **Browser globals are qualified with `window.`** in `dashboard/app/`:
+  `window.localStorage`, `window.location.hash`, `window.document`,
+  `window.setTimeout`, `window.fetch`. Bare, each of these is
+  indistinguishable at the call site from an import or a local, and the
+  dashboard's other half is Node — where `fetch`, `setTimeout`, and
+  `navigator` all exist with different types and behaviour, and the two halves
+  get edited in the same sitting. The list is window-owned _state and
+  services_, not global constructors: `new URL(…)` and `new Blob(…)` stay as
+  they are, because `new window.Blob()` reads as a mistake and nothing about a
+  constructor is ambient. See `WINDOW_GLOBALS` in
+  [`tools/style.ts`](tools/style.ts) for the exact set. **Checked** — see
+  below.
+- **`function` over arrow functions** for statement functions — including
+  helpers in specs, which is where the exceptions used to collect. A `const`
+  bound to an arrow is still right when the arrow is a _value_ satisfying a
+  declared type (`export const silentLogger: Logger = () => {};`); the rule is
+  about functions declared to be called, not about every arrow. That
+  distinction is why this one is not machine-checked: a blanket check cannot
+  tell the two apart.
+- **`while (true)`, never `for (;;)`.**
 
 ### The rules that are checked
 
@@ -293,21 +283,21 @@ it builds a real TypeScript program, because "is this a promise?" is a question
 about types and "is this await top-level?" is a question about scope. Its
 `@fileoverview` explains each rule and the failure it prevents; in short:
 
--   **A promise that is neither awaited nor `void`ed is an error.** An unhandled
-    rejection is fatal to a Node process, and this repo has already lost a
-    server to one. Writing `void` is how a deliberate fire-and-forget is
-    distinguished from a forgotten `await` — a distinction only the author can
-    make, so each `void` here carries a comment saying why.
--   **No top-level `await` anywhere, and no `import.meta`.** The Node half of
-    the repo is CommonJS, which has neither: top-level `await` is TS1378 and a
-    module using it does not run, and `import.meta` is a *syntax* error rather
-    than a diagnostic. Use `void run().then(…)`, and resolve paths from
-    `__dirname`. `tsconfig.json` says why the module system is what it is.
--   **No unqualified browser global in `dashboard/app/`.** The `window.` rule
-    above, and the clearest case for needing a program rather than a regex:
-    `routes.ts` declares a local named `history`, and the bare word appears over
-    a hundred times across the app. Only the checker can tell that local from
-    `window.history` — which is exactly why the qualified form is worth writing.
+- **A promise that is neither awaited nor `void`ed is an error.** An unhandled
+  rejection is fatal to a Node process, and this repo has already lost a
+  server to one. Writing `void` is how a deliberate fire-and-forget is
+  distinguished from a forgotten `await` — a distinction only the author can
+  make, so each `void` here carries a comment saying why.
+- **No top-level `await` anywhere, and no `import.meta`.** The Node half of
+  the repo is CommonJS, which has neither: top-level `await` is TS1378 and a
+  module using it does not run, and `import.meta` is a _syntax_ error rather
+  than a diagnostic. Use `void run().then(…)`, and resolve paths from
+  `__dirname`. `tsconfig.json` says why the module system is what it is.
+- **No unqualified browser global in `dashboard/app/`.** The `window.` rule
+  above, and the clearest case for needing a program rather than a regex:
+  `routes.ts` declares a local named `history`, and the bare word appears over
+  a hundred times across the app. Only the checker can tell that local from
+  `window.history` — which is exactly why the qualified form is worth writing.
 
 The conventions checker is the one that reads the **whole tree** rather than a
 compiler's view of it — `tools/` and `spec/` are in no tsconfig, the first
@@ -336,13 +326,13 @@ unusual history.
 
 Not every test is documentation, and forcing it to be makes both worse.
 
--   **Documentation specs** — the author-facing programming model, meant to be
-    *read* as the spec of what the engine does:
-    `spec/integration/local.spec.ts`. Hold these to the conventions below.
--   **Correctness / internals specs** — `spec/server/` and the
-    distributed/resume integration specs. These prove invariants (version CAS,
-    lease redelivery, durable timers). Keep them rigorous, but don't contort
-    them into English prose; they document *for contributors*, not for authors.
+- **Documentation specs** — the author-facing programming model, meant to be
+  _read_ as the spec of what the engine does:
+  `spec/integration/local.spec.ts`. Hold these to the conventions below.
+- **Correctness / internals specs** — `spec/server/` and the
+  distributed/resume integration specs. These prove invariants (version CAS,
+  lease redelivery, durable timers). Keep them rigorous, but don't contort
+  them into English prose; they document _for contributors_, not for authors.
 
 ### Conventions for documentation specs
 
@@ -352,11 +342,11 @@ Not every test is documentation, and forcing it to be makes both worse.
 2.  **Each `it` is a full declarative sentence stating one guarantee.** Present
     tense, active voice, no "should", no test-jargon. It should read as a line
     of the manual:
-    -   ✅ `it('parks on a condition and wakes when a signal makes it true')`
-    -   ✅ `it('retries a flaky activity and succeeds within maximumAttempts')`
-    -   ❌ `it('should work with signals')`
-    -   ❌ `it('test condition 2')`
-3.  **One guarantee per test.** If the name needs "and" between two *different*
+    - ✅ `it('parks on a condition and wakes when a signal makes it true')`
+    - ✅ `it('retries a flaky activity and succeeds within maximumAttempts')`
+    - ❌ `it('should work with signals')`
+    - ❌ `it('test condition 2')`
+3.  **One guarantee per test.** If the name needs "and" between two _different_
     behaviors, split it. (An "and" describing a single cause→effect is fine.)
 4.  **Each test is a minimal, self-contained example.** Define the workflow
     inline in the test so the reader sees the whole example in one place; avoid
@@ -393,4 +383,3 @@ npm run format
 ```bash
 npm run format:check
 ```
-
