@@ -58,19 +58,19 @@ const conflicted = new Set<string>();
  * can evaluate twice — resolved through two paths, or present in both a bundle and
  * a `require` — and that is not a mistake anyone made.
  *
- * A *different* function under a name already taken is **last-write-wins, and
- * recorded**. Throwing would be the tempting answer and is not available: every
- * `proxyActivities` call registers, and those calls run at module load, so a throw
- * fires while modules are still being evaluated — before any application or test
- * setup exists to catch or prevent it. In a process that loads more than one workflow
- * module claiming a name, that is an unrecoverable crash rather than a diagnosable
- * error. This repo's own suite is such a process: three modules define an activity
- * called `greet`.
+ * A *different* function under a name already taken is **recorded, not rejected
+ * here** — the last one wins in this map, and `startWorker` then refuses to start.
  *
- * So the conflict is kept instead, and `startWorker` logs one
- * `activity.name_conflict` event per name at startup. Not silent, not fatal, and the
- * escape hatch is unchanged: `startWorker({activities})` wins over anything declared,
- * so an artifact that needs to be unambiguous can say so.
+ * Throwing at this point is the obvious answer and is not available. Every
+ * `proxyActivities` call registers, and those calls run at module load, so a throw
+ * fires while modules are still being evaluated, before any application or test setup
+ * exists to catch it: a process that crashes on import rather than reporting something
+ * actionable. Deferring the failure to `startWorker` costs nothing — by then every
+ * module has loaded, so the picture is complete — and buys an error that names the
+ * activity and says what to do about it.
+ *
+ * The escape hatch is `startWorker({activities})`, which wins over anything declared,
+ * so an artifact that must be unambiguous names the implementation it means.
  *
  * Non-callable properties are skipped, so handing over a whole module namespace that
  * also exports constants is fine — the same filtering the type level applies.
@@ -87,9 +87,9 @@ export function registerActivityImpls(impls: object): void {
 /**
  * Names that more than one distinct implementation claimed.
  *
- * Reported by `startWorker` rather than thrown at registration — see above. An
- * artifact with entries here is running whichever implementation loaded last, which
- * is a fact worth putting in a log even when it is harmless.
+ * `startWorker` refuses to start when any of these is not resolved by an explicit
+ * `options.activities` entry — see above for why the check is there rather than at
+ * registration. Exported so a build check can assert on it directly too.
  */
 export function activityNameConflicts(): string[] {
   return [...conflicted];

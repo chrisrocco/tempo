@@ -512,6 +512,34 @@ export function startWorker(options: StartWorkerOptions): Worker {
     ]),
   ];
 
+  // A worker refuses to start rather than run an activity it cannot identify.
+  //
+  // Two workflow modules declaring different implementations under one name leaves the
+  // registry holding whichever loaded last, and a worker that started anyway would run
+  // the wrong one — silently, forever, and looking healthy. That is worth refusing.
+  //
+  // **Checked here rather than at registration**, which is the whole reason this is a
+  // deferred check: `proxyActivities` runs at module load, so throwing there fires
+  // while modules are still evaluating, before any handler exists — a process that
+  // crashes on import instead of reporting something actionable. By the time
+  // `startWorker` is called every module has loaded and the picture is complete.
+  //
+  // A name the caller passed explicitly is **not** a conflict: `options.activities`
+  // wins over anything declared, so naming it is exactly how an artifact resolves the
+  // ambiguity, and it is the documented escape hatch.
+  const explicit = new Set(
+    callableEntries(options.activities).map(([name]) => name),
+  );
+  const unresolved = activityNameConflicts().filter(
+    (name) => !explicit.has(name),
+  );
+  if (unresolved.length > 0)
+    throw new Error(
+      `worker "${options.name}" has ${unresolved.length} activity name${unresolved.length === 1 ? '' : 's'} claimed by more than one implementation: ${unresolved.join(', ')}. ` +
+        `Whichever module loaded last would win, so this worker refuses to start rather than run an implementation nobody chose. ` +
+        `Rename one of them, or name the intended implementation in startWorker({activities}), which overrides anything declared.`,
+    );
+
   // Read once, from the process's own arguments past the interpreter and script.
   const argv = process.argv.slice(2);
 
@@ -561,22 +589,6 @@ export function startWorker(options: StartWorkerOptions): Worker {
       return stopping;
     },
   };
-
-  // Two workflow modules claiming one activity name is resolved by load order, so
-  // the artifact is running whichever loaded last. Reported rather than thrown
-  // because registration happens at module load, where a throw fires before anything
-  // exists to handle it — see `activity_registry.ts`. On stderr as JSON Lines, beside
-  // the poll failures, so one pipeline catches both.
-  const conflicts = activityNameConflicts();
-  if (conflicts.length > 0) {
-    const log = createJsonLogger();
-    for (const name of conflicts)
-      log('activity.name_conflict', {
-        worker: options.name,
-        activity: name,
-        resolution: 'the implementation registered last is the one that runs',
-      });
-  }
 
   // Readiness line for a human or a spawning test, not the readiness contract:
   // `Client.queues()` is what answers "is this worker polling" from anywhere, at

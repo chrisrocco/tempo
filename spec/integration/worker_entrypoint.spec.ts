@@ -39,13 +39,15 @@ import {proxyActivities} from '../../src/workflow';
 /** The reference shape: a module namespace holding a constant and an activity. */
 const activities = {
   GREETING: 'Hello',
-  greet: (name: string): string => `Hello, ${name}!`,
+  // A name unique to this file: the registry is one map for the whole process, so two
+  // fixtures sharing an activity name is a conflict a worker now refuses to start on.
+  greetForEntrypoint: (name: string): string => `Hello, ${name}!`,
 };
 
 const act = proxyActivities(activities);
 
 async function greeter(name: string): Promise<string> {
-  return act.greet(name);
+  return act.greetForEntrypoint(name);
 }
 
 const workflows = {greeter};

@@ -161,28 +161,20 @@ describe('proxyActivities — precedence and collisions', () => {
   });
 
   /**
-   * Last-write-wins rather than a throw, and the reason is not squeamishness.
-   * Registration now happens inside every `proxyActivities` call, and those run at
-   * module load — so a throw fires while modules are still evaluating, before any
-   * application or test setup exists to catch it. A process that loads two workflow
-   * modules claiming one name would crash on import rather than report a
-   * diagnosable error, and this repo's own suite is such a process.
+   * Registration itself does not throw, and that is not squeamishness. Every
+   * `proxyActivities` call registers, and those run at module load — so a throw fires
+   * while modules are still evaluating, before any handler exists. A process loading
+   * two workflow modules that claim one name would crash on import rather than report
+   * something actionable. The failure is deferred to `startWorker` instead, by which
+   * point every module has loaded.
    */
-  it('lets the last registration win when two implementations claim a name', () => {
+  it('records the conflict at registration rather than throwing', () => {
     proxyActivities({greet: () => 'first'});
 
     expect(() => proxyActivities({greet: () => 'second'})).not.toThrow();
     expect(Object.fromEntries(registeredActivityImpls())['greet']?.()).toBe(
       'second',
     );
-  });
-
-  // Not silent, though: `startWorker` logs one `activity.name_conflict` per name, so
-  // an artifact running the wrong implementation says so in its own log.
-  it('records the conflict so a worker can report it', () => {
-    proxyActivities({greet: () => 'first'});
-    proxyActivities({greet: () => 'second'});
-
     expect(activityNameConflicts()).toContain('greet');
   });
 
@@ -193,6 +185,70 @@ describe('proxyActivities — precedence and collisions', () => {
     proxyActivities({greet});
 
     expect(activityNameConflicts()).toEqual([]);
+  });
+
+  /**
+   * The failure that matters. A worker that started here would run whichever
+   * implementation loaded last — silently, forever, and looking healthy — so it
+   * refuses instead. This is the check that makes last-write-wins at registration
+   * safe rather than merely convenient.
+   */
+  it('refuses to start a worker when a name has two implementations', () => {
+    proxyActivities({charge: () => 'from module A'});
+    proxyActivities({charge: () => 'from module B'});
+
+    expect(() =>
+      startWorker({
+        name: 'orders',
+        serverUrl: 'http://127.0.0.1:1',
+        workflows: {w: async () => 'x'},
+      }),
+    ).toThrowError(/claimed by more than one implementation: charge/);
+  });
+
+  it('names every conflicting activity, so one start reports all of them', () => {
+    proxyActivities({charge: () => 'a', refund: () => 'a'});
+    proxyActivities({charge: () => 'b', refund: () => 'b'});
+
+    expect(() =>
+      startWorker({
+        name: 'orders',
+        serverUrl: 'http://127.0.0.1:1',
+        workflows: {w: async () => 'x'},
+      }),
+    ).toThrowError(/charge, refund/);
+  });
+
+  // The documented escape hatch: naming the implementation resolves the ambiguity, so
+  // there is nothing left to refuse.
+  it('starts when the caller names the intended implementation', () => {
+    proxyActivities({charge: () => 'from module A'});
+    proxyActivities({charge: () => 'from module B'});
+
+    const worker = startWorker({
+      name: 'orders',
+      serverUrl: 'http://127.0.0.1:1',
+      workflows: {w: async () => 'x'},
+      activities: {charge: () => 'the one I meant'},
+    });
+
+    expect(worker.roles).toEqual(['workflow', 'activity']);
+    void worker.stop();
+  });
+
+  // Resolving one conflict does not excuse the others.
+  it('still refuses when only some conflicts were resolved', () => {
+    proxyActivities({charge: () => 'a', refund: () => 'a'});
+    proxyActivities({charge: () => 'b', refund: () => 'b'});
+
+    expect(() =>
+      startWorker({
+        name: 'orders',
+        serverUrl: 'http://127.0.0.1:1',
+        workflows: {w: async () => 'x'},
+        activities: {charge: () => 'the one I meant'},
+      }),
+    ).toThrowError(/implementation: refund/);
   });
 
   /**
