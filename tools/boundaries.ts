@@ -53,7 +53,7 @@ export interface Violation {
 
 /**
  * What each layer under `src/` is permitted to import. Absent from this map means
- * "unrestricted" — the entrypoints and `deploy/` compose everything by design.
+ * "unrestricted" — the entrypoints compose everything by design.
  */
 const LAYER_IMPORTS: Record<string, readonly string[]> = {
   protocol: [],
@@ -227,7 +227,7 @@ function checkLayering(file: SourceFile, stripped: string): Violation[] {
   const fromLayer = layerOf(file.path);
   if (!fromLayer) return [];
   const allowed = LAYER_IMPORTS[fromLayer];
-  if (!allowed) return []; // deploy/ and the entrypoints compose freely
+  if (!allowed) return []; // the entrypoints compose freely
 
   const violations: Violation[] = [];
   for (const ref of extractImports(stripped)) {

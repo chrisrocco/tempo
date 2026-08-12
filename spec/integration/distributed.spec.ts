@@ -2,7 +2,7 @@
  * @fileoverview
  * Against a REAL server process (spawned via `node --import tsx bin/server-main`),
  * over real sockets, driving the real deployable worker entrypoint
- * (`examples/greeter.ts`) exactly as `tempo up` deploys it: one binary,
+ * (`examples/greeter.ts`) exactly as a deployment launches it: one binary,
  * its role chosen by --role. Test 2 demonstrates the phase's failure
  * semantics: an activity whose worker "crashed" (ran it but never acked) has its
  * lease expire and is redelivered — so it runs at-least-once.
@@ -127,7 +127,7 @@ function remote(
 
 describe('distributed — real server process over RPC', () => {
   // The deployed shape: one worker binary, started twice, each process taking a
-  // single role from --role — what the units `tempo up` writes do.
+  // single role from --role — the shape a deployment installs.
   it('runs a workflow across a server and the worker binary in each role', async () => {
     const {url, proc: server} = await spawnServer();
     const wf = spawnMain(WORKER, [`--server=${url}`, '--role=workflow']);

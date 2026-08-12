@@ -238,9 +238,9 @@ describe('remote client — liveness and what the server is', () => {
 
   /**
    * The field to read first. An in-memory server loses every execution on its next
-   * restart while completing workflows normally and reading `active` to systemd —
-   * catastrophic and invisible, and exactly what a server started without
-   * `--data-dir` looks like.
+   * restart while completing workflows normally and reading healthy to whatever
+   * supervises it — catastrophic and invisible, and exactly what a server started
+   * without `--data-dir` looks like.
    */
   it('says a server is not durable when it is keeping history in memory', async () => {
     const {remote, teardown} = await startDeployment();

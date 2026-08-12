@@ -3,7 +3,7 @@
 A minimal-but-correct **durable workflow engine** in TypeScript — a small,
 Temporal-shaped system built to demonstrate the mechanism end to end.
 
-A *workflow* is an ordinary async function whose execution survives crashes. The
+A _workflow_ is an ordinary async function whose execution survives crashes. The
 engine never trusts the function's in-memory state: it records an **event
 history** and reconstructs any execution by **replaying** the function against
 that history. Workflow code stays deterministic; everything that touches the
@@ -28,43 +28,38 @@ on npm and makes no stability promises — clone it, read it, run it.
 
 ## What it does
 
--   **Activities** with typed `proxyActivities`, server-decided retry with
-    backoff, start-to-close timeouts, and `heartbeat()` for work of unbounded
-    duration
--   **Timers** — real wall-clock, durable, re-armed from history on restart
--   **Signals** and **`condition`** — event-driven waiting, no polling; a
-    workflow can `signalWorkflow` another one, so a child poller can feed items
-    to a waiting parent without leaving the engine
--   **Child workflows**, blocking or fire-and-forget, optionally keyed by a
-    `workflowId` you choose — claim the same id twice and you get one child, and
-    a per-child **parent-close policy** decides whether it is terminated, asked
-    to unwind, or left running when its parent finishes
--   **Cancellation**, cascading to children, surfacing as a catchable failure —
-    plus `terminate` for when cooperative cancellation cannot land
--   **`continueAsNew`** to bound history on long-lived workflows
--   **Crash recovery** — kill the server mid-workflow, restart, and it continues
--   **Inspection** — an execution's status, history, and what it is currently
-    waiting on, derived from history rather than stored and reachable through
-    [`src/client/`](src/client/client.ts) or the dashboard
--   **Structured lifecycle log** — JSON Lines on stderr, one event per fact, so
-    a run can be aggregated without parsing prose
--   **Task queues** — route work to a pool of workers, so several applications
-    can share one server; activities and children inherit their execution's
-    queue
+- **Activities** with typed `proxyActivities`, server-decided retry with
+  backoff, start-to-close timeouts, and `heartbeat()` for work of unbounded
+  duration
+- **Timers** — real wall-clock, durable, re-armed from history on restart
+- **Signals** and **`condition`** — event-driven waiting, no polling; a
+  workflow can `signalWorkflow` another one, so a child poller can feed items
+  to a waiting parent without leaving the engine
+- **Child workflows**, blocking or fire-and-forget, optionally keyed by a
+  `workflowId` you choose — claim the same id twice and you get one child, and
+  a per-child **parent-close policy** decides whether it is terminated, asked
+  to unwind, or left running when its parent finishes
+- **Cancellation**, cascading to children, surfacing as a catchable failure —
+  plus `terminate` for when cooperative cancellation cannot land
+- **`continueAsNew`** to bound history on long-lived workflows
+- **Crash recovery** — kill the server mid-workflow, restart, and it continues
+- **Inspection** — an execution's status, history, and what it is currently
+  waiting on, derived from history rather than stored and reachable through
+  [`src/client/`](src/client/client.ts) or the dashboard
+- **Structured lifecycle log** — JSON Lines on stderr, one event per fact, so
+  a run can be aggregated without parsing prose
+- **Task queues** — route work to a pool of workers, so several applications
+  can share one server; activities and children inherit their execution's
+  queue
 
-The same workflow code runs three ways, with no changes:
+The same workflow code runs four ways, with no changes:
 
-| Mode                  | How                        | For                   |
-| --------------------- | -------------------------- | --------------------- |
-| In-memory             | `createLocalRuntime()`     | Tests, the fast inner |
-:                       :                            : loop                  :
-| Durable single-binary | `createLocalRuntime({      | One process, survives |
-:                       : historyStore\: await       : restarts              :
-:                       : FileHistoryStore.open(dir) :                       :
-:                       : })`                        :                       :
-| Distributed           | Server + workflow/activity | Horizontal scale      |
-:                       : worker processes over HTTP :                       :
-:                       : RPC                        :                       :
+| Mode                    | How                                                                    | For                            |
+| ----------------------- | ---------------------------------------------------------------------- | ------------------------------ |
+| In-memory               | `createLocalRuntime()`                                                 | Tests, the fast inner loop     |
+| One workflow, no server | `worker.js --local=NAME`                                               | Trying a change; build checks  |
+| Durable single-binary   | `createLocalRuntime({historyStore: await FileHistoryStore.open(dir)})` | One process, survives restarts |
+| Distributed             | Server + workflow/activity worker processes over HTTP RPC              | Horizontal scale               |
 
 ## Requirements
 
@@ -93,38 +88,121 @@ console.log(await rt.start<string>('greeter', ['world']).result());
 rt.shutdown(); // stop background timers so the process exits
 ```
 
-Or run the pieces separately — a server process and one or more workers:
+Or run one workflow through your worker binary, with no server at all:
 
 ```bash
-tsx bin/server-main.ts &                                    # --port=7777 by default
-tsx examples/greeter.ts --server=http://127.0.0.1:7777 &    # --role= picks one loop
+tsx examples/greeter.ts --local=greeter --args='["world"]'
+# LOCAL RUN greeter greeter — one workflow, then exit. Not a deployment: …
+# "Hello, world!"
 ```
 
-then drive them through [`src/client/`](src/client/client.ts), the same seam an
-application uses — `start`, `describe`, `signal`, `cancel`, `terminate`, `reset`,
-`list`, `queues`, `counts`, `health`. Configuration is flags with defaults, never
-the environment — see [`src/process_flags.ts`](src/process_flags.ts) for why.
+`--local=NAME` runs that workflow to completion in-process, prints its result as
+JSON, and exits — 0 on success, 1 if the workflow failed or the artifact does not
+register it. That last part is the other reason it exists: it is the cheapest way
+to prove a _built_ worker actually registered its workflows, which otherwise
+surfaces only as executions parking on a queue whose workers reject every task.
 
-**There is no command-line tool, by design.** There was, and it was deleted; what
-replaced it is [`src/deploy/`](src/deploy/index.ts) — `up`, `down`, `status`,
-`restart`, and `logs` as ordinary functions, typed options in and typed values
-out, for a consumer to assemble a CLI from. Installing a server and its two worker
-tiers as supervised systemd **user** services is one call, and needs no root:
+**Never put `--local` in a supervisor's command line.** The process runs one
+workflow and exits, so a supervisor that restarts it will run that workflow
+again, forever, with real activities doing real I/O. It announces itself on
+stderr on every run for exactly this reason.
+
+Or run the real thing — a server and the two worker tiers, each its own process:
+
+```bash
+tsx bin/server-main.ts --port=7777 --data-dir=./data &          # LISTENING 7777 127.0.0.1
+tsx examples/greeter.ts --server=http://127.0.0.1:7777 --role=workflow &
+tsx examples/greeter.ts --server=http://127.0.0.1:7777 --role=activity &
+```
+
+Each prints one readiness line — `LISTENING <port> <host>` and `WORKER_READY
+<name> <roles> <queue>` — and then drive them from a script, through
+[`src/client/`](src/client/client.ts), the same seam an application uses:
 
 ```ts
-import { up, systemHost } from './src/deploy';
+import { createRemoteClient, createRemoteService } from './src';
 
-await up({ server: 'out/server.js', worker: 'out/worker.js' }, systemHost());
+const client = createRemoteClient(createRemoteService('http://127.0.0.1:7777'));
+
+await client.health(); // {uptimeMs, durable, dataLocation} — is it up, is it durable
+await client.queues(); // who is polling, per queue and role
+
+const handle = client.start<string>('greeter', ['world']);
+console.log(await handle.result()); // Hello, world!
 ```
 
-The workflows then run as the user who deployed them, under
-`$XDG_DATA_HOME/tempo`, managed with `systemctl --user`. One privileged step is
-needed once per user — `sudo loginctl enable-linger $USER`, without which the
-services stop at logout — and `up` reports whether it has been done.
+`start`, `describe`, `signal`, `cancel`, `terminate`, `reset`, `list`, `queues`,
+`counts`, and `health` are all there — the whole client-facing surface, so
+nothing needs a raw service. The operator UI is one more process:
+
+```bash
+npm start -w @tempo/dashboard
+```
+
+Configuration is flags with defaults, never the environment — see
+[`src/process_flags.ts`](src/process_flags.ts) for why.
+
+## Running it yourself
+
+**This library does not deploy itself.** There is no CLI, no `tempo up`, and no
+deployment module. Building the artifacts, installing them, and supervising them
+is yours — and that is a decision rather than a gap, because the build system,
+the machine, and the supervisor are yours too. Anything written here about them
+would be a guess made in a repo that cannot test it, corrected in a repo that
+cannot fix it. (The reasoning in full: issue #64.)
+
+What this library gives a deployment is **two entrypoints, one per artifact** —
+each a file whose whole body is one call:
+
+```ts
+// server.ts — bundle this, run it once
+import { startServer } from 'workflow-engine';
+void startServer({ dataDir: '/var/lib/tempo' });
+
+// worker.ts — bundle this, run it twice, once per --role
+import { Tempo } from 'workflow-engine';
+import * as activities from './activities';
+import * as workflows from './workflows';
+Tempo.startWorker({ name: 'orders', workflows, activities });
+```
+
+plus the client above, and the **flag vocabulary** both processes read
+(`SERVER_FLAG`, `WORKER_FLAG`, `formatFlag`, `DEFAULT_PORT`), so whatever writes
+their command lines shares one spelling with the code that parses it rather than
+hardcoding strings:
+
+```ts
+import { SERVER_FLAG, formatFlag } from 'workflow-engine';
+formatFlag(SERVER_FLAG.dataDir, '/var/lib/tempo'); // --data-dir=/var/lib/tempo
+```
+
+The worker is checkable before it is deployed: `node worker.js --local=NAME` runs
+one workflow through the built artifact and exits non-zero if it is not
+registered, which is worth a CI step — a worker that registered nothing installs
+happily and reports nothing until executions park on a queue it never serves.
+
+The rest is ordinary process supervision, and the shape is always the same: one
+server, one workflow worker (`--role=workflow`), one activity worker
+(`--role=activity`), the workers pointed at the server with `--server`. Split by
+role so an activity blocking the event loop cannot stall workflow replay into a
+lease expiry. Restart the server first; the workers back off and retry, and
+report it while they do.
+
+Three things are worth knowing before you write that supervisor config:
+
+- **A server with no `--data-dir` is not durable.** It serves correctly and loses
+  every execution on its next restart. `health().durable` is the field that says
+  so — check it after a deploy, because nothing else will.
+- **A redeploy is a restart.** Nothing rereads a `.js` in place.
+- **Readiness is `health()` and `queues()`, not the stdout lines.** Those two
+  answer from anywhere, at any time, about a process you did not spawn — which is
+  what a supervisor or a deploy check actually needs. The readiness lines are for
+  a human watching a terminal, and for learning the port after `--port=0`.
 
 Going distributed does not change the workflow code, only how it is hosted. See
-[`bin/server-main.ts`](bin/server-main.ts) for the server process and
-[`src/tempo.ts`](src/tempo.ts) for the worker entrypoint and its input contract.
+[`src/server_main.ts`](src/server_main.ts) for the server entrypoint and its
+operational caveats, and [`src/tempo.ts`](src/tempo.ts) for the worker entrypoint
+and its input contract.
 
 ## How it works
 
@@ -141,7 +219,7 @@ Going distributed does not change the workflow code, only how it is hosted. See
 
 Everything else is an elaboration of that loop. The single organizing idea:
 
-> The **deterministic core** turns a *history* into a set of *commands* and does
+> The **deterministic core** turns a _history_ into a set of _commands_ and does
 > nothing else — no I/O, no clock, no randomness. Everything non-deterministic
 > lives on the other side of the line, in the runtime.
 
@@ -151,14 +229,14 @@ it, stop.
 ### Following a signal, end to end
 
 Design documentation lives in each module, so the one thing no single module can
-tell you is the path *between* them. Here is a signal's, which exercises most of
+tell you is the path _between_ them. Here is a signal's, which exercises most of
 the engine:
 
 1.  **Client** calls `signal(workflowId, name, payload)` —
     [`client/client.ts`](src/client/client.ts). Against `RemoteService` this is
     an HTTP POST; against `LocalService` it is a direct call. Same seam either
     way.
-2.  **Server** appends a `signal` history event, then *wakes* the execution —
+2.  **Server** appends a `signal` history event, then _wakes_ the execution —
     [`server_core.appendSignal`](src/server/server_core.ts). Waking is nothing
     more than enqueuing a workflow task.
 3.  **The workflow-task queue** absorbs the wake —
@@ -180,7 +258,7 @@ the engine:
     [`core/apply_event.ts`](src/core/apply_event.ts).
 7.  **`settle`** drains microtasks and runs the condition unblock pass to a
     fixpoint. A workflow parked on `condition(() => queue.length > 0)` wakes
-    here, *after* the handler pushed to the queue — that ordering is why the
+    here, _after_ the handler pushed to the queue — that ordering is why the
     queue pattern never misses an item.
 8.  **The workflow runs on** and emits the commands history holds no event for;
     the worker responds with them.
@@ -193,30 +271,22 @@ the engine:
     reports back, the server appends the completion — and the loop returns to
     step 3.
 
-Cold replay from step 5 happens on *every* task today; a sticky cache that keeps
+Cold replay from step 5 happens on _every_ task today; a sticky cache that keeps
 warm executions on the worker is planned but not built.
 
 ### Terms
 
-| Term              | Meaning                                                  |
-| ----------------- | -------------------------------------------------------- |
-| **Command**       | A request emitted by workflow code during a task,        |
-:                   : carrying a deterministic `seq`                           :
-| **History event** | The durable record of something that happened; history   |
-:                   : is the source of truth                                   :
-| **seq**           | Sequence number assigned to each command in call order — |
-:                   : how a completion finds its promise                       :
-| **Activation**    | One batch of new events applied to advance a workflow (a |
-:                   : "workflow task")                                         :
-| **Replay**        | Re-running the workflow from the top against recorded    |
-:                   : history to rebuild lost state                            :
-| **Live edge**     | The boundary between catching up and producing new       |
-:                   : commands                                                 :
-| **Marker event**  | A record that work was *dispatched*; resolves nothing,   |
-:                   : but stops re-dispatch on replay                          :
-| **Wake**          | Enqueuing a workflow task for an execution               |
-| **Execution**     | One running instance of a workflow (a `workflowId`, plus |
-:                   : a `runId` per run)                                       :
+| Term              | Meaning                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| **Command**       | A request emitted by workflow code during a task, carrying a deterministic `seq`            |
+| **History event** | The durable record of something that happened; history is the source of truth               |
+| **seq**           | Sequence number assigned to each command in call order — how a completion finds its promise |
+| **Activation**    | One batch of new events applied to advance a workflow (a "workflow task")                   |
+| **Replay**        | Re-running the workflow from the top against recorded history to rebuild lost state         |
+| **Live edge**     | The boundary between catching up and producing new commands                                 |
+| **Marker event**  | A record that work was _dispatched_; resolves nothing, but stops re-dispatch on replay      |
+| **Wake**          | Enqueuing a workflow task for an execution                                                  |
+| **Execution**     | One running instance of a workflow (a `workflowId`, plus a `runId` per run)                 |
 
 ## Project layout
 
@@ -236,15 +306,14 @@ src/
   services/       The WorkflowService implementations + HTTP transport
   worker/         Stateless workflow + activity workers
   client/         WorkflowService -> handles and server-wide reads
-  deploy/         up · down · status — install and inspect a deployment
-    ports/          host — the seam onto the machine being deployed to
   workflow.ts     ★ AUTHOR ENTRYPOINT — deterministic primitives only
   activity.ts     ★ ACTIVITY ENTRYPOINT — heartbeat()
-  index.ts        ★ HOST ENTRYPOINT — createLocalRuntime, types
+  index.ts        ★ HOST ENTRYPOINT — startServer, createLocalRuntime, types
   tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
+  server_main.ts  ★ SERVER ENTRYPOINT — startServer()
   process_flags.ts  how a deployed process reads its own configuration
-bin/              server-main.ts — the server process
-examples/         greeter.ts — the reference deployable worker
+bin/              server-main.ts — the reference server binary, one call
+examples/         greeter.ts — the reference worker binary, one call
 spec/             the executable documentation
 ```
 
@@ -253,7 +322,7 @@ The `★` entrypoints are load-bearing: workflow code imports only from
 rather than a convention. [`tools/boundaries.ts`](tools/boundaries.ts) enforces
 it mechanically — layering, core purity, and the author entrypoint — via `npm
 run lint` and the suite. `activity.ts` is the other side of that line and is
-deliberately *not* enforced: activities are where I/O belongs, so there is
+deliberately _not_ enforced: activities are where I/O belongs, so there is
 nothing to forbid — it exists to say where `heartbeat()` makes sense, and where
 it does not.
 
@@ -266,18 +335,18 @@ it keeps working.
 
 Read in this order the first time; each builds on the last:
 
-Read                                                                                   | What it covers
--------------------------------------------------------------------------------------- | --------------
-[`src/workflow.ts`](src/workflow.ts)                                                   | The determinism boundary, and the rules workflow code obeys
-[`src/core/replay.ts`](src/core/replay.ts)                                             | Activation vs. replay, what suppresses a command, observe-don't-await
-[`src/core/context.ts`](src/core/context.ts)                                           | Per-task state, and the AsyncLocalStorage caveat
-[`src/core/condition.ts`](src/core/condition.ts) · [`signals.ts`](src/core/signals.ts) | How a workflow waits, and the queue pattern
-[`src/core/workflow_api.ts`](src/core/workflow_api.ts)                                 | The primitives, `proxyActivities`, `continueAsNew`
-[`src/protocol/`](src/protocol/)                                                       | The wire format both sides of the boundary speak
-[`src/server/server_core.ts`](src/server/server_core.ts)                               | Dispatch-and-park, and the transactional heart
-[`src/server/ports/workflow_task_queue.ts`](src/server/ports/workflow_task_queue.ts)   | The two concurrency bugs the design prevents
-[`src/services/local_service.ts`](src/services/local_service.ts)                       | Local vs. distributed, and the failure-semantics caveat
-[`bin/server-main.ts`](bin/server-main.ts)                                             | The three tiers, and the operational caveats
+| Read                                                                                   | What it covers                                                        |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [`src/workflow.ts`](src/workflow.ts)                                                   | The determinism boundary, and the rules workflow code obeys           |
+| [`src/core/replay.ts`](src/core/replay.ts)                                             | Activation vs. replay, what suppresses a command, observe-don't-await |
+| [`src/core/context.ts`](src/core/context.ts)                                           | Per-task state, and the AsyncLocalStorage caveat                      |
+| [`src/core/condition.ts`](src/core/condition.ts) · [`signals.ts`](src/core/signals.ts) | How a workflow waits, and the queue pattern                           |
+| [`src/core/workflow_api.ts`](src/core/workflow_api.ts)                                 | The primitives, `proxyActivities`, `continueAsNew`                    |
+| [`src/protocol/`](src/protocol/)                                                       | The wire format both sides of the boundary speak                      |
+| [`src/server/server_core.ts`](src/server/server_core.ts)                               | Dispatch-and-park, and the transactional heart                        |
+| [`src/server/ports/workflow_task_queue.ts`](src/server/ports/workflow_task_queue.ts)   | The two concurrency bugs the design prevents                          |
+| [`src/services/local_service.ts`](src/services/local_service.ts)                       | Local vs. distributed, and the failure-semantics caveat               |
+| [`src/server_main.ts`](src/server_main.ts)                                             | The three tiers, and the operational caveats                          |
 
 ## Testing
 
@@ -286,33 +355,35 @@ Read                                                                            
 canonical one: the whole author-facing programming model. Start there to
 understand what the engine does.
 
-Spec                                                                  | Covers
---------------------------------------------------------------------- | ------
-[`integration/local`](spec/integration/local.spec.ts)                 | The whole programming model against `createLocalRuntime`
-[`core/replay`](spec/core/replay.spec.ts)                             | Command suppression, divergence detection, terminal outcomes
-[`core/apply_event`](spec/core/apply_event.spec.ts)                   | Event routing, markers, buffering, the nondeterminism check
-[`core/condition`](spec/core/condition.spec.ts)                       | Parking, the unblock fixpoint, the condSeq invariant
-[`core/workflow_api`](spec/core/workflow_api.spec.ts)                 | seq allocation and command payloads
-[`architecture`](spec/architecture.spec.ts)                           | The determinism boundary, enforced — and proven to catch breakage
-[`integration/resume`](spec/integration/resume.spec.ts)               | Crash recovery: restart mid-flight and finish from history
-[`integration/remote`](spec/integration/remote.spec.ts)               | Client → RemoteService → HTTP → server → workers, one process
-[`integration/distributed`](spec/integration/distributed.spec.ts)     | Real spawned processes; crash redelivery / at-least-once
-[`integration/cli`](spec/integration/cli.spec.ts)                     | The `tempo` CLI end to end as a subprocess
-[`server/concurrency`](spec/server/concurrency.spec.ts)               | Version CAS, lease expiry, lease-race rejection, late-ack dedup
-[`server/pending_work`](spec/server/pending_work.spec.ts)             | What an execution still awaits — shared by recovery and `describe`
-[`server/task_failure`](spec/server/task_failure.spec.ts)             | Poison tasks: counted, backed off, never settled, fixed by redeploy
-[`server/activity_timeout`](spec/server/activity_timeout.spec.ts)     | Start-to-close bounds an attempt without duplicating the work
-[`server/logging`](spec/server/logging.spec.ts)                       | Lifecycle events, their fields, and silence by default
-[`server/activity_retry`](spec/server/activity_retry.spec.ts)         | Server-decided retry: one budget, durable across restarts
-[`server/id_collision`](spec/server/id_collision.spec.ts)             | Ids stay unique across restarts, and children derive theirs
-[`server/heartbeat`](spec/server/heartbeat.spec.ts)                   | A long attempt holds its claim; a silent one is caught fast
-[`worker/activity_context`](spec/worker/activity_context.spec.ts)     | `heartbeat()` as an author meets it: ambient, throttled, inert
-[`server/task_queue_routing`](spec/server/task_queue_routing.spec.ts) | Work reaches the right pool; activities and children inherit theirs
-[`server/child_recovery`](spec/server/child_recovery.spec.ts)         | Children launch once across replay/restart; cancel still reaches them
-[`server/file_history_store`](spec/server/file_history_store.spec.ts) | Durable persistence + single-writer lockfile
-[`server/timer_service`](spec/server/timer_service.spec.ts)           | Durable timer fire / cancel / startup re-arm
-[`server/retry_policy`](spec/server/retry_policy.spec.ts)             | Retry arithmetic (attempts, backoff cap)
-[`worker/worker_loops`](spec/worker/worker_loops.spec.ts)             | Poll-failure reporting and backoff
+| Spec                                                                          | Covers                                                                |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [`integration/local`](spec/integration/local.spec.ts)                         | The whole programming model against `createLocalRuntime`              |
+| [`core/replay`](spec/core/replay.spec.ts)                                     | Command suppression, divergence detection, terminal outcomes          |
+| [`core/apply_event`](spec/core/apply_event.spec.ts)                           | Event routing, markers, buffering, the nondeterminism check           |
+| [`core/condition`](spec/core/condition.spec.ts)                               | Parking, the unblock fixpoint, the condSeq invariant                  |
+| [`core/workflow_api`](spec/core/workflow_api.spec.ts)                         | seq allocation and command payloads                                   |
+| [`architecture`](spec/architecture.spec.ts)                                   | The determinism boundary, enforced — and proven to catch breakage     |
+| [`integration/resume`](spec/integration/resume.spec.ts)                       | Crash recovery: restart mid-flight and finish from history            |
+| [`integration/remote`](spec/integration/remote.spec.ts)                       | Client → RemoteService → HTTP → server → workers, one process         |
+| [`integration/distributed`](spec/integration/distributed.spec.ts)             | Real spawned processes; crash redelivery / at-least-once              |
+| [`integration/server_entrypoint`](spec/integration/server_entrypoint.spec.ts) | `startServer`: bind, persist, refuse, override                        |
+| [`integration/local_run`](spec/integration/local_run.spec.ts)                 | `--local`: one workflow, no server, and what it refuses               |
+| [`integration/worker_entrypoint`](spec/integration/worker_entrypoint.spec.ts) | `startWorker`: what it registers, connects to, refuses                |
+| [`server/concurrency`](spec/server/concurrency.spec.ts)                       | Version CAS, lease expiry, lease-race rejection, late-ack dedup       |
+| [`server/pending_work`](spec/server/pending_work.spec.ts)                     | What an execution still awaits — shared by recovery and `describe`    |
+| [`server/task_failure`](spec/server/task_failure.spec.ts)                     | Poison tasks: counted, backed off, never settled, fixed by redeploy   |
+| [`server/activity_timeout`](spec/server/activity_timeout.spec.ts)             | Start-to-close bounds an attempt without duplicating the work         |
+| [`server/logging`](spec/server/logging.spec.ts)                               | Lifecycle events, their fields, and silence by default                |
+| [`server/activity_retry`](spec/server/activity_retry.spec.ts)                 | Server-decided retry: one budget, durable across restarts             |
+| [`server/id_collision`](spec/server/id_collision.spec.ts)                     | Ids stay unique across restarts, and children derive theirs           |
+| [`server/heartbeat`](spec/server/heartbeat.spec.ts)                           | A long attempt holds its claim; a silent one is caught fast           |
+| [`worker/activity_context`](spec/worker/activity_context.spec.ts)             | `heartbeat()` as an author meets it: ambient, throttled, inert        |
+| [`server/task_queue_routing`](spec/server/task_queue_routing.spec.ts)         | Work reaches the right pool; activities and children inherit theirs   |
+| [`server/child_recovery`](spec/server/child_recovery.spec.ts)                 | Children launch once across replay/restart; cancel still reaches them |
+| [`server/file_history_store`](spec/server/file_history_store.spec.ts)         | Durable persistence + single-writer lockfile                          |
+| [`server/timer_service`](spec/server/timer_service.spec.ts)                   | Durable timer fire / cancel / startup re-arm                          |
+| [`server/retry_policy`](spec/server/retry_policy.spec.ts)                     | Retry arithmetic (attempts, backoff cap)                              |
+| [`worker/worker_loops`](spec/worker/worker_loops.spec.ts)                     | Poll-failure reporting and backoff                                    |
 
 ```bash
 npm test
@@ -332,9 +403,9 @@ Working and green: the suite, `tsc --noEmit`, and the boundary checker all pass.
 The full programming model runs in all three modes above.
 
 Not built: server HA, workflow versioning, metrics and alerting on top of the
-lifecycle log, the workflow-worker sticky cache, cross-process timer-sweep
-failover, and the deployment library in `src/deploy/`. The RPC has no auth or TLS and
-binds loopback. [`ROADMAP.md`](ROADMAP.md) ranks these by how likely each is to
+lifecycle log, the workflow-worker sticky cache, and cross-process timer-sweep
+failover. Deployment is deliberately not here at all — see "Running it yourself".
+The RPC has no auth or TLS and binds loopback. [`ROADMAP.md`](ROADMAP.md) ranks these by how likely each is to
 bite a real deployment ("Adoption blockers") and tracks what's planned;
 in-flight design work lives in
 [GitHub issues](https://github.com/chrisrocco/tempo/issues).

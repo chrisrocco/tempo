@@ -100,7 +100,7 @@ export function createWorkflowWorker(
       // written: a throw escaped the loop, the task was never acked, and the
       // lease redelivered it forever while the client waited on something that
       // would never settle. Both premises have since changed. A task failure is
-      // now reported, counted, backed off, and named in `tempo describe`; and
+      // now reported, counted, backed off, and named in `Client.describe()`; and
       // once tasks are routed by queue, an unregistered type usually means a
       // deploy that has not finished rolling rather than a typo — so recovering
       // when the right version arrives is worth far more than failing fast.
