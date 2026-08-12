@@ -170,7 +170,7 @@ describe('capturing a park site — what it must not do', () => {
   it('restores the stack-trace limit it narrowed', async () => {
     // The capture lowers `Error.stackTraceLimit` to bound the frame walk. It is
     // a global, so failing to put it back would silently truncate every stack in
-    // the process — including the failure stacks the dashboard renders.
+    // the process — including the failure stacks a client reads off a describe.
     const before = Error.stackTraceLimit;
     const store = new MemoryHistoryStore();
     createLocalRuntime({historyStore: store})

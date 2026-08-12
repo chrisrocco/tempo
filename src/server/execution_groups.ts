@@ -11,7 +11,7 @@
  * server, and being wrong by exactly the amount that matters once there is
  * enough data to need paging.
  *
- * ## Why the server does this and not the dashboard
+ * ## Why the server does this and not the client
  *
  * `listExecutions` caps at `MAX_PAGE_SIZE`. A client tallying what it received
  * would report "3 failed" when there are three hundred, and would report it

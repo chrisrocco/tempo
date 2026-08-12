@@ -176,8 +176,9 @@ export interface ExecutionFilter {
    *
    * Absolute rather than a duration, because this is a wire contract and
    * "the last hour" would be relative to a clock the two ends do not share.
-   * A client that thinks in durations resolves them before it asks; the
-   * dashboard does exactly that in `time_range.ts`.
+   * A client that thinks in durations — an operator UI offering "last hour",
+   * "last day" — resolves them against its own clock before it asks, which is
+   * the only clock it can honestly resolve them against.
    */
   createdAfter?: number;
   /**
@@ -607,8 +608,11 @@ export type QueueLiveness = Omit<
 /**
  * Is anything currently asking `taskQueue` for `role` work?
  *
- * Defined here, beside the type, so the CLI and the dashboard cannot drift into
- * two different answers — the same reason `isStuck` lives here.
+ * Defined here, beside the type, so no two clients drift into different answers
+ * to the same question — the same reason `isStuck` lives here. Both predicates
+ * are exported from `workflow-engine/protocol` for that reason: a tool outside
+ * this repo reading `QueueWorkers` gets the verdict rather than reimplementing
+ * it, and reimplementing it is how "served" quietly comes to mean two things.
  *
  * **A busy worker used to look like an absent one.** The activity loop is
  * sequential: it awaits the activity it claimed before polling again, so a

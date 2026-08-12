@@ -1,6 +1,6 @@
 {
-  // The Node half of the repo is **CommonJS**, and that is a requirement rather
-  // than a preference: a downstream build system consumes this code and accepts
+  // The repo is **CommonJS**, and that is a requirement rather than a
+  // preference: a downstream build system consumes this code and accepts
   // `__dirname` but not `import.meta`. Under CommonJS `import.meta` is a syntax
   // error rather than a diagnostic — which is why it was already banned
   // repo-wide (`tools/style.ts`) while this was still ESM, and why the ban now
@@ -13,13 +13,13 @@
   //   - **Top-level `await` is illegal everywhere**, not just in `bin/`. The
   //     style checker enforces that; entrypoints use `void run().then(…)`.
   //
-  // `Node16` rather than plain `CommonJS` because the module resolver has to
-  // read `exports` maps — the dashboard imports `workflow-engine/protocol`, a
-  // subpath this package declares, and the older resolver cannot see it.
-  //
-  // The dashboard's *browser* half stays ESM under its own config
-  // (`dashboard/app/tsconfig.json`); esbuild bundles it to an IIFE, so no module
-  // system survives into what a browser loads.
+  // `Node16` rather than plain `CommonJS` because it is the resolver that reads
+  // `exports` maps, and this package publishes one: `.`, `./protocol`,
+  // `./workflow`, `./activity`. Nothing in this tree imports itself by package
+  // name — the dashboard did, and it is gone — so the map is checked here only
+  // in the sense that this is the resolution mode a consumer will be using. The
+  // older resolver cannot see a subpath at all, which would make the published
+  // surface untestable from any angle.
   "compilerOptions": {
     "target": "ES2022",
     "module": "Node16",

@@ -7,6 +7,10 @@
  * "is this written the way this repo writes things?"; `dependencies` answers
  * "did anything get installed that we did not agree to carry?".
  *
+ * Several of them are thinner than they were: the dashboard is gone, and with it
+ * the rules that were only ever about a browser. Each checker's `@fileoverview`
+ * says which of its rules left.
+ *
  * The boundary, dependency, and convention rules also run inside the suite
  * (spec/architecture.spec.ts, spec/conventions.spec.ts), so CI enforces them
  * even if nobody runs this. The style rules do not: they need a full TypeScript
@@ -69,19 +73,12 @@ if (dependencyViolations.length === 0) {
   console.error(`\ndependencies: ${dependencyViolations.length} violation(s)`);
 }
 
-// Three programs, because the engine, the dashboard's server, and its browser
-// code are checked under different libs and no single program can hold them.
-// Same rules over all of them — a dropped promise in a custom element is a
-// swallowed error rather than a dead process, which is quieter and worse.
-const styleViolations = [
-  ...checkStyle(programFor(root), root),
-  ...checkStyle(programFor(root, 'dashboard/tsconfig.json'), root),
-  ...checkStyle(programFor(root, 'dashboard/app/tsconfig.json'), root),
-];
+// One program. It was three while the dashboard was here — its server half and
+// its browser half are checked under different libs than the engine, and no
+// single program can hold two libs at once.
+const styleViolations = checkStyle(programFor(root), root);
 if (styleViolations.length === 0) {
-  console.log(
-    'style: clean (floating promises, top-level await, import.meta, window globals)',
-  );
+  console.log('style: clean (floating promises, top-level await, import.meta)');
 } else {
   console.error(formatStyleViolations(styleViolations));
   console.error(`\nstyle: ${styleViolations.length} violation(s)`);

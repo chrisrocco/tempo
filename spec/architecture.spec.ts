@@ -347,63 +347,35 @@ describe('architecture — dependencies', () => {
     expect(checkRepoDependencies(repoRoot)).toEqual([]);
   });
 
-  it('accepts lit, the one permitted runtime dependency', () => {
-    expect(checkDependencies({dependencies: {lit: '^3.2.0'}})).toEqual([]);
+  /**
+   * The runtime list is empty, and an empty list is the one shape a checker can
+   * get wrong in a way that looks like success — a bug that returns no
+   * violations passes the case above too, because the repo declares no runtime
+   * dependency to find. So the claim is pinned from the other side: anything at
+   * all in `dependencies` is refused, and `lit` in particular, which is what
+   * this package carried for a browser it no longer ships.
+   */
+  it('refuses any runtime dependency, lit included', () => {
+    const violations = checkDependencies({
+      dependencies: {lit: '^3.2.0', 'date-fns': '^3'},
+    });
+
+    expect(violations.map((v) => v.name).sort()).toEqual(['date-fns', 'lit']);
+    expect(violations.every((v) => v.field === 'dependencies')).toBe(true);
   });
 
   /**
-   * The engine's own list is empty, and that is the claim worth pinning: `lit`
-   * is permitted *somewhere*, and the somewhere is the dashboard. Checking only
-   * the general case would pass while the engine quietly regrew a runtime
-   * dependency for a browser.
+   * The dev list is separate and just as closed. A bundler is the likeliest
+   * thing to appear here — one was on it until the dashboard, the only thing
+   * being bundled, left the repo — and adding one back is a decision, not an
+   * install.
    */
-  it('refuses a runtime dependency in the engine, including lit', () => {
-    const violations = checkDependencies(
-      {dependencies: {lit: '^3.2.0'}},
-      {runtime: [], dev: []},
-    );
-
-    expect(violations.map((v) => v.name)).toEqual(['lit']);
-  });
-
-  /**
-   * The specific rule that is easiest to talk yourself out of: labs packages
-   * look official, and each one replaces work. They are pre-release by
-   * definition, and the dashboard was scoped to do without them.
-   */
-  it('refuses a Lit labs package, and says why', () => {
-    const violations = checkDependencies({
-      dependencies: {'@lit-labs/virtualizer': '^2.0.0'},
-    });
-
-    expect(violations.length).toBe(1);
-    expect(violations[0].message).toContain('labs');
-    expect(violations[0].message).toContain('AGENTS.md');
-  });
-
-  // "Part of Lit" means the `lit` package — not everything under the org.
-  it('refuses a @lit/ package that is not lit itself', () => {
-    const violations = checkDependencies({
-      dependencies: {'@lit/context': '^1'},
-    });
-
-    expect(violations.length).toBe(1);
-    expect(violations[0].message).toContain('not Lit');
-  });
-
-  it('refuses an unrelated runtime dependency', () => {
-    const violations = checkDependencies({dependencies: {'date-fns': '^3'}});
-
-    expect(violations.length).toBe(1);
-    expect(violations[0].field).toBe('dependencies');
-  });
-
-  // The dev list is separate and just as closed — a bundler is the likeliest
-  // thing to appear here, and adding one is a decision, not an install.
   it('refuses a new dev dependency, bundlers included', () => {
-    const violations = checkDependencies({devDependencies: {vite: '^5'}});
+    const violations = checkDependencies({
+      devDependencies: {vite: '^5', esbuild: '^0.25.0'},
+    });
 
-    expect(violations.length).toBe(1);
-    expect(violations[0].field).toBe('devDependencies');
+    expect(violations.map((v) => v.name).sort()).toEqual(['esbuild', 'vite']);
+    expect(violations.every((v) => v.field === 'devDependencies')).toBe(true);
   });
 });

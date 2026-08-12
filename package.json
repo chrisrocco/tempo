@@ -3,9 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "description": "A minimal-but-correct durable workflow engine (a small Temporal-shaped system).",
-  "workspaces": [
-    "dashboard"
-  ],
   "exports": {
     ".": "./src/index.ts",
     "./protocol": "./src/protocol/index.ts",
@@ -14,16 +11,14 @@
   },
   "scripts": {
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard/tsconfig.json && tsc --noEmit -p dashboard/app/tsconfig.json",
+    "typecheck": "tsc --noEmit",
     "lint": "tsx tools/lint.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "pretest": "npm run build -w @tempo/dashboard"
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@types/jasmine": "^5.1.4",
     "@types/node": "^22.10.0",
-    "esbuild": "^0.25.0",
     "jasmine": "^5.5.0",
     "prettier": "^3.9.6",
     "tsx": "^4.19.2",

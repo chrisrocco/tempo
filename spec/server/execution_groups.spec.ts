@@ -152,8 +152,8 @@ describe('execution groups — ordering', () => {
  * settles — so a flaky activity that eventually succeeds vanishes from here
  * entirely, and nothing in history would have let it be counted either. A
  * reader who assumes these are cumulative failure totals is reading the wrong
- * number, which is why `ActivityRetryGroup` says so and why the dashboard
- * heading says "right now".
+ * number, which is why `ActivityRetryGroup` says so, and why anything
+ * rendering it should say "right now" in the heading.
  */
 describe('execution groups — activities retrying now', () => {
   function retrying(
