@@ -563,6 +563,30 @@ export function continueAsNew(...args: unknown[]): Promise<never> {
 
 export interface WorkflowInfo {
   /**
+   * This execution's own id — the one a client passed to `start`, or the one the
+   * engine derived for a child.
+   *
+   * The address to hand out when something outside has to reach back in. An
+   * activity that launches an external process, or files a webhook, needs somewhere
+   * for the callback to signal, and the workflow is the only thing that can supply
+   * it: an activity has no ambient access to it (`activity.ts` exports `heartbeat`
+   * and nothing else, deliberately), so it travels as an argument.
+   *
+   * ```ts
+   * await act.launchJob({callbackWorkflowId: workflowInfo().workflowId});
+   * ```
+   *
+   * **The id, and not the run.** A signal addressed to this id lands on whichever
+   * run is current, which is what a caller wants: `continueAsNew` replaces the run
+   * and keeps the execution, so a callback pinned to a run would be pinned to the
+   * one about to be rolled over. That matters most for exactly the workflows that
+   * live long enough to hand out callbacks.
+   *
+   * Replay-safe, and more plainly so than anything else here — fixed before the
+   * first task and unchanged for the execution's whole life.
+   */
+  workflowId: string;
+  /**
    * True when the server hints that history has grown enough to roll over.
    *
    * A server-provided *input*, not a command — it flows in via the task and is
@@ -608,6 +632,7 @@ export interface WorkflowInfo {
 export function workflowInfo(): WorkflowInfo {
   const ctx = getContext();
   return {
+    workflowId: ctx.workflowId,
     continueAsNewSuggested: ctx.continueAsNewSuggested,
     args: [...ctx.args],
     // Copied for the same reason `args` is: a caller must not be able to reach

@@ -130,6 +130,21 @@ export interface WorkflowContext {
    */
   parent?: ExecutionParentView;
   /**
+   * This execution's own id.
+   *
+   * The most stable fact there is: chosen before the first task and unchanged for
+   * the execution's whole life, including across continue-as-new — a rollover bumps
+   * the run, not the execution. So it is safe to branch on, safe to hand to an
+   * activity, and safe to compose ids from.
+   *
+   * Here because a workflow could see who *started* it and not who it is. `parent`
+   * notes the asymmetry in passing — "an id the engine derived from lineage is not
+   * visible to the workflow that owns it" — and this closes it. The use that forces
+   * it: an activity that hands an external system somewhere to call back, which
+   * needs an address the workflow can only get from itself.
+   */
+  workflowId: string;
+  /**
    * What this **run** started with. Constant for the whole run: every task of it
    * is built from the same value, so a read cannot vary between replays. That is
    * what lets workflow code branch on carryover without breaking determinism —
@@ -182,6 +197,20 @@ function patchesInHistory(events: HistoryEvent[]): Map<number, string> {
  * empty state, which is indistinguishable from a workflow that wrote none —
  * silent. A missing parent makes `workflowInfo().parent` undefined, which any
  * code that needs it must already handle, because a root execution has none.
+ *
+ * `workflowId` is defaulted rather than required, which by that same argument
+ * wants a defence. Every execution has one, so unlike `parent` there is no honest
+ * "absent" — but the default is `''`, and an empty id is not a valid execution id
+ * anywhere in the system. Code that reaches for one gets a failure at the point of
+ * use (`signalWorkflow('')` addresses nothing, and the client answers `no
+ * execution`) rather than quietly addressing the wrong execution. That is the
+ * difference from carryover, where the empty value is a *legitimate* state and so
+ * cannot fail.
+ *
+ * What buys: the production path threads it from `WorkflowTask.workflowId` and
+ * always has it, while the hand-built contexts in `spec/core` — over a hundred of
+ * them, none about identity — do not acquire a parameter they have nothing to say
+ * about.
  */
 export function createContext(
   args: unknown[],
@@ -189,6 +218,7 @@ export function createContext(
   continueAsNewSuggested = false,
   carryover: Carryover = {},
   parent?: ExecutionParentView,
+  workflowId = '',
 ): WorkflowContext {
   return {
     args,
@@ -216,5 +246,6 @@ export function createContext(
     cancelled: false,
     continueAsNewSuggested,
     parent,
+    workflowId,
   };
 }
