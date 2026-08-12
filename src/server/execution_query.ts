@@ -63,6 +63,25 @@ function sortKey(execution: {createdAt: number; workflowId: string}): string {
   return `${String(execution.createdAt).padStart(15, '0')}|${execution.workflowId}`;
 }
 
+/**
+ * The half of the filter that reads a field the **summary** deliberately does
+ * not carry.
+ *
+ * `parent` is on the detail and off the summary on purpose (see
+ * `ExecutionParentView`), so filtering by it has to happen while the record is
+ * still a record. Applied before `summarizeExecution` rather than after, which
+ * also means a row excluded by lineage is never summarized at all.
+ */
+function matchesRecord(
+  record: ExecutionRecord,
+  filter: ExecutionFilter,
+): boolean {
+  return (
+    filter.parentWorkflowId === undefined ||
+    record.parent?.workflowId === filter.parentWorkflowId
+  );
+}
+
 /** Does this execution match every field the filter names? */
 function matches(
   execution: ExecutionSummary,
@@ -114,6 +133,7 @@ export function queryExecutions(
   filter: ExecutionFilter = {},
 ): ExecutionPage {
   const ordered = records
+    .filter((record) => matchesRecord(record, filter))
     .map(summarizeExecution)
     .filter((execution) => matches(execution, filter))
     // Descending: the string keys compare correctly, so this is a plain reverse

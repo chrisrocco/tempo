@@ -151,6 +151,27 @@ export interface ExecutionFilter {
   /** Only executions the engine cannot replay. */
   stuck?: boolean;
   /**
+   * Only the children of this execution — the query behind a lineage view.
+   *
+   * The parent link itself stays on the detail and off the summary, for the
+   * reason on `ExecutionParentView`: a listing has no lineage column, and most
+   * executions have no parent. This asks the question from the other end, which
+   * is the end that needs a server: a caller filtering by parent already knows
+   * what the parent is, so the rows do not have to repeat it, and the response
+   * gets smaller rather than larger.
+   *
+   * It is the only way to see a child that has **finished**.
+   * `ExecutionDetail.pending.children` lists the ones still outstanding, so a
+   * completed child vanishes from the parent's view at the moment it succeeds —
+   * fine for "what is this execution waiting on", useless for "what did this
+   * execution do". Reconstructing it otherwise means describing every execution
+   * on the server and keeping the ones whose parent matches.
+   *
+   * Direct children only. A tree is walked a level at a time, which is also how
+   * a UI renders one.
+   */
+  parentWorkflowId?: string;
+  /**
    * Created at or after this instant, as epoch milliseconds.
    *
    * Absolute rather than a duration, because this is a wire contract and
@@ -540,6 +561,25 @@ export interface QueueWorkers {
   /** Epoch ms of the last activity-task poll. */
   activityPolledAt?: number;
   /**
+   * Executions waiting for a workflow task on this pool, right now.
+   *
+   * **Waiting, not outstanding**: a task a worker is holding is being worked and
+   * is not backlog — `workers[].busy` reports those. Coalesced, so this counts
+   * executions rather than wakes.
+   *
+   * Paired with the poll timestamps, this is what separates the two ways a pool
+   * can be quiet. Backlog with no recent poll is work nobody is coming for;
+   * backlog with a recent poll is a pool that is merely behind. Neither reading
+   * was available before — the timestamps alone cannot tell "nothing to do" from
+   * "nobody doing it".
+   *
+   * A live reading of an in-memory queue: it does not survive a restart, and it
+   * says nothing about how long anything has waited.
+   */
+  pendingWorkflowTasks: number;
+  /** Activity tasks waiting to be claimed on this pool. Same contract as above. */
+  pendingActivities: number;
+  /**
    * The workers seen on this queue, newest poll first.
    *
    * The two timestamps above are the aggregate — "something asked" — and remain
@@ -548,6 +588,21 @@ export interface QueueWorkers {
    */
   workers: WorkerInfo[];
 }
+
+/**
+ * The half of `QueueWorkers` that says who is serving a pool, without the half
+ * that says how much is waiting on it.
+ *
+ * The two predicates below read polls and workers and nothing else, so this is
+ * what they ask for. A `QueueWorkers` satisfies it, which is what every real
+ * caller passes; asking for the wider type instead would make a caller that only
+ * has liveness — a test, a future source of fleet data that is not the task
+ * queues — invent a backlog number to answer a question about workers.
+ */
+export type QueueLiveness = Omit<
+  QueueWorkers,
+  'pendingWorkflowTasks' | 'pendingActivities'
+>;
 
 /**
  * Is anything currently asking `taskQueue` for `role` work?
@@ -566,7 +621,7 @@ export interface QueueWorkers {
  * with nothing to do holds no lease and is known only by polling.
  */
 export function isQueueServed(
-  queues: QueueWorkers[],
+  queues: readonly QueueLiveness[],
   taskQueue: string,
   role: WorkerRole,
   now: number,
@@ -594,7 +649,7 @@ export function isQueueServed(
  * one being looked for.
  */
 export function workersServing(
-  queues: QueueWorkers[],
+  queues: readonly QueueLiveness[],
   taskQueue: string,
   role: WorkerRole,
 ): WorkerInfo[] {

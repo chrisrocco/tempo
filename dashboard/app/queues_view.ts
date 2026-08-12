@@ -188,6 +188,46 @@ export class QueuesView extends LitElement {
     >`;
   }
 
+  /**
+   * What is queued and unclaimed on this pool, workflow tasks and activities
+   * together.
+   *
+   * Read next to the worker pills rather than anywhere else, because neither
+   * number means much alone. `wf none` with nothing waiting is an idle pool that
+   * nobody has deployed to yet; `wf none` with work waiting is an outage. Until
+   * the server reported a backlog the two rendered identically, and the second
+   * is the row an operator came here to find.
+   *
+   * Emphasised only when something is waiting *and* the pool is unserved. A
+   * served pool with a queue is simply busy, which is what a queue is for.
+   */
+  private waiting(taskQueue: string): TemplateResult {
+    const queues = this.queues.value;
+    const row = queues?.find((q) => q.taskQueue === taskQueue);
+    if (row === undefined) return html`<span class="muted">0</span>`;
+    // An engine that predates the backlog fields sends neither. Rendering the
+    // arithmetic on `undefined` would put `NaN` in the column; `?` is what the
+    // worker pills already show for something this dashboard cannot know, and it
+    // is the honest answer — this is not a zero.
+    if (
+      row.pendingWorkflowTasks === undefined ||
+      row.pendingActivities === undefined
+    )
+      return html`<span class="muted" title="this server does not report queue backlog">?</span>`;
+    const total = row.pendingWorkflowTasks + row.pendingActivities;
+    if (total === 0) return html`<span class="muted">0</span>`;
+
+    const now = Date.now();
+    const stranded =
+      !isQueueServed(queues ?? [], taskQueue, 'workflow', now) &&
+      !isQueueServed(queues ?? [], taskQueue, 'activity', now);
+    return html`<span
+      class=${stranded ? 'wedged' : ''}
+      title="${row.pendingWorkflowTasks} workflow task(s) and ${row.pendingActivities} activity task(s) queued and unclaimed${stranded ? ', with nothing polling this queue' : ''}"
+      >${total}</span
+    >`;
+  }
+
   /** The pill's tooltip: who, and when each was last heard from. */
   private pillTitle(
     taskQueue: string,
@@ -332,6 +372,7 @@ export class QueuesView extends LitElement {
             <tr>
               <th>Queue</th>
               <th>Workers</th>
+              <th class="num">Waiting</th>
               <th class="num">Running</th>
               <th class="num">Stuck</th>
               <th class="num">Failed</th>
@@ -369,6 +410,7 @@ export class QueuesView extends LitElement {
             ${this.rolePill(name, 'workflow')}${this.rolePill(name, 'activity')}
           </div>
         </td>
+        <td class="num">${this.waiting(name)}</td>
         <td class="num">${this.count(group?.running ?? 0)}</td>
         <td class="num">${this.count(group?.stuck ?? 0, 'wedged')}</td>
         <td class="num">${this.count(group?.failed ?? 0, 'bad')}</td>

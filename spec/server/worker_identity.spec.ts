@@ -23,7 +23,7 @@ import {
   QUEUE_STALE_MS,
   isQueueServed,
   workersServing,
-  type QueueWorkers,
+  type QueueLiveness,
   type WorkerInfo,
   type WorkerRole,
 } from '../../src/protocol';
@@ -56,7 +56,6 @@ describe('worker identity — naming workers', () => {
         role: 'workflow',
         taskQueue: 'email',
         lastPolledAt: 1_000,
-        busy: false,
       },
     ]);
   });
@@ -113,13 +112,16 @@ describe('worker identity — naming workers', () => {
   });
 
   // Whether a worker holds a lease is `server_core`'s join to make; this table
-  // watches polls and nothing else, and reports the conservative value.
-  it('reports every worker as not busy, because it cannot know', () => {
+  // watches polls and nothing else. It used to report `busy: false` — honest but
+  // still an assertion it had not observed — and now does not carry the field at
+  // all, so a caller cannot read a claim that was never made. `ObservedWorker`
+  // is what enforces that; this case is what says why.
+  it('does not report whether a worker is busy, because it cannot know', () => {
     const registry = createWorkerRegistry(() => 1_000);
 
     registry.recordPoll('activity', 'email', 'w1@host');
 
-    expect(registry.queues()[0]!.workers[0]!.busy).toBe(false);
+    expect('busy' in registry.queues()[0]!.workers[0]!).toBeFalse();
   });
 
   it('orders workers by most recent poll, breaking ties by identity', () => {
@@ -223,7 +225,7 @@ describe('worker identity — a lease says who is holding it', () => {
 
 describe('worker identity — a busy worker still serves its queue', () => {
   /** Polled long enough ago to be stale on its own. */
-  function queue(workers: WorkerInfo[]): QueueWorkers[] {
+  function queue(workers: WorkerInfo[]): QueueLiveness[] {
     return [{taskQueue: 'email', activityPolledAt: 1_000, workers}];
   }
 
@@ -308,7 +310,7 @@ describe('worker identity — end to end through a server host', () => {
 
 describe('worker identity — which workers serve a queue', () => {
   it('includes a worker polling every queue', () => {
-    const queues: QueueWorkers[] = [
+    const queues: QueueLiveness[] = [
       {taskQueue: 'email', workers: [worker('w1@host')]},
       {
         taskQueue: ANY_TASK_QUEUE,
@@ -324,7 +326,7 @@ describe('worker identity — which workers serve a queue', () => {
   });
 
   it('excludes workers on an unrelated queue', () => {
-    const queues: QueueWorkers[] = [
+    const queues: QueueLiveness[] = [
       {taskQueue: 'email', workers: [worker('w1@host')]},
       {
         taskQueue: 'billing',
@@ -337,7 +339,7 @@ describe('worker identity — which workers serve a queue', () => {
 
   it('excludes the other role', () => {
     const role: WorkerRole = 'workflow';
-    const queues: QueueWorkers[] = [
+    const queues: QueueLiveness[] = [
       {taskQueue: 'email', workers: [worker('w1@host', {role})]},
     ];
 
@@ -350,7 +352,7 @@ describe('worker identity — which workers serve a queue', () => {
    * looked for.
    */
   it('includes a worker however long ago it last polled', () => {
-    const queues: QueueWorkers[] = [
+    const queues: QueueLiveness[] = [
       {
         taskQueue: 'email',
         workers: [worker('ancient@host', {lastPolledAt: 1})],
