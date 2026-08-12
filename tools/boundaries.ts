@@ -24,8 +24,9 @@
  * 2. **Determinism purity** — no clock, randomness, I/O, or ambient host state in
  *    `core/` *or* `patterns/`: both run inside a replay. One documented exception
  *    (see `ALLOWED_HOST_COUPLING`).
- * 3. **The author entrypoint** — workflow modules import only `workflow.ts`, and
- *    obey the same purity rule as the core they run inside.
+ * 3. **The author entrypoint** — workflow modules import only `workflow.ts` at
+ *    runtime, and obey the same purity rule as the core they run inside. A
+ *    statement-level `import type` is exempt; see `checkAuthorEntrypoint`.
  * 4. **Package direction** — the engine must not import the dashboard. The
  *    dashboard depends on the engine and not the reverse, which is what lets the
  *    engine ship with no runtime dependencies. This one is here because the
@@ -176,6 +177,18 @@ export function stripCommentsAndStrings(text: string): string {
 interface ImportRef {
   specifier: string;
   line: number;
+  /**
+   * True for a statement-level `import type …` or `export type …`, which
+   * TypeScript erases entirely — the emitted JavaScript contains no reference to
+   * the module, and using the binding as a value is a compile error.
+   *
+   * Only the statement form counts. An inline `import {type Foo, bar}` is a value
+   * import of `bar`, and even `import {type Foo}` alone can emit a bare
+   * `import './x'` under `verbatimModuleSyntax` — which is a side-effect import and
+   * therefore real. Conservative on purpose: the point of the flag is that nothing
+   * runs, and only the statement form guarantees it.
+   */
+  typeOnly: boolean;
 }
 
 function extractImports(strippedText: string): ImportRef[] {
@@ -183,10 +196,14 @@ function extractImports(strippedText: string): ImportRef[] {
   const lines = strippedText.split('\n');
   const re = /(?:\bfrom|\bimport)\s*\(?\s*'([^']+)'/g;
   lines.forEach((lineText, idx) => {
+    // Per line rather than per match: a line holds one import in this codebase
+    // (Prettier at 80 columns cannot produce two), and the modifier belongs to the
+    // statement rather than to the specifier.
+    const typeOnly = /^\s*(?:import|export)\s+type\s/.test(lineText);
     let m: RegExpExecArray | null;
     re.lastIndex = 0;
     while ((m = re.exec(lineText)) !== null) {
-      refs.push({specifier: m[1], line: idx + 1});
+      refs.push({specifier: m[1], line: idx + 1, typeOnly});
     }
   });
   return refs;
@@ -290,12 +307,33 @@ function checkPurity(
   return violations;
 }
 
+/**
+ * Workflow code may import only `workflow.ts` — **at runtime.**
+ *
+ * A statement-level `import type` is exempt, because it is erased: the emitted
+ * JavaScript names no other module, nothing is executed, and the compiler rejects
+ * any attempt to use the binding as a value. The rule exists to keep
+ * nondeterminism out of replay, and a type cannot run.
+ *
+ * Without the exemption the recommended way to type activities is unexpressible.
+ * `proxyActivities<typeof activities>` needs the activities module's *shape* in the
+ * workflow module, and the only way to get it without a runtime edge is
+ * `import type * as activities from './activities'`. That is precisely what
+ * `examples/greeter.ts` tells authors to do, and this checker used to reject it —
+ * so following the documented advice failed `npm run lint`, and there was no other
+ * way to write a typed workflow module that the convention would accept.
+ *
+ * The layering rule is deliberately *not* given the same exemption. That one is
+ * about which layers may know about which, and a type dependency is still
+ * knowledge; this one is about what executes inside a replay.
+ */
 function checkAuthorEntrypoint(
   file: SourceFile,
   stripped: string,
 ): Violation[] {
   const violations: Violation[] = [];
   for (const ref of extractImports(stripped)) {
+    if (ref.typeOnly) continue;
     const resolved = resolveSpecifier(file.path, ref.specifier);
     if (resolved === null) {
       violations.push({

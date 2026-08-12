@@ -264,6 +264,60 @@ describe('architecture — the author entrypoint', () => {
 
     expect(violations).toEqual([]);
   });
+
+  /**
+   * The exemption that makes the documented typing pattern expressible.
+   * `proxyActivities<typeof activities>` needs the activities module's shape inside
+   * the workflow module, and `import type * as` is the only way to get it without a
+   * runtime edge. This checker used to reject it, so following the advice in
+   * `examples/greeter.ts` failed `npm run lint` and a properly-named workflow module
+   * could not be typed at all.
+   */
+  it('allows a type-only import, which is erased and cannot run', () => {
+    const violations = checkBoundaries([
+      file(
+        'src/workflows.ts',
+        `import { runActivity } from './workflow';
+         import type * as activities from './activities';
+         export type A = typeof activities;`,
+      ),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  it('allows a type-only re-export for the same reason', () => {
+    const violations = checkBoundaries([
+      file('src/workflows.ts', `export type { Order } from './orders';`),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  // The exemption is about what executes. Drop the `type` and the same line is a
+  // runtime dependency on a module that may do I/O inside a replay.
+  it('still rejects the same import without the type modifier', () => {
+    const violations = checkBoundaries([
+      file('src/workflows.ts', `import * as activities from './activities';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('author-entrypoint');
+  });
+
+  /**
+   * Conservative on purpose: an inline `{type Foo}` can still emit a bare
+   * `import './x'` under `verbatimModuleSyntax`, which is a side-effect import and
+   * therefore real. Only the statement form guarantees nothing runs.
+   */
+  it('does not exempt an inline type modifier, which can still emit an import', () => {
+    const violations = checkBoundaries([
+      file('src/workflows.ts', `import { type Order } from './orders';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('author-entrypoint');
+  });
 });
 
 describe('architecture — the comment stripper', () => {
