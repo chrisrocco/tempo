@@ -20,14 +20,15 @@
  * a completion synthesized for it — so filtering is the caller's job, not this
  * module's.
  *
- * `childCancelRequested` and `workflowSignaled` are markers and are deliberately
- * **not** pending work. The others record work that is still owed something — a
- * result, a firing — and a cancel or a sent signal is owed nothing: each is
- * dispatched and finished in the same breath. They exist so replay can tell a
- * dispatch it already made from one it has not (see `core/workflow_api`), which is
- * a different question from what this module answers. Reporting them here would
- * tell an operator the execution is waiting on something it is not, and would have
- * `resume` re-send a cancel or a signal that landed.
+ * `childCancelRequested`, `workflowSignaled` and `patchRecorded` are markers and are
+ * deliberately **not** pending work. The others record work that is still owed
+ * something — a result, a firing — and a cancel, a sent signal, or a version
+ * decision is owed nothing: each is finished in the breath it was recorded in. They
+ * exist so replay can tell a dispatch it already made from one it has not, and so
+ * `patched` can tell which branch it took (see `core/workflow_api`) — different
+ * questions from what this module answers. Reporting them here would tell an
+ * operator the execution is waiting on something it is not, and would have `resume`
+ * re-send a cancel or a signal that landed.
  */
 
 import type {

@@ -43,6 +43,11 @@ on npm and makes no stability promises — clone it, read it, run it.
 - **Cancellation**, cascading to children, surfacing as a catchable failure —
   plus `terminate` for when cooperative cancellation cannot land
 - **`continueAsNew`** to bound history on long-lived workflows
+- **Versioning** — `patched('some-change')` lets a workflow's body gain a branch
+  while executions of it are running: the choice is recorded in each execution's
+  history, so one that has already run the old path keeps it and one that has not
+  reached the call site takes the new one. `deprecatePatch` retires the branch
+  afterwards
 - **Crash recovery** — kill the server mid-workflow, restart, and it continues
 - **Inspection** — an execution's status, history, and what it is currently
   waiting on, derived from history rather than stored and reachable through
@@ -350,7 +355,7 @@ Read in this order the first time; each builds on the last:
 | [`src/core/replay.ts`](src/core/replay.ts)                                             | Activation vs. replay, what suppresses a command, observe-don't-await |
 | [`src/core/context.ts`](src/core/context.ts)                                           | Per-task state, and the AsyncLocalStorage caveat                      |
 | [`src/core/condition.ts`](src/core/condition.ts) · [`signals.ts`](src/core/signals.ts) | How a workflow waits, and the queue pattern                           |
-| [`src/core/workflow_api.ts`](src/core/workflow_api.ts)                                 | The primitives, `proxyActivities`, `continueAsNew`                    |
+| [`src/core/workflow_api.ts`](src/core/workflow_api.ts)                                 | The primitives, `proxyActivities`, `continueAsNew`, `patched`         |
 | [`src/protocol/`](src/protocol/)                                                       | The wire format both sides of the boundary speak                      |
 | [`src/server/server_core.ts`](src/server/server_core.ts)                               | Dispatch-and-park, and the transactional heart                        |
 | [`src/server/ports/workflow_task_queue.ts`](src/server/ports/workflow_task_queue.ts)   | The two concurrency bugs the design prevents                          |
@@ -364,35 +369,37 @@ Read in this order the first time; each builds on the last:
 canonical one: the whole author-facing programming model. Start there to
 understand what the engine does.
 
-| Spec                                                                          | Covers                                                                |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`integration/local`](spec/integration/local.spec.ts)                         | The whole programming model against `createLocalRuntime`              |
-| [`core/replay`](spec/core/replay.spec.ts)                                     | Command suppression, divergence detection, terminal outcomes          |
-| [`core/apply_event`](spec/core/apply_event.spec.ts)                           | Event routing, markers, buffering, the nondeterminism check           |
-| [`core/condition`](spec/core/condition.spec.ts)                               | Parking, the unblock fixpoint, the condSeq invariant                  |
-| [`core/workflow_api`](spec/core/workflow_api.spec.ts)                         | seq allocation and command payloads                                   |
-| [`architecture`](spec/architecture.spec.ts)                                   | The determinism boundary, enforced — and proven to catch breakage     |
-| [`integration/resume`](spec/integration/resume.spec.ts)                       | Crash recovery: restart mid-flight and finish from history            |
-| [`integration/remote`](spec/integration/remote.spec.ts)                       | Client → RemoteService → HTTP → server → workers, one process         |
-| [`integration/distributed`](spec/integration/distributed.spec.ts)             | Real spawned processes; crash redelivery / at-least-once              |
-| [`integration/server_entrypoint`](spec/integration/server_entrypoint.spec.ts) | `startServer`: bind, persist, refuse, override                        |
-| [`integration/local_run`](spec/integration/local_run.spec.ts)                 | `--local`: one workflow, no server, and what it refuses               |
-| [`integration/worker_entrypoint`](spec/integration/worker_entrypoint.spec.ts) | `startWorker`: what it registers, connects to, refuses                |
-| [`server/concurrency`](spec/server/concurrency.spec.ts)                       | Version CAS, lease expiry, lease-race rejection, late-ack dedup       |
-| [`server/pending_work`](spec/server/pending_work.spec.ts)                     | What an execution still awaits — shared by recovery and `describe`    |
-| [`server/task_failure`](spec/server/task_failure.spec.ts)                     | Poison tasks: counted, backed off, never settled, fixed by redeploy   |
-| [`server/activity_timeout`](spec/server/activity_timeout.spec.ts)             | Start-to-close bounds an attempt without duplicating the work         |
-| [`server/logging`](spec/server/logging.spec.ts)                               | Lifecycle events, their fields, and silence by default                |
-| [`server/activity_retry`](spec/server/activity_retry.spec.ts)                 | Server-decided retry: one budget, durable across restarts             |
-| [`server/id_collision`](spec/server/id_collision.spec.ts)                     | Ids stay unique across restarts, and children derive theirs           |
-| [`server/heartbeat`](spec/server/heartbeat.spec.ts)                           | A long attempt holds its claim; a silent one is caught fast           |
-| [`worker/activity_context`](spec/worker/activity_context.spec.ts)             | `heartbeat()` as an author meets it: ambient, throttled, inert        |
-| [`server/task_queue_routing`](spec/server/task_queue_routing.spec.ts)         | Work reaches the right pool; activities and children inherit theirs   |
-| [`server/child_recovery`](spec/server/child_recovery.spec.ts)                 | Children launch once across replay/restart; cancel still reaches them |
-| [`server/file_history_store`](spec/server/file_history_store.spec.ts)         | Durable persistence + single-writer lockfile                          |
-| [`server/timer_service`](spec/server/timer_service.spec.ts)                   | Durable timer fire / cancel / startup re-arm                          |
-| [`server/retry_policy`](spec/server/retry_policy.spec.ts)                     | Retry arithmetic (attempts, backoff cap)                              |
-| [`worker/worker_loops`](spec/worker/worker_loops.spec.ts)                     | Poll-failure reporting and backoff                                    |
+| Spec                                                                              | Covers                                                                                   |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| [`integration/local`](spec/integration/local.spec.ts)                             | The whole programming model against `createLocalRuntime`                                 |
+| [`core/replay`](spec/core/replay.spec.ts)                                         | Command suppression, divergence detection, terminal outcomes                             |
+| [`core/apply_event`](spec/core/apply_event.spec.ts)                               | Event routing, markers, buffering, the nondeterminism check                              |
+| [`core/condition`](spec/core/condition.spec.ts)                                   | Parking, the unblock fixpoint, the condSeq invariant                                     |
+| [`core/workflow_api`](spec/core/workflow_api.spec.ts)                             | seq allocation and command payloads                                                      |
+| [`core/patched`](spec/core/patched.spec.ts)                                       | Versioning, at the layer where it can go wrong: seq allocation                           |
+| [`integration/workflow_versioning`](spec/integration/workflow_versioning.spec.ts) | A running workflow's body changing under it, and the loud failure when it is unversioned |
+| [`architecture`](spec/architecture.spec.ts)                                       | The determinism boundary, enforced — and proven to catch breakage                        |
+| [`integration/resume`](spec/integration/resume.spec.ts)                           | Crash recovery: restart mid-flight and finish from history                               |
+| [`integration/remote`](spec/integration/remote.spec.ts)                           | Client → RemoteService → HTTP → server → workers, one process                            |
+| [`integration/distributed`](spec/integration/distributed.spec.ts)                 | Real spawned processes; crash redelivery / at-least-once                                 |
+| [`integration/server_entrypoint`](spec/integration/server_entrypoint.spec.ts)     | `startServer`: bind, persist, refuse, override                                           |
+| [`integration/local_run`](spec/integration/local_run.spec.ts)                     | `--local`: one workflow, no server, and what it refuses                                  |
+| [`integration/worker_entrypoint`](spec/integration/worker_entrypoint.spec.ts)     | `startWorker`: what it registers, connects to, refuses                                   |
+| [`server/concurrency`](spec/server/concurrency.spec.ts)                           | Version CAS, lease expiry, lease-race rejection, late-ack dedup                          |
+| [`server/pending_work`](spec/server/pending_work.spec.ts)                         | What an execution still awaits — shared by recovery and `describe`                       |
+| [`server/task_failure`](spec/server/task_failure.spec.ts)                         | Poison tasks: counted, backed off, never settled, fixed by redeploy                      |
+| [`server/activity_timeout`](spec/server/activity_timeout.spec.ts)                 | Start-to-close bounds an attempt without duplicating the work                            |
+| [`server/logging`](spec/server/logging.spec.ts)                                   | Lifecycle events, their fields, and silence by default                                   |
+| [`server/activity_retry`](spec/server/activity_retry.spec.ts)                     | Server-decided retry: one budget, durable across restarts                                |
+| [`server/id_collision`](spec/server/id_collision.spec.ts)                         | Ids stay unique across restarts, and children derive theirs                              |
+| [`server/heartbeat`](spec/server/heartbeat.spec.ts)                               | A long attempt holds its claim; a silent one is caught fast                              |
+| [`worker/activity_context`](spec/worker/activity_context.spec.ts)                 | `heartbeat()` as an author meets it: ambient, throttled, inert                           |
+| [`server/task_queue_routing`](spec/server/task_queue_routing.spec.ts)             | Work reaches the right pool; activities and children inherit theirs                      |
+| [`server/child_recovery`](spec/server/child_recovery.spec.ts)                     | Children launch once across replay/restart; cancel still reaches them                    |
+| [`server/file_history_store`](spec/server/file_history_store.spec.ts)             | Durable persistence + single-writer lockfile                                             |
+| [`server/timer_service`](spec/server/timer_service.spec.ts)                       | Durable timer fire / cancel / startup re-arm                                             |
+| [`server/retry_policy`](spec/server/retry_policy.spec.ts)                         | Retry arithmetic (attempts, backoff cap)                                                 |
+| [`worker/worker_loops`](spec/worker/worker_loops.spec.ts)                         | Poll-failure reporting and backoff                                                       |
 
 ```bash
 npm test

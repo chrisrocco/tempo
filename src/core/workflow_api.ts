@@ -11,6 +11,10 @@
  * history rather than being read from the host. That is why the surface is
  * exactly this and no wider — a non-deterministic capability added here would
  * make replay irreproducible and belongs on the runtime/host side instead.
+ *
+ * `patched` is the odd one out and worth flagging here: it is the only primitive
+ * that *reads* history rather than adding to it, and the only one whose return
+ * value workflow code branches on. Its own comment carries the argument.
  */
 
 import {
@@ -261,6 +265,206 @@ export function signalWorkflow(
     payload,
     seq: ctx.seq++,
   });
+}
+
+/**
+ * What history already says about the seq a patch primitive is standing on.
+ *
+ * The three cases are the whole of the versioning mechanism, and they are three
+ * rather than two because "history holds nothing here" is a different answer from
+ * "history holds the other branch here". Collapsing them is how a version
+ * primitive turns into a nondeterminism generator.
+ */
+type PatchState =
+  /** No code has ever reached this seq. Nothing is owed; decide freely. */
+  | 'unreached'
+  /** This patch's marker is here. The patched branch was taken and is pinned. */
+  | 'recorded'
+  /** Some other event owns this seq, so the code that wrote it had no patch here. */
+  | 'foreign';
+
+function patchState(
+  ctx: WorkflowContext,
+  seq: number,
+  patchId: string,
+): PatchState {
+  if (!ctx.dispatchedSeqs.has(seq)) return 'unreached';
+  return ctx.patchesBySeq.get(seq) === patchId ? 'recorded' : 'foreign';
+}
+
+/**
+ * Has this execution adopted the change called `id`?
+ *
+ * The versioning primitive: it lets a workflow's body gain a branch while
+ * executions of it are in flight, which is otherwise the change that diverges
+ * replay from history and wedges every running execution (adoption blocker 3 in
+ * ROADMAP.md, issue #52). Wrap the new code, leave the old code in the `else`, and
+ * both an execution that has already run the old path and one that has not can
+ * replay the same source:
+ *
+ * ```ts
+ * if (patched('schedule-jitter')) {
+ *   await sleepJittered(delayMs);
+ * } else {
+ *   await sleep(delayMs);
+ * }
+ * ```
+ *
+ * `id` is an author's name for one change, and it must be unique within the
+ * workflow. It is compared, not just counted (see `apply_event`), so two patches
+ * that swap places in the source is a divergence rather than a silent re-branch.
+ *
+ * ## `patched`, not `getVersion(id, min, max)`
+ *
+ * Temporal has both shapes. `getVersion` returns an integer and handles a call
+ * site that evolves repeatedly: version 1 then 2 then 3, with the workflow
+ * switching on the number. `patched` is one boolean per change.
+ *
+ * The boolean is chosen because the integer's extra power is bought with a range
+ * the author must maintain by hand, and the failure mode of getting it wrong is
+ * silent. `getVersion(id, min, max)` asks for the *supported* range, so pruning a
+ * branch means raising `min`, and raising it past a version some in-flight
+ * execution recorded is a nondeterminism error discovered at replay time on
+ * production data. With one id per change there is no range: a change is adopted
+ * or it is not, three sequential changes are three ids, and each is retired
+ * independently. The version numbers were never the thing being reasoned about;
+ * "did this execution get the fix" was.
+ *
+ * It does not foreclose `getVersion`. The marker records a `patchId` at a seq, and
+ * an integer version is that same shape with a different payload — a
+ * `versionRecorded` marker carrying a number, read by the same "what does this seq
+ * hold" question. Nothing here has to be unpicked to add it; a caller who genuinely
+ * needs an ordered range can have it, and a boolean per change stops being the
+ * answer only when someone can show a call site where three ids read worse than
+ * one integer.
+ *
+ * ## Why the answer is recorded rather than recomputed
+ *
+ * Because the thing that would recompute it is the thing that changed. A workflow
+ * being replayed is being replayed by *new* code, so any test the new code
+ * performs — a feature flag, a comparison against the arguments, a config lookup —
+ * answers for the new code, not for the code that wrote the history. The only
+ * witness to what the old code did is the history the old code produced. So the
+ * first execution to reach a patch writes its answer down, and every later replay
+ * of that execution reads it back.
+ *
+ * ## The recorded answer is read before the branch allocates a seq
+ *
+ * This is the sharp edge, and it is worth being explicit about why the obvious
+ * implementation is wrong. A version branch changes how many commands are issued,
+ * and `seq` is assigned in call order — so if the answer were decided *after* the
+ * branch started allocating, or decided differently on a later replay, every seq
+ * after the branch would renumber and every completion in history would find the
+ * wrong waiter.
+ *
+ * So: `patched` reads `ctx.seq` **without consuming it**, asks history what is
+ * already recorded there, and only then decides. It consumes the seq in exactly
+ * the case where history holds (or is about to hold) its own marker there, and
+ * consumes nothing in the case where history holds pre-patch code's event there.
+ * Either way the branch body starts allocating from the seq the recorded history
+ * says it should, and it never has to give one back — the decision is final before
+ * the first line of either branch runs.
+ *
+ * ## What is actually guaranteed, stated precisely
+ *
+ * **Once an execution has taken a branch at a call site, it takes that branch
+ * forever.** That is a claim about *dispatched work*, not about start time, and the
+ * difference is deliberate:
+ *
+ * - An execution whose history already holds a command at this seq took the
+ *   pre-patch branch there, and keeps taking it — for that call site, for the life
+ *   of the run.
+ * - An execution that has never reached this seq is owed nothing. It adopts the
+ *   patch, records the marker, and keeps it.
+ *
+ * So a long-lived workflow looping over `patched` keeps the old shape for the
+ * iterations it already ran and takes the new one from the next iteration on, which
+ * is what a schedule wants: iterations already committed to history stay as they
+ * were recorded, and the fix applies going forward.
+ *
+ * Note what this does *not* claim: that an execution started before the deploy
+ * takes the `false` branch forever. Nothing in history distinguishes "started
+ * before the patch existed" from "started after it and has not reached it yet" —
+ * that needs a per-execution stamp of the code or engine semantics in force
+ * (question 4 on issue #52, deliberately not built here). Pinning on committed
+ * history instead is the strongest guarantee available without one, and it is the
+ * one replay safety actually needs: the branch cannot change under an execution
+ * that has already acted on it.
+ *
+ * ## Rules for the author
+ *
+ * - **The call must be reached on every replay, in the same order.** It is an
+ *   ordinary primitive that allocates a seq; putting it behind a non-deterministic
+ *   condition is the same mistake as putting `runActivity` there.
+ * - **Never rename or re-use an `id`.** The id is compared against history, so a
+ *   rename is a divergence on every execution that recorded the old one.
+ * - **Deleting the call is not the same as deleting the branch.** See
+ *   `deprecatePatch`, which exists precisely because the marker holds a seq that
+ *   still has to be accounted for after the `if` is gone.
+ */
+export function patched(id: string): boolean {
+  const ctx = getContext();
+  // Peeked, not allocated. Consuming it here and rolling back on the `false` path
+  // would work today and would be the wrong shape: it makes seq allocation depend
+  // on control flow inside this function rather than on what history records.
+  const seq = ctx.seq;
+  // Deliberately not gated on `ctx.cancelled`, unlike every dispatching primitive
+  // above. This is a read of a fact, not new work, and a cancelled run unwinding
+  // through `finally` must see the same branch its forward path saw — returning
+  // `false` for a patch whose marker is sitting in history would have one run take
+  // both sides. Allocating a seq during the cancellation window is safe because
+  // the decision is a function of history, so every replay allocates the same one.
+  if (patchState(ctx, seq, id) === 'foreign') return false;
+  ctx.seq++;
+  // Suppressed by `issue` when history already holds the marker, so re-deciding
+  // costs nothing; emitted only by the first replay to reach this seq.
+  issue(ctx, {type: 'recordPatch', patchId: id, seq});
+  return true;
+}
+
+/**
+ * Retire a patch: keep its seq accounted for, stop recording it for new work.
+ *
+ * The second half of a two-step change, and the reason `patched` is not a call site
+ * you are stuck with forever. Once every execution that predates the patch has
+ * drained, the `else` branch is dead code — but **removing the `if` is not the same
+ * as removing the call.** Executions that recorded a marker still have a
+ * `patchRecorded` sitting at that seq, and code that no longer issues anything
+ * there will allocate that seq for whatever comes next. That is a divergence, and
+ * `apply_event` reports it as one rather than letting the commands shift silently.
+ *
+ * So the migration is:
+ *
+ * 1. `if (patched('x')) { new } else { old }` — ship the change.
+ * 2. `deprecatePatch('x'); new` — once nothing is left on the old branch, delete
+ *    the `else` and the `if`, leaving this. Executions carrying the marker consume
+ *    their seq and are satisfied; executions started from here on record nothing
+ *    and pay nothing, because the branch is no longer a branch.
+ * 3. Delete this line too, once every execution carrying a marker for `x` has
+ *    drained.
+ *
+ * Step 3 needs a drain, so this does not abolish draining — it moves it off the
+ * critical path. The deploy that *changes behaviour* is step 1 and it needs no
+ * drain at all; steps 2 and 3 are cleanup, and can wait as long as they like.
+ *
+ * **Do not skip step 1's cooldown.** Deprecating while pre-patch executions are
+ * still in flight makes the new branch unconditional for a run whose history
+ * records the old one, which is exactly the divergence this whole mechanism exists
+ * to prevent. It is loud rather than silent — the seq that the deleted `else`
+ * branch used to own now carries a mismatched command — but loud on production
+ * executions is still a bad afternoon.
+ */
+export function deprecatePatch(id: string): void {
+  const ctx = getContext();
+  const seq = ctx.seq;
+  // Only the pinned case consumes anything. `unreached` must not record a marker —
+  // the whole point of deprecating is that new executions stop carrying them — and
+  // `foreign` is a pre-patch execution, which has nothing here to account for.
+  if (patchState(ctx, seq, id) !== 'recorded') return;
+  ctx.seq++;
+  // Always suppressed (history holds the marker, or we would not be here), so this
+  // records the claim for the divergence check and emits nothing.
+  issue(ctx, {type: 'recordPatch', patchId: id, seq});
 }
 
 /**

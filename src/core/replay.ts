@@ -110,16 +110,30 @@
  * never awaits anything finishes within its first task through the same
  * machinery, with no special case.
  *
+ * ## A finished run is checked against the history it did not read
+ *
+ * The loop stops the moment the workflow function settles, so a run that finishes
+ * early leaves history's remaining events unapplied — and an event that is never
+ * applied is never compared against the code. That is the hole a version branch
+ * falls into: new code that issues *fewer* commands than the history it is replaying
+ * reaches `return` with recorded work unaccounted for, and every per-event check is
+ * upstream of the events that would have objected. `assertHistoryAccounted` runs
+ * once here, after the loop, and turns that silence into a stopped replay;
+ * `apply_event` owns the reasoning and the exclusions.
+ *
  * ## Determinism rules this relies on
  *
  * - Time comes from `sleep` and recorded fire-times, never `Date.now()`.
  * - `seq` allocation must be stable across replays, so any branch that changes
- *   how many commands are issued must itself be deterministic.
+ *   how many commands are issued must itself be deterministic. A branch on the
+ *   *version of the code* is the one case where that is impossible by construction
+ *   — the new code cannot compute what the old code did — which is why `patched`
+ *   reads the answer out of history instead (`core/workflow_api`).
  * - `condition` predicates must be pure reads of workflow state — no clock, no
  *   activity calls inside them.
  */
 
-import {applyEvent} from './apply_event';
+import {applyEvent, assertHistoryAccounted} from './apply_event';
 import {tryUnblockConditions} from './condition';
 import {als, type WorkflowContext, type WorkflowFn} from './context';
 import {drainMicrotasks} from './microtask_scheduler';
@@ -155,5 +169,9 @@ export async function replay(
     applyEvent(ctx, ev);
     await settle(ctx);
   }
+  // The one check that cannot be made from inside the loop: a run that finished
+  // early leaves history's remaining events unapplied, so nothing ever compares
+  // them against the code. See `apply_event.assertHistoryAccounted`.
+  assertHistoryAccounted(ctx);
   return ctx;
 }

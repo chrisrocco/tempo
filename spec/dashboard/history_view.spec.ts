@@ -158,12 +158,24 @@ describe('dashboard history — grouping events into families', () => {
     ).toBe('child');
   });
 
+  /**
+   * A version decision is filed on its own, away from the work. It pairs with no
+   * outcome event, and the question it answers is about the code rather than about
+   * what the execution did — "which changes has this run adopted".
+   */
+  it('files a recorded patch under its own family, not with the work around it', () => {
+    expect(
+      eventCategory({type: 'patchRecorded', seq: 4, patchId: 'jitter'}),
+    ).toBe('version');
+  });
+
   it('offers every family it can return, so none is unreachable', () => {
     const every: HistoryEvent[] = [
       {type: 'activityCompleted', seq: 1, result: 1},
       {type: 'timerFired', seq: 1},
       {type: 'childCompleted', seq: 1, result: 1},
       {type: 'signal', name: 'go', payload: undefined},
+      {type: 'patchRecorded', seq: 1, patchId: 'jitter'},
       {type: 'cancelRequested'},
     ];
     const reachable = new Set(every.map(eventCategory));
