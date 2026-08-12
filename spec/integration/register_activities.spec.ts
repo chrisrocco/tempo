@@ -175,6 +175,51 @@ describe('registerActivities — it is a default, not the mechanism', () => {
   });
 });
 
+/**
+ * The seam where the two features meet, which neither side of the merge that
+ * created it had a reason to test.
+ *
+ * `--local` runs one workflow in-process with no server, and it is the cheapest way
+ * to prove a *built* artifact registered what it should. If it did not see
+ * module-scope registrations it would report a self-registering artifact as broken —
+ * the exact false alarm it exists to rule out.
+ */
+describe('registerActivities — a local run sees them too', () => {
+  const originalArgv = process.argv;
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    // `startLocalRun` reports the run's outcome by setting `process.exitCode`, so
+    // leaving it set would fail the whole suite from a passing spec.
+    process.exitCode = undefined;
+  });
+
+  it('runs a registered activity under --local, with no server anywhere', async () => {
+    registerActivities({greet: (name: string) => `Hello, ${name}!`});
+    process.argv = [...originalArgv, '--local=greeter', '--args=["world"]'];
+
+    // A local run prints its result to stdout and does not expose a promise, so the
+    // result is read the way a launch site reads it.
+    let out = '';
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      out += String(chunk);
+      return true;
+    };
+    try {
+      startWorker({name: 'greeter', workflows: {greeter}});
+      const deadline = Date.now() + 5000;
+      while (out === '' && Date.now() < deadline)
+        await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      process.stdout.write = write;
+    }
+
+    expect(out.trim()).toBe('"Hello, world!"');
+    expect(process.exitCode).toBe(0);
+  }, 15000);
+});
+
 describe('registerActivities — collisions', () => {
   /**
    * A module genuinely can evaluate twice — resolved through two paths, or present
