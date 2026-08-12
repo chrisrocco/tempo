@@ -101,6 +101,8 @@ function describeCommand(cmd: Command): string {
   if (cmd.type === 'startChild')
     return `startChild${cmd.detached ? ' (detached)' : ''}`;
   if (cmd.type === 'cancelChild') return `cancelChild of seq ${cmd.targetSeq}`;
+  if (cmd.type === 'startWorkflow')
+    return `startWorkflow ${cmd.name} as ${cmd.targetId}`;
   if (cmd.type === 'signalWorkflow')
     return `signalWorkflow ${cmd.signalName} to ${cmd.targetId}`;
   if (cmd.type === 'recordPatch') return `patched ${cmd.patchId}`;
@@ -147,6 +149,19 @@ function markerMismatch(
       return describeCommand(cmd);
     return undefined;
   }
+  if (ev.type === 'workflowStarted') {
+    // Both fields are the workflow's own logic and neither is derived, so both are
+    // checkable — unlike `childStarted`, whose id may have been the engine's to
+    // invent. The id is the sharper of the two: it is the dedup key, so a replay
+    // that computes a different one starts a second execution of work history says
+    // was already started, and nothing notices. An independent start threads no
+    // completion back, so there is no waiter to wedge and no result to come out
+    // wrong — the duplicate simply runs.
+    if (cmd.type !== 'startWorkflow' || cmd.targetId !== ev.targetId)
+      return describeCommand(cmd);
+    if (cmd.name !== ev.name) return `startWorkflow ${cmd.name}`;
+    return undefined;
+  }
   if (ev.type === 'patchRecorded') {
     // The id is the whole content of the marker, and comparing it is what makes a
     // patch retired the wrong way loud. Deleting `if (patched('x'))` without
@@ -180,6 +195,8 @@ function describeEvent(ev: HistoryEvent): string {
   if (ev.type === 'activityScheduled') return `activityScheduled ${ev.name}`;
   if (ev.type === 'childStarted')
     return `childStarted ${ev.childId}${ev.detached ? ' (detached)' : ''}`;
+  if (ev.type === 'workflowStarted')
+    return `workflowStarted ${ev.name} as ${ev.targetId}`;
   if (ev.type === 'childCancelRequested')
     return `childCancelRequested of seq ${ev.targetSeq}`;
   if (ev.type === 'workflowSignaled')
@@ -199,6 +216,7 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     ev.type === 'activityScheduled' ||
     ev.type === 'timerStarted' ||
     ev.type === 'childStarted' ||
+    ev.type === 'workflowStarted' ||
     ev.type === 'childCancelRequested' ||
     ev.type === 'workflowSignaled' ||
     ev.type === 'patchRecorded'
@@ -279,6 +297,15 @@ function failureError(ev: {error: string; stack?: string}): Error {
  * is running work, and a parent that no longer issues its `startChild` cannot
  * `cancelChild` it either — `cancelChild` names the spawning seq, and that seq is
  * now something else's.
+ *
+ * `workflowStarted` is **excluded**, and the contrast is the point rather than an
+ * inconsistency. What makes an unreached `childStarted` a problem is that the seq was
+ * the only handle on the child; an independent execution was never addressable by seq
+ * to begin with — it is reached by an id the workflow's own logic computed, which a
+ * settling run does not invalidate. Including it would fire on precisely the case the
+ * command exists for: a scheduler that stops starting a run it once started has not
+ * orphaned it, because the run was never the scheduler's to hold. A seq that comes
+ * back as something *else* is still caught, by `markerMismatch` above.
  */
 function dispatchesWork(ev: HistoryEvent): ev is HistoryEvent & {seq: number} {
   return (

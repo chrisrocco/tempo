@@ -135,6 +135,15 @@ export function describeEvent(event: HistoryEvent): EventView {
         label: `adopted change "${event.patchId}"`,
         tone: 'muted',
       };
+    case 'workflowStarted':
+      // `created: false` is the expected case for a schedule re-firing one nominal
+      // time, not a fault — so it reads as a distinct outcome rather than a warning.
+      return {
+        label: event.created
+          ? `started ${event.name} as ${event.targetId}`
+          : `${event.name} already running as ${event.targetId}`,
+        tone: 'muted',
+      };
     case 'cancelRequested':
       return {label: 'cancellation requested', tone: 'danger'};
     default:
@@ -189,6 +198,12 @@ export function eventCategory(event: HistoryEvent): EventCategory {
     // It is not `cancellation`: that family is this execution being cancelled,
     // which is a different thing happening to a different workflow.
     case 'childCancelRequested':
+    // Filed here despite not being a child, because the family answers "what other
+    // executions did this one set off" and a reader asking that wants both. Adding a
+    // seventh family for one event type would split that question in two, and the
+    // difference between the two — whether the starter can still reach it — is
+    // already in the row's own label.
+    case 'workflowStarted':
       return 'child';
     case 'signal':
     // The sending end of a signal, filed with the receiving end: someone

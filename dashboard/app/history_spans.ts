@@ -192,6 +192,17 @@ export function buildTimeline(
           tone: 'muted',
         });
         break;
+      case 'workflowStarted':
+        // A mark, not a span. A span needs an end, and this execution never learns
+        // of one — an independent start threads no completion back by design.
+        marks.push({
+          at,
+          label: event.created
+            ? `started ${event.targetId}`
+            : `${event.targetId} already running`,
+          tone: 'muted',
+        });
+        break;
       case 'cancelRequested':
         marks.push({at, label: 'cancellation requested', tone: 'danger'});
         break;

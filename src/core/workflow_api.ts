@@ -267,6 +267,78 @@ export function signalWorkflow(
   });
 }
 
+/** What `startWorkflow` needs to know beyond the id and the name. */
+export interface StartWorkflowExternalOptions {
+  args?: unknown[];
+  /** Which pool runs it. Defaults to this execution's queue, as `startChild` does. */
+  taskQueue?: string;
+}
+
+/**
+ * Start an execution that is not this one's child, addressed by an id you choose.
+ *
+ * The third way to start work, and the one to reach for when the new execution must
+ * outlive *anything* that happens to the starter:
+ *
+ * | | outlives completion | outlives cancellation | reachable afterwards |
+ * | --- | --- | --- | --- |
+ * | `executeChild` | n/a — awaited | no | the awaited result |
+ * | `startChild` | with `abandon` | **no** | the returned handle |
+ * | `startWorkflow` | yes | yes | by id only |
+ *
+ * The middle column is the whole reason this exists. `parentClosePolicy` governs a
+ * parent *closing*; cancellation cascades to children regardless of it, because
+ * cancelling a parent means *stop this work* and a subtree of it is still that work
+ * (`protocol/parent_close_policy.ts` argues for that, and it is right). So a child
+ * cannot be the shape of a scheduled run: cancelling the schedule would cancel runs
+ * already in flight, which is the behaviour Temporal's Schedules exist to fix in
+ * their own older `CronSchedule`.
+ *
+ * ## The id is required, and is the dedup
+ *
+ * A claimed id that already exists **correlates instead of starting a second
+ * execution** — the same claim semantics `startChild`'s optional `workflowId` has, but
+ * mandatory here because nothing else can reach the result. No handle is returned
+ * (there is no `cancelChild` counterpart to hand back; that coupling is what is being
+ * avoided) and no parent link is recorded, so an unnamed independent execution would
+ * be addressable by nothing.
+ *
+ * Make the id a fact about the domain and the start becomes idempotent against the
+ * domain:
+ *
+ * ```ts
+ * startWorkflow(`${scheduleId}-${nominalTime}`, 'nightlyReport', {args: [day]});
+ * ```
+ *
+ * A schedule that fires the same nominal time twice — a retried task, a rollover
+ * landing on the same boundary — starts one execution. The marker records which of
+ * the two happened as `workflowStarted.created`, because "already there" is the
+ * expected case and should be legible rather than inferred.
+ *
+ * ## What it gives up
+ *
+ * Everything `signalWorkflow` gives up, for the same reasons: no await, no failure to
+ * catch, nothing threaded back. It returns `void` and allocates one seq for its
+ * marker. To act on what you started, address it by id — `signalWorkflow`, or a
+ * client held by an activity. To *know* what it did, read `describe` on that id.
+ */
+export function startWorkflow(
+  workflowId: string,
+  name: string,
+  options: StartWorkflowExternalOptions = {},
+): void {
+  const ctx = getContext();
+  if (ctx.cancelled) return; // no new work after cancel, as with startChild
+  issue(ctx, {
+    type: 'startWorkflow',
+    targetId: workflowId,
+    name,
+    args: options.args ?? [],
+    taskQueue: options.taskQueue,
+    seq: ctx.seq++,
+  });
+}
+
 /**
  * What history already says about the seq a patch primitive is standing on.
  *

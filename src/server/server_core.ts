@@ -249,17 +249,22 @@ export interface ServerCoreDeps {
   activityTaskQueue: TaskQueue;
   timerService: TimerService;
   /**
-   * Create a child execution under an id the core has already chosen, and queue
-   * its first task. The id is **not** the host's to invent: a generated one has
-   * to be stable across a restart, and only the core knows the lineage that makes
-   * it so (see `childExecutionId`).
+   * Create an execution under an id the core has already chosen, and queue its
+   * first task. The id is **not** the host's to invent: a generated one has to be
+   * stable across a restart, and only the core knows the lineage that makes it so
+   * (see `childExecutionId`).
+   *
+   * `parent` is absent for a `startWorkflow` dispatch, which is the one caller that
+   * starts an execution with no lineage at all. Optional rather than a second method
+   * because the host does the same work either way — the parent is a field on the
+   * record, and the difference is entirely in what the core hands over.
    */
   launch(
     workflowId: string,
     name: string,
     args: unknown[],
     taskQueue: string,
-    parent: ExecutionParent,
+    parent: ExecutionParent | undefined,
   ): void;
   /** Nudge the (async, in-proc) workflow worker to drain the workflow-task queue. */
   kickWorkflowWorker(): void;
@@ -749,6 +754,42 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           parentOfChild.set(childId, {parentId: workflowId, seq: cmd.seq});
         }
       }
+    } else if (cmd.type === 'startWorkflow') {
+      // The same claim check `startChild` makes, and here it is the entire dedup
+      // story: an independent start threads nothing back, so a caller cannot notice
+      // a duplicate the way a parent awaiting a child would.
+      const existing = await historyStore.get(cmd.targetId);
+      if (existing) {
+        log('workflow.start_reused', {
+          workflowId,
+          seq: cmd.seq,
+          targetId: cmd.targetId,
+          status: existing.status,
+        });
+      } else {
+        // No parent argument, and that is the point of the command rather than an
+        // omission. `recordChild` is deliberately not called either: nothing here
+        // enters `childrenByParent`, so no close policy fires on it and the
+        // cancellation cascade cannot reach it.
+        launch(
+          cmd.targetId,
+          cmd.name,
+          cmd.args,
+          cmd.taskQueue ?? taskQueue,
+          undefined,
+        );
+      }
+      // Marker last, like `startChild`, `cancelChild` and `signalWorkflow`, and
+      // safe for the reason `signalWorkflow` needs and gets from `SignalSource`:
+      // the dispatch is idempotent. Here the claim check above is what provides
+      // it — a replayed command finds the execution it created and correlates.
+      await appendEvent(workflowId, {
+        type: 'workflowStarted',
+        seq: cmd.seq,
+        targetId: cmd.targetId,
+        name: cmd.name,
+        created: !existing,
+      });
     } else if (cmd.type === 'cancelChild') {
       const childId = childrenByParent
         .get(workflowId)

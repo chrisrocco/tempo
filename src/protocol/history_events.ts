@@ -199,6 +199,48 @@ export interface ChildCancelRequestedEvent extends HistoryEventBase {
 }
 
 /**
+ * Marker: an independent execution was started from workflow code. Same role as
+ * `childStarted` — it records the dispatch so replay does not start a second one —
+ * and deliberately not the same event, because the two record different things.
+ *
+ * `childStarted` records a *relationship*: it carries `detached` and its seq is what
+ * `cancelChild` addresses, because a child is something the starter can still act on.
+ * This records only that a start happened, since an independent execution is not
+ * reachable from the starter by anything but its id. Reusing `childStarted` with a
+ * flag would have put a parent link in history for an execution that has none, and
+ * `closeChildren` reads that history.
+ *
+ * Written **after** the launch, as `childStarted` is, and safe for the same reason:
+ * a claimed id that already exists correlates rather than starting a second
+ * execution, so a replayed command is idempotent. Marker-first would suppress the
+ * only recovery a crash between the two has.
+ */
+export interface WorkflowStartedEvent extends HistoryEventBase {
+  type: 'workflowStarted';
+  seq: number;
+  /** The execution that was started. Always a workflow-chosen id — see `StartWorkflowCommand`. */
+  targetId: string;
+  /**
+   * The workflow name it was started with, kept because the id alone does not say
+   * what ran. `activityScheduled` keeps its name for the same reason, and this is
+   * the only record on *this* side of what the start was for: the execution itself
+   * has no parent link pointing back here.
+   */
+  name: string;
+  /**
+   * Whether this start created the execution, or found the claimed id already taken.
+   *
+   * The counterpart of `workflowSignaled.delivered`, and recorded for the same
+   * reason: it is the interesting failure of this command, and the starter cannot
+   * see it — nothing parks on an independent start, so there is no promise to
+   * reject. `false` is usually correct and expected (a schedule re-firing the same
+   * nominal time must not run twice), which is exactly why it should be legible
+   * rather than inferred.
+   */
+  created: boolean;
+}
+
+/**
  * Marker: a signal has been sent to another execution. Same role as the markers
  * above — it records the dispatch so replay does not send a second one.
  *
@@ -374,6 +416,7 @@ export type HistoryEvent =
   | ActivityScheduledEvent
   | TimerStartedEvent
   | ChildStartedEvent
+  | WorkflowStartedEvent
   | ChildCancelRequestedEvent
   | WorkflowSignaledEvent
   | PatchRecordedEvent

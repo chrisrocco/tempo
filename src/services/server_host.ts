@@ -238,7 +238,7 @@ export function createServerHost(
     name: string,
     args: unknown[],
     taskQueue: string,
-    parent: ExecutionParent,
+    parent: ExecutionParent | undefined,
   ): void {
     void createAndEnqueue(workflowId, name, args, taskQueue, parent).catch(
       (error: unknown) => {

@@ -93,9 +93,11 @@ export {
   signalWorkflow,
   sleep,
   startChild,
+  startWorkflow,
   workflowInfo,
   type ChildHandle,
   type ChildOptions,
+  type StartWorkflowExternalOptions,
   type WorkflowInfo,
 } from './core/workflow_api';
 
