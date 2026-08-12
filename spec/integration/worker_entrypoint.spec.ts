@@ -42,7 +42,7 @@ const activities = {
   greet: (name: string): string => `Hello, ${name}!`,
 };
 
-const act = proxyActivities<typeof activities>({});
+const act = proxyActivities(activities);
 
 async function greeter(name: string): Promise<string> {
   return act.greet(name);

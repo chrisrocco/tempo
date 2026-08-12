@@ -2,7 +2,7 @@
  * @fileoverview
  * Scoped isolation for the process-global activity registry.
  *
- * `defineActivities` writes to one map for the whole process, at module scope, so a
+ * `proxyActivities` writes to one map for the whole process, at module scope, so a
  * spec file that imports a workflow module declaring activities registers them for
  * every case in the suite. A file asserting "this worker has no activities" therefore
  * has to own the registry while it runs.

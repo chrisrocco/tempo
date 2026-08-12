@@ -163,12 +163,12 @@ describe('local runtime — activities', () => {
 describe('local runtime — proxyActivities & retries', () => {
   it('calls activities through a typed proxy', async () => {
     const activities = {add: (a: number, b: number) => a + b};
+    // Declared outside the workflow: this is a module-load declaration, not something
+    // to re-run on every replay.
+    const {add} = proxyActivities(activities);
     const rt = createLocalRuntime()
       .registerActivity('add', activities.add)
-      .registerWorkflow('sum', async () => {
-        const {add} = proxyActivities<typeof activities>();
-        return add(2, 3);
-      });
+      .registerWorkflow('sum', async () => add(2, 3));
 
     await expectAsync(rt.start<number>('sum').result()).toBeResolvedTo(5);
   });
@@ -180,10 +180,10 @@ describe('local runtime — proxyActivities & retries', () => {
       GREETING: 'Hello',
       greet: (name: string) => `Hello, ${name}!`,
     };
+    const proxy = proxyActivities(activities);
     const rt = createLocalRuntime()
       .registerActivity('greet', activities.greet)
       .registerWorkflow('wf', async () => {
-        const proxy = proxyActivities<typeof activities>();
         // @ts-expect-error constants are not callable, so they are not proxied
         proxy.GREETING;
         return proxy.greet('world');
@@ -202,11 +202,10 @@ describe('local runtime — proxyActivities & retries', () => {
         throw new Error('boom');
       },
     };
+    const {once} = proxyActivities(activities);
     const rt = createLocalRuntime()
       .registerActivity('once', activities.once)
-      .registerWorkflow('wf', async () =>
-        proxyActivities<typeof activities>().once(),
-      );
+      .registerWorkflow('wf', async () => once());
 
     await expectAsync(rt.start('wf').result()).toBeRejectedWithError(/boom/);
     expect(attempts).toBe(1);
@@ -221,14 +220,12 @@ describe('local runtime — proxyActivities & retries', () => {
         return 'ok-after-retries';
       },
     };
+    const flakyProxy = proxyActivities(activities, {
+      retry: {maximumAttempts: 3},
+    });
     const rt = createLocalRuntime()
       .registerActivity('flaky', activities.flaky)
-      .registerWorkflow('wf', async () => {
-        const {flaky} = proxyActivities<typeof activities>({
-          retry: {maximumAttempts: 3},
-        });
-        return flaky();
-      });
+      .registerWorkflow('wf', async () => flakyProxy.flaky());
 
     await expectAsync(rt.start<string>('wf').result()).toBeResolvedTo(
       'ok-after-retries',
@@ -244,14 +241,12 @@ describe('local runtime — proxyActivities & retries', () => {
         throw new Error('persistent');
       },
     };
+    const alwaysProxy = proxyActivities(activities, {
+      retry: {maximumAttempts: 2},
+    });
     const rt = createLocalRuntime()
       .registerActivity('always', activities.always)
-      .registerWorkflow('wf', async () => {
-        const {always} = proxyActivities<typeof activities>({
-          retry: {maximumAttempts: 2},
-        });
-        return always();
-      });
+      .registerWorkflow('wf', async () => alwaysProxy.always());
 
     await expectAsync(rt.start('wf').result()).toBeRejectedWithError(
       /persistent/,

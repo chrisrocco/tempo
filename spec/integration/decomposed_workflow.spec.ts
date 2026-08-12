@@ -1,6 +1,6 @@
 /**
  * @fileoverview
- * The case `defineActivities` exists for: a workflow decomposed across modules,
+ * The case `proxyActivities` exists for: a workflow decomposed across modules,
  * served by a worker that was never told about its activities.
  *
  * `spec/support/decomposed.workflow.ts` calls two activities through a helper and
@@ -14,8 +14,8 @@
  * **This file does not reset the activity registry, on purpose.** The declaration it
  * depends on happened once, when the module was imported, and a reset cannot be
  * undone — module evaluation is cached, so `decomposed.workflow.ts` will never run
- * its `defineActivities` again. Cases that need an empty registry live in
- * `define_activities.spec.ts`.
+ * its `proxyActivities` again. Cases that need an empty registry live in
+ * `proxy_activities.spec.ts`.
  */
 
 import 'jasmine';

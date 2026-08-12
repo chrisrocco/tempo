@@ -371,19 +371,23 @@ export type ActivityProxy<A> = {
 };
 
 /**
- * A typed façade over `runActivity`: `proxyActivities<A>(options)` returns a proxy
- * whose methods forward to the activity of the same name, carrying `options` on
- * the command. Pure sugar living in the core (re-exported from `workflow.ts`);
- * `A` drives the compile-time argument/return types — typically
- * `proxyActivities<typeof activities>()` against an imported activities module.
- * The typing is the whole payoff; at runtime this is a thin forwarder.
+ * A typed façade over `runActivity`: returns a proxy whose methods forward to the
+ * activity of the same name, carrying `options` on the command. `A` drives the
+ * compile-time argument and return types; at runtime this is a thin forwarder and
+ * the typing is the whole payoff.
+ *
+ * **The primitive, not the author-facing call.** Workflow authors use
+ * `proxyActivities` from `workflow.ts`, which wraps this to also register the
+ * implementations it was handed. That wrapper cannot live here: registration is host
+ * state and `core/` is a pure function of history, which is the property that makes
+ * replay reproducible and the core testable against hand-written histories.
  *
  * The `options` it carries are declared in `protocol/` and **interpreted only by
  * the server** when it turns the command into an activity task. The core emits
  * them and does nothing with them — they are just more history-in/commands-out
  * payload.
  */
-export function proxyActivities<A extends object>(
+export function createActivityProxy<A extends object>(
   options: ActivityOptions = {},
 ): ActivityProxy<A> {
   return new Proxy({} as ActivityProxy<A>, {

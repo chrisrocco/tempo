@@ -1,6 +1,6 @@
 /**
  * @fileoverview
- * `defineActivities` — declaring the activities a workflow calls, which registers
+ * `proxyActivities` — declaring the activities a workflow calls, which registers
  * them.
  *
  * The problem it solves is one of scale rather than keystrokes. A worker is handed
@@ -10,17 +10,21 @@
  * name every one of those modules from memory, nothing checks the list, and an
  * omission surfaces as an execution parked on an activity that retries forever.
  *
- * This file covers the mechanism against an empty registry, so it resets between
- * cases. The case the feature actually exists for — a real workflow module declaring
- * activities at load, in a file the entrypoint never names — is
- * `decomposed_workflow.spec.ts`, which deliberately does *not* reset: a reset cannot
- * be undone, because module evaluation is cached and a module's declaration will
- * never run twice. One policy per file is the only way to have both.
+ * This file covers the mechanism against an empty registry, via
+ * `isolateActivityRegistry()` inside each describe — save and restore rather than
+ * clear, because the registry is one map for the whole process and a bare reset would
+ * delete what other files declared at load. The case the feature actually exists for —
+ * a real workflow module declaring activities in a file the entrypoint never names — is
+ * `decomposed_workflow.spec.ts`, which relies on exactly those load-time declarations.
  */
 
 import 'jasmine';
 import type {AddressInfo} from 'node:net';
 import type {Server} from 'node:http';
+import {
+  activityNameConflicts,
+  registeredActivityImpls,
+} from '../../src/activity_registry';
 import {isolateActivityRegistry} from '../support/isolate_activity_registry';
 import {
   createRemoteService,
@@ -28,7 +32,7 @@ import {
   createServerHost,
 } from '../../src/services';
 import {startWorker} from '../../src/tempo';
-import {defineActivities} from '../../src/workflow';
+import {proxyActivities} from '../../src/workflow';
 
 interface Harness {
   url: string;
@@ -56,12 +60,12 @@ async function startServer(): Promise<Harness> {
   };
 }
 
-describe('defineActivities — one call types and registers', () => {
+describe('proxyActivities — one call types and registers', () => {
   isolateActivityRegistry();
 
   it('returns a proxy that forwards to the activity of the same name', async () => {
     const impls = {greet: (name: string) => `Hello, ${name}!`};
-    const act = defineActivities(impls);
+    const act = proxyActivities(impls);
     async function greeter(name: string): Promise<string> {
       return act.greet(name);
     }
@@ -86,7 +90,7 @@ describe('defineActivities — one call types and registers', () => {
   }, 15000);
 
   it('drops non-callable members, so a whole module namespace is fine', () => {
-    defineActivities({GREETING: 'Hello', greet: () => 'hi'});
+    proxyActivities({GREETING: 'Hello', greet: () => 'hi'});
 
     const worker = startWorker({
       name: 'greeter',
@@ -105,7 +109,7 @@ describe('defineActivities — one call types and registers', () => {
   it('counts declared activities when deciding which roles it can serve', () => {
     // A name no other spec file uses: one registry serves the whole process, so two
     // files declaring different functions under one name is a collision.
-    defineActivities({settleInvoice: () => 'ok'});
+    proxyActivities({settleInvoice: () => 'ok'});
 
     const worker = startWorker({
       name: 'orders',
@@ -117,13 +121,13 @@ describe('defineActivities — one call types and registers', () => {
   });
 });
 
-describe('defineActivities — precedence and collisions', () => {
+describe('proxyActivities — precedence and collisions', () => {
   isolateActivityRegistry();
 
   // A caller that supplies its own set is unaffected by what the loaded workflow
   // modules declared, which is what keeps a test double possible.
   it('lets an explicitly passed activity win over a declared one', async () => {
-    const act = defineActivities({greet: () => 'declared'});
+    const act = proxyActivities({greet: () => 'declared'});
     async function greeter(): Promise<string> {
       return act.greet();
     }
@@ -152,16 +156,43 @@ describe('defineActivities — precedence and collisions', () => {
   it('accepts the same function under the same name twice', () => {
     const greet = (): string => 'hi';
 
-    defineActivities({greet});
-    expect(() => defineActivities({greet})).not.toThrow();
+    proxyActivities({greet});
+    expect(() => proxyActivities({greet})).not.toThrow();
   });
 
-  it('refuses a different function under a name already taken', () => {
-    defineActivities({greet: () => 'first'});
+  /**
+   * Last-write-wins rather than a throw, and the reason is not squeamishness.
+   * Registration now happens inside every `proxyActivities` call, and those run at
+   * module load — so a throw fires while modules are still evaluating, before any
+   * application or test setup exists to catch it. A process that loads two workflow
+   * modules claiming one name would crash on import rather than report a
+   * diagnosable error, and this repo's own suite is such a process.
+   */
+  it('lets the last registration win when two implementations claim a name', () => {
+    proxyActivities({greet: () => 'first'});
 
-    expect(() => defineActivities({greet: () => 'second'})).toThrowError(
-      /activity "greet" is already registered as a different function/,
+    expect(() => proxyActivities({greet: () => 'second'})).not.toThrow();
+    expect(Object.fromEntries(registeredActivityImpls())['greet']?.()).toBe(
+      'second',
     );
+  });
+
+  // Not silent, though: `startWorker` logs one `activity.name_conflict` per name, so
+  // an artifact running the wrong implementation says so in its own log.
+  it('records the conflict so a worker can report it', () => {
+    proxyActivities({greet: () => 'first'});
+    proxyActivities({greet: () => 'second'});
+
+    expect(activityNameConflicts()).toContain('greet');
+  });
+
+  it('records nothing when the same function is registered twice', () => {
+    const greet = (): string => 'hi';
+
+    proxyActivities({greet});
+    proxyActivities({greet});
+
+    expect(activityNameConflicts()).toEqual([]);
   });
 
   /**
@@ -174,7 +205,7 @@ describe('defineActivities — precedence and collisions', () => {
       serverUrl: 'http://127.0.0.1:1',
       workflows: {w: async () => 'x'},
     });
-    defineActivities({tooLateToMatter: () => 'x'});
+    proxyActivities({tooLateToMatter: () => 'x'});
 
     expect(worker.roles).toEqual(['workflow']);
     void worker.stop();

@@ -200,7 +200,7 @@ interface ImportRef {
 }
 
 /** The call a workflow module may hand a value-imported activities namespace to. */
-const ACTIVITY_DEFINER = 'defineActivities';
+const ACTIVITY_DEFINER = 'proxyActivities';
 
 /**
  * The file with its import statements blanked out, so scanning for *uses* of a
@@ -230,9 +230,9 @@ function withoutImportStatements(strippedText: string): string {
 }
 
 /**
- * Is every use of `binding` in `body` an argument to `defineActivities`?
+ * Is every use of `binding` in `body` an argument to `proxyActivities`?
  *
- * Counting rather than parsing: each `defineActivities(binding` match contains
+ * Counting rather than parsing: each `proxyActivities(binding` match contains
  * exactly one occurrence of the binding, so if the totals agree then every
  * occurrence is accounted for by such a call. Any other reference — a direct call,
  * a re-export, passing it somewhere else — pushes the first count higher and fails.
@@ -244,7 +244,7 @@ function onlyDefinesActivities(body: string, binding: string): boolean {
   // An unused namespace binding is **not** harmless, which is easy to get wrong: the
   // import still evaluates the module, so any module-scope work in an activities file
   // — opening a pool, reading config — runs inside the workflow worker. Only a
-  // binding actually handed to `defineActivities` earns the exemption.
+  // binding actually handed to `proxyActivities` earns the exemption.
   if (uses === 0) return false;
 
   const handedOver =
@@ -399,7 +399,7 @@ function checkPurity(
  *
  * ## The one value import that is allowed, and what makes it safe
  *
- * `defineActivities(impls, options)` types the proxy from the implementations *and*
+ * `proxyActivities(impls, options)` types the proxy from the implementations *and*
  * registers them, so a workflow that declares it will call an activity has
  * registered that activity by saying so. That is worth having — a large workflow
  * decomposed across helper modules otherwise depends on someone maintaining a flat
@@ -409,7 +409,7 @@ function checkPurity(
  * But passing implementations means binding them, and a bound implementation is one
  * keystroke from catastrophe:
  *
- *     const act = defineActivities(payments, {…});
+ *     const act = proxyActivities(payments, {…});
  *     await act.charge(amount);      // correct — issues a command
  *     await payments.charge(amount); // real I/O inside replay, on every replay
  *
@@ -420,12 +420,12 @@ function checkPurity(
  *
  * So the value import is allowed **only in the shape that cannot be misused**:
  * `import * as NAME from '…'` where every occurrence of `NAME` in the file is an
- * argument to `defineActivities`. Reach for the binding anywhere else and this
+ * argument to `proxyActivities`. Reach for the binding anywhere else and this
  * fails. That keeps the protection structural rather than turning it into a
  * convention, which is the property this whole file exists to provide.
  *
  * Deliberately narrow. Only the namespace form is considered — named, default, and
- * bare side-effect imports stay rejected outright, because `defineActivities` takes
+ * bare side-effect imports stay rejected outright, because `proxyActivities` takes
  * a module namespace and no other shape has a reason to appear here. A rule that
  * fails a legitimate-but-unusual import is recoverable; one that admits an
  * implementation binding is not.
@@ -452,7 +452,7 @@ function checkAuthorEntrypoint(
     if (/(^|\/)src\/workflow$/.test(resolved)) continue;
 
     // The activities exemption: a namespace binding used for nothing but
-    // `defineActivities` never reaches an implementation, so it cannot run one.
+    // `proxyActivities` never reaches an implementation, so it cannot run one.
     if (
       ref.namespaceBinding &&
       onlyDefinesActivities(body, ref.namespaceBinding)
@@ -464,8 +464,8 @@ function checkAuthorEntrypoint(
       line: ref.line,
       rule: 'author-entrypoint',
       message: ref.namespaceBinding
-        ? `workflow code may import '${ref.specifier}' only to hand it to defineActivities — '${ref.namespaceBinding}' is used elsewhere in this file, and a bound activity implementation can be called directly, which would run real I/O inside replay`
-        : `workflow code may import only workflow.ts, not '${ref.specifier}' — that is what makes the determinism boundary structural rather than a convention. To call its activities, use \`import * as x\` and hand it to defineActivities`,
+        ? `workflow code may import '${ref.specifier}' only to hand it to proxyActivities — '${ref.namespaceBinding}' is used elsewhere in this file, and a bound activity implementation can be called directly, which would run real I/O inside replay`
+        : `workflow code may import only workflow.ts, not '${ref.specifier}' — that is what makes the determinism boundary structural rather than a convention. To call its activities, use \`import * as x\` and hand it to proxyActivities`,
     });
   }
   return violations;

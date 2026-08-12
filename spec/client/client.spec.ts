@@ -33,7 +33,7 @@ const activities = {
   greet: (name: string): string => `Hello, ${name}!`,
 };
 
-const act = proxyActivities<typeof activities>({retry: {maximumAttempts: 1}});
+const act = proxyActivities(activities, {retry: {maximumAttempts: 1}});
 
 async function greeter(name: string): Promise<string> {
   return act.greet(name);

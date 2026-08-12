@@ -28,7 +28,8 @@ on npm and makes no stability promises — clone it, read it, run it.
 
 ## What it does
 
-- **Activities** with typed `proxyActivities`, server-decided retry with
+- **Activities** with typed `proxyActivities`, which registers what it types, plus
+  server-decided retry with
   backoff, start-to-close timeouts, and `heartbeat()` for work of unbounded
   duration
 - **Timers** — real wall-clock, durable, re-armed from history on restart
@@ -159,11 +160,19 @@ each a file whose whole body is one call:
 import { startServer } from 'workflow-engine';
 void startServer({ dataDir: '/var/lib/tempo' });
 
+// workflows/order.workflow.ts — declaring the activities registers them
+import { proxyActivities } from 'workflow-engine/workflow';
+import * as payments from '../activities/payments';
+const act = proxyActivities(payments, { retry: { maximumAttempts: 3 } });
+
+export async function order(id: string): Promise<void> {
+  await act.charge(id);
+}
+
 // worker.ts — bundle this, run it twice, once per --role
 import { Tempo } from 'workflow-engine';
-import * as activities from './activities';
 import * as workflows from './workflows';
-Tempo.startWorker({ name: 'orders', workflows, activities });
+Tempo.startWorker({ name: 'orders', workflows });
 ```
 
 plus the client above, and the **flag vocabulary** both processes read

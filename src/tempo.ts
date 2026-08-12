@@ -140,7 +140,10 @@
  * site still overrides the three values a redeploy needs.
  */
 
-import {registeredActivityImpls} from './activity_registry';
+import {
+  activityNameConflicts,
+  registeredActivityImpls,
+} from './activity_registry';
 import type {WorkflowFn} from './core';
 import {createLocalRuntime} from './local_runtime';
 import {DEFAULT_PORT, WORKER_FLAG, flagValue} from './process_flags';
@@ -494,7 +497,7 @@ function composeRemote(args: {
 
 export function startWorker(options: StartWorkerOptions): Worker {
   const workflows = callableEntries(options.workflows);
-  // What the workflows declared via `defineActivities` first, then what this call
+  // What the workflows declared via `proxyActivities` first, then what this call
   // was handed, so an explicitly-passed activity wins over a declared one of the
   // same name — a caller that supplies its own set (a spec, a test double) is
   // unaffected by whatever the loaded workflow modules asked for.
@@ -558,6 +561,22 @@ export function startWorker(options: StartWorkerOptions): Worker {
       return stopping;
     },
   };
+
+  // Two workflow modules claiming one activity name is resolved by load order, so
+  // the artifact is running whichever loaded last. Reported rather than thrown
+  // because registration happens at module load, where a throw fires before anything
+  // exists to handle it — see `activity_registry.ts`. On stderr as JSON Lines, beside
+  // the poll failures, so one pipeline catches both.
+  const conflicts = activityNameConflicts();
+  if (conflicts.length > 0) {
+    const log = createJsonLogger();
+    for (const name of conflicts)
+      log('activity.name_conflict', {
+        worker: options.name,
+        activity: name,
+        resolution: 'the implementation registered last is the one that runs',
+      });
+  }
 
   // Readiness line for a human or a spawning test, not the readiness contract:
   // `Client.queues()` is what answers "is this worker polling" from anywhere, at
