@@ -13,7 +13,7 @@ import {
   defineSignal,
   drainMicrotasks,
   executeChild,
-  proxyActivities,
+  createActivityProxy,
   runActivity,
   signalWorkflow,
   sleep,
@@ -84,13 +84,13 @@ describe('core primitives — command payloads', () => {
   });
 
   /**
-   * `proxyActivities` is a typed façade over `runActivity`. At runtime it is a
+   * `createActivityProxy` is a typed façade over `runActivity`. At runtime it is a
    * thin forwarder: the property name becomes the activity name, and the options
    * it was built with ride along on every command.
    */
   it('forwards a proxied call to the activity of the same name, with its options', () => {
     const ctx = createContext([], []);
-    const act = proxyActivities<{greet(name: string): string}>({
+    const act = createActivityProxy<{greet(name: string): string}>({
       retry: {maximumAttempts: 3},
     });
 

@@ -34,7 +34,7 @@ export function greet(name: string): string {
 const activities = {GREETING, greet};
 
 // ── workflows — deterministic orchestration, reaching I/O only via activities ─
-const act = proxyActivities<typeof activities>({
+const act = proxyActivities(activities, {
   retry: {maximumAttempts: 3},
 });
 

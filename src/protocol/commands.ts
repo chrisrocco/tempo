@@ -66,6 +66,56 @@ export interface StartChildCommand extends CommandBase {
   parentClosePolicy: ParentClosePolicy;
 }
 
+/**
+ * Start an execution that is **not** a child: no parent link, no lineage, nothing
+ * that reaches back into the starter.
+ *
+ * ## Why this is not `startChild` with a policy
+ *
+ * `parentClosePolicy` looks like it should cover this, and does not. It governs what
+ * happens when a parent *closes*; cancelling a parent cascades to every child
+ * **unconditionally**, in defiance of the policy (`server_core`, and
+ * `parent_close_policy.ts` argues for why that is right). So `abandon` buys a child
+ * that survives its parent completing, not one that survives its parent being called
+ * off.
+ *
+ * For a scheduler that is the difference between working and not. Cancelling a
+ * schedule has to stop *the schedule*, and leave the runs it already started alone —
+ * exactly the property Temporal's Schedules were built to have and their older
+ * `CronSchedule` lacked. There is no combination of existing commands that expresses
+ * it, which is why this one exists rather than a fourth policy value.
+ *
+ * ## Fire-and-forget, and more so than the others
+ *
+ * No completion event, nothing to await, and unlike `startChild` **no handle comes
+ * back** — there is no `cancelChild` counterpart, because a cancel keyed by the seq
+ * that spawned it is precisely the coupling this command exists to avoid. To act on
+ * the execution afterwards, address it by id: `signalWorkflow`, or a client held by
+ * an activity.
+ *
+ * That is also why `targetId` is **required** where `startChild.workflowId` is
+ * optional. A child with no chosen id is still reachable through lineage; an
+ * independent execution with no chosen id is reachable by nothing, having produced
+ * neither a handle nor a link. Naming it is what makes it addressable — and what
+ * makes the start idempotent against the domain rather than against the call, since
+ * a claimed id that already exists correlates instead of starting a second.
+ */
+export interface StartWorkflowCommand extends CommandBase {
+  type: 'startWorkflow';
+  /**
+   * The new execution's id, chosen by the workflow. Required — see above.
+   *
+   * `targetId` rather than `workflowId` for the reason `signalWorkflow` gives: the
+   * code applying this already has a `workflowId` in scope, the *starter's*, and one
+   * of the two would be read as the other.
+   */
+  targetId: string;
+  name: string;
+  args: unknown[];
+  /** Which pool runs it. Defaults to the starting execution's queue, as `startChild` does. */
+  taskQueue?: string;
+}
+
 /** Cancel a fire-and-forget child, identified by the seq of its startChild command. */
 export interface CancelChildCommand extends CommandBase {
   type: 'cancelChild';
@@ -99,6 +149,27 @@ export interface SignalWorkflowCommand extends CommandBase {
 }
 
 /**
+ * Pin a version branch: record that the workflow took the patched side of
+ * `patched(patchId)` at this seq.
+ *
+ * The one command whose entire purpose is its marker. Every other command asks
+ * the server to *do* something and leaves a marker as evidence; this one asks for
+ * the evidence and nothing else, because the thing being made durable is a
+ * decision the workflow already made. `core/workflow_api.patched` owns the
+ * reasoning for why the decision has to be durable at all.
+ *
+ * `patchId` is on the command as well as on the marker so the divergence check
+ * has two sides to compare (`core/apply_event`). Without it a patch marker could
+ * only be checked for *presence*, and swapping two adjacent patches — which
+ * changes which branch each execution takes — would read as agreement.
+ */
+export interface RecordPatchCommand extends CommandBase {
+  type: 'recordPatch';
+  /** The author's name for one change. Compared against `patchRecorded.patchId`. */
+  patchId: string;
+}
+
+/**
  * Terminal command: end the current run and start a fresh one carrying `args`.
  * The core only emits it and halts; the close-and-restart is a server disposition
  * (`server_core.applyWorkflowTaskResult`). Not something the core ever acts on
@@ -113,8 +184,10 @@ export type Command =
   | ScheduleActivityCommand
   | StartTimerCommand
   | StartChildCommand
+  | StartWorkflowCommand
   | CancelChildCommand
   | SignalWorkflowCommand
+  | RecordPatchCommand
   | ContinueAsNewCommand;
 
 /**
@@ -126,6 +199,8 @@ export type CommandSpec =
   | Omit<ScheduleActivityCommand, 'seq'>
   | Omit<StartTimerCommand, 'seq'>
   | Omit<StartChildCommand, 'seq'>
+  | Omit<StartWorkflowCommand, 'seq'>
   | Omit<CancelChildCommand, 'seq'>
   | Omit<SignalWorkflowCommand, 'seq'>
+  | Omit<RecordPatchCommand, 'seq'>
   | Omit<ContinueAsNewCommand, 'seq'>;

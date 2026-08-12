@@ -24,7 +24,7 @@ const activities = {
   },
 };
 
-const act = proxyActivities<typeof activities>({
+const act = proxyActivities(activities, {
   retry: {maximumAttempts: 5, initialIntervalMs: BACKOFF_MS},
 });
 

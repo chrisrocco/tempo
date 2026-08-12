@@ -140,6 +140,10 @@
  * site still overrides the three values a redeploy needs.
  */
 
+import {
+  activityNameConflicts,
+  registeredActivityImpls,
+} from './activity_registry';
 import type {WorkflowFn} from './core';
 import {createLocalRuntime} from './local_runtime';
 import {DEFAULT_PORT, WORKER_FLAG, flagValue} from './process_flags';
@@ -493,7 +497,48 @@ function composeRemote(args: {
 
 export function startWorker(options: StartWorkerOptions): Worker {
   const workflows = callableEntries(options.workflows);
-  const activities = callableEntries(options.activities);
+  // What the workflows declared via `proxyActivities` first, then what this call
+  // was handed, so an explicitly-passed activity wins over a declared one of the
+  // same name — a caller that supplies its own set (a spec, a test double) is
+  // unaffected by whatever the loaded workflow modules asked for.
+  //
+  // Snapshotted here rather than read through on every task: a worker's registered
+  // set must not shift after `WORKER_READY` has reported what it serves, and `roles`
+  // is derived from it too.
+  const activities = [
+    ...new Map([
+      ...registeredActivityImpls(),
+      ...callableEntries(options.activities),
+    ]),
+  ];
+
+  // A worker refuses to start rather than run an activity it cannot identify.
+  //
+  // Two workflow modules declaring different implementations under one name leaves the
+  // registry holding whichever loaded last, and a worker that started anyway would run
+  // the wrong one — silently, forever, and looking healthy. That is worth refusing.
+  //
+  // **Checked here rather than at registration**, which is the whole reason this is a
+  // deferred check: `proxyActivities` runs at module load, so throwing there fires
+  // while modules are still evaluating, before any handler exists — a process that
+  // crashes on import instead of reporting something actionable. By the time
+  // `startWorker` is called every module has loaded and the picture is complete.
+  //
+  // A name the caller passed explicitly is **not** a conflict: `options.activities`
+  // wins over anything declared, so naming it is exactly how an artifact resolves the
+  // ambiguity, and it is the documented escape hatch.
+  const explicit = new Set(
+    callableEntries(options.activities).map(([name]) => name),
+  );
+  const unresolved = activityNameConflicts().filter(
+    (name) => !explicit.has(name),
+  );
+  if (unresolved.length > 0)
+    throw new Error(
+      `worker "${options.name}" has ${unresolved.length} activity name${unresolved.length === 1 ? '' : 's'} claimed by more than one implementation: ${unresolved.join(', ')}. ` +
+        `Whichever module loaded last would win, so this worker refuses to start rather than run an implementation nobody chose. ` +
+        `Rename one of them, or name the intended implementation in startWorker({activities}), which overrides anything declared.`,
+    );
 
   // Read once, from the process's own arguments past the interpreter and script.
   const argv = process.argv.slice(2);

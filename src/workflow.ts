@@ -37,6 +37,16 @@
  *   bare `fetch`). Only promises the engine resolves are safe, because only those
  *   resolve identically on replay.
  *
+ * One more rule, which is about the *source* rather than about a single run:
+ * **changing which commands a workflow issues is a change to the histories already
+ * recorded against it.** Replay reproduces a run only while the code still asks for
+ * what history holds, so adding, removing or reordering a primitive call is safe
+ * only if no execution has passed that point. When one has, `patched` is how the
+ * new branch is added without diverging them — it reads which side of the change an
+ * execution is on out of its own history, so old and new can share one source. And
+ * when it is missed, a replay that settles an execution while history still holds
+ * work it never issued is stopped rather than published (`core/apply_event`).
+ *
  * ## How the boundary is held today
  *
  * Two entrypoints (this file for workflow code, `index.ts` for hosts) plus a
@@ -47,6 +57,10 @@
  * new feature goes, ask "is this deterministic (history-in, commands-out) or
  * not?" The answer names the layer.
  */
+
+import {registerActivityImpls} from './activity_registry';
+import {createActivityProxy, type ActivityProxy} from './core/workflow_api';
+import type {ActivityOptions} from './protocol';
 
 export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
 export {condition} from './core/condition';
@@ -72,17 +86,88 @@ export {
 } from './core/signals';
 export {
   continueAsNew,
+  deprecatePatch,
   executeChild,
-  proxyActivities,
+  patched,
   runActivity,
   signalWorkflow,
   sleep,
   startChild,
+  startWorkflow,
   workflowInfo,
   type ChildHandle,
   type ChildOptions,
+  type StartWorkflowExternalOptions,
   type WorkflowInfo,
 } from './core/workflow_api';
 
 // author-facing option types (erased at runtime; safe on the deterministic surface)
 export type {ActivityOptions, ParentClosePolicy, RetryPolicy} from './protocol';
+
+export type {ActivityProxy};
+
+/**
+ * Declare the activities a workflow calls: types the proxy from the implementations,
+ * and registers them so a worker that loads this module can serve them.
+ *
+ * ```ts
+ * import * as payments from '../activities/payments';
+ * const act = proxyActivities(payments, {retry: {maximumAttempts: 3}});
+ *
+ * export async function order(id: string): Promise<void> {
+ *   await act.charge(id);
+ * }
+ * ```
+ *
+ * ## Why it takes the implementations
+ *
+ * This used to take only a type — `proxyActivities<typeof payments>(options)` — which
+ * did the typing and nothing else, leaving the implementations to reach the worker by
+ * a second, unrelated route: a flat `activities` object at the entrypoint, maintained
+ * by hand. That holds up for a small artifact and stops holding up for a large
+ * workflow split across helper modules, where the entrypoint must name every
+ * activities module any helper touches. Nothing checks the list, and an omission
+ * surfaces as an execution parking on a retrying activity rather than as a
+ * configuration error.
+ *
+ * Now **declaring that a workflow will call an activity is what registers it.** There
+ * is no list to maintain and no order to get wrong: the entrypoint imports its
+ * workflows, loading them runs these calls, and the worker ends up with exactly the
+ * activities its workflows asked for. `startWorker({activities})` still works and
+ * still wins on a name collision, for a worker that would rather be explicit.
+ *
+ * ## Why this is on the deterministic surface at all
+ *
+ * It touches host state, which nothing else exported from here does. Two things keep
+ * it honest. The registration happens **once, at module load**, not during a replay —
+ * this is a declaration, and calling it inside a workflow function would be a misuse
+ * the same way any module-scope side effect would be. And the proxy it returns is the
+ * pure forwarder `core/workflow_api` builds; nothing about a workflow's execution
+ * changes.
+ *
+ * The wrapper is here rather than in `core/` because `core/` may import only
+ * `protocol/` and must stay a pure function of history. The registry is host state,
+ * so it lives outside, and this file — the seam between author code and host — is
+ * where the two meet.
+ *
+ * ## The one thing to be careful about
+ *
+ * Passing implementations means binding them, and a bound implementation can be
+ * called directly:
+ *
+ * ```ts
+ * await act.charge(id);      // correct — issues a command the engine records
+ * await payments.charge(id); // real I/O inside replay, on every replay
+ * ```
+ *
+ * The second line is why `tools/boundaries.ts` permits this import **only** in the
+ * shape `import * as NAME` where `NAME` is used for nothing but `proxyActivities`.
+ * Reach for the namespace anywhere else in a workflow module and lint fails.
+ */
+export function proxyActivities<A extends object>(
+  impls: A,
+  options: ActivityOptions = {},
+): ActivityProxy<A> {
+  registerActivityImpls(impls);
+  return createActivityProxy<A>(options);
+}

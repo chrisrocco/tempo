@@ -30,13 +30,15 @@ import {startWorker} from '../../src/tempo';
 import {proxyActivities} from '../../src/workflow';
 
 const activities = {
-  greet: (name: string): string => `Hello, ${name}!`,
+  // Unique to this file — see worker_entrypoint.spec.ts on why fixtures cannot share
+  // an activity name.
+  greetForClient: (name: string): string => `Hello, ${name}!`,
 };
 
-const act = proxyActivities<typeof activities>({retry: {maximumAttempts: 1}});
+const act = proxyActivities(activities, {retry: {maximumAttempts: 1}});
 
 async function greeter(name: string): Promise<string> {
-  return act.greet(name);
+  return act.greetForClient(name);
 }
 
 const workflows = {greeter};

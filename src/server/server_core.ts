@@ -54,6 +54,12 @@
  * one place its fix could not see (issue #50). `childCancelRequested` is what
  * closes it.
  *
+ * `recordPatch` is the invariant read from the other end: a command that is
+ * *nothing but* its marker. It dispatches no work, so there is no "record the
+ * dispatch" to do — what it makes durable is a decision workflow code took, so that
+ * a later replay by later code reaches the same fork (see `core/workflow_api.patched`).
+ * It is the one command for which the ordering question below does not arise.
+ *
  * ## Where the marker is written, and how little of that is forced
  *
  * Two branches of `applyCommand` write the marker before dispatching and three
@@ -156,6 +162,7 @@ import type {
   WorkflowTask,
   WorkflowTaskResult,
 } from '../protocol';
+import {ANY_TASK_QUEUE} from '../protocol';
 import {completedSeqs, pendingWork} from './pending_work';
 import {createWorkerRegistry} from './worker_registry';
 import type {
@@ -242,17 +249,22 @@ export interface ServerCoreDeps {
   activityTaskQueue: TaskQueue;
   timerService: TimerService;
   /**
-   * Create a child execution under an id the core has already chosen, and queue
-   * its first task. The id is **not** the host's to invent: a generated one has
-   * to be stable across a restart, and only the core knows the lineage that makes
-   * it so (see `childExecutionId`).
+   * Create an execution under an id the core has already chosen, and queue its
+   * first task. The id is **not** the host's to invent: a generated one has to be
+   * stable across a restart, and only the core knows the lineage that makes it so
+   * (see `childExecutionId`).
+   *
+   * `parent` is absent for a `startWorkflow` dispatch, which is the one caller that
+   * starts an execution with no lineage at all. Optional rather than a second method
+   * because the host does the same work either way — the parent is a field on the
+   * record, and the difference is entirely in what the core hands over.
    */
   launch(
     workflowId: string,
     name: string,
     args: unknown[],
     taskQueue: string,
-    parent: ExecutionParent,
+    parent: ExecutionParent | undefined,
   ): void;
   /** Nudge the (async, in-proc) workflow worker to drain the workflow-task queue. */
   kickWorkflowWorker(): void;
@@ -742,6 +754,42 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           parentOfChild.set(childId, {parentId: workflowId, seq: cmd.seq});
         }
       }
+    } else if (cmd.type === 'startWorkflow') {
+      // The same claim check `startChild` makes, and here it is the entire dedup
+      // story: an independent start threads nothing back, so a caller cannot notice
+      // a duplicate the way a parent awaiting a child would.
+      const existing = await historyStore.get(cmd.targetId);
+      if (existing) {
+        log('workflow.start_reused', {
+          workflowId,
+          seq: cmd.seq,
+          targetId: cmd.targetId,
+          status: existing.status,
+        });
+      } else {
+        // No parent argument, and that is the point of the command rather than an
+        // omission. `recordChild` is deliberately not called either: nothing here
+        // enters `childrenByParent`, so no close policy fires on it and the
+        // cancellation cascade cannot reach it.
+        launch(
+          cmd.targetId,
+          cmd.name,
+          cmd.args,
+          cmd.taskQueue ?? taskQueue,
+          undefined,
+        );
+      }
+      // Marker last, like `startChild`, `cancelChild` and `signalWorkflow`, and
+      // safe for the reason `signalWorkflow` needs and gets from `SignalSource`:
+      // the dispatch is idempotent. Here the claim check above is what provides
+      // it — a replayed command finds the execution it created and correlates.
+      await appendEvent(workflowId, {
+        type: 'workflowStarted',
+        seq: cmd.seq,
+        targetId: cmd.targetId,
+        name: cmd.name,
+        created: !existing,
+      });
     } else if (cmd.type === 'cancelChild') {
       const childId = childrenByParent
         .get(workflowId)
@@ -799,6 +847,23 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         targetId: cmd.targetId,
         signalName: cmd.signalName,
         delivered,
+      });
+    } else if (cmd.type === 'recordPatch') {
+      // The one command with no dispatch at all: the marker *is* the effect. The
+      // workflow decided which side of a version branch it is on and is asking for
+      // that to be durable, so there is nothing to enqueue, nothing to arm, nobody
+      // to tell, and no ordering question to answer — the two writes the section
+      // above weighs against each other are one write here.
+      //
+      // Nothing is logged either. Every other line in this function reports work
+      // entering the system; this reports that a replay agreed with itself, which
+      // is the normal case on every task of every patched execution and would be
+      // pure volume. The marker is in history, which is where an operator asking
+      // "did this execution get the fix" looks.
+      await appendEvent(workflowId, {
+        type: 'patchRecorded',
+        seq: cmd.seq,
+        patchId: cmd.patchId,
       });
     }
   }
@@ -1349,13 +1414,52 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflow: workflowTaskQueue.leaseHolders(),
       activity: activityTaskQueue.leaseHolders(),
     };
-    return workerRegistry.queues().map((queue) => ({
+    const backlog = {
+      workflow: workflowTaskQueue.backlog(),
+      activity: activityTaskQueue.backlog(),
+    };
+
+    const rows = workerRegistry.queues().map((queue) => ({
       ...queue,
+      // The wildcard row is workers that serve *every* pool, not a pool named
+      // `*`; nothing is ever enqueued to it. Its backlog is on the named rows,
+      // and reporting a total here would double-count the same tasks.
+      pendingWorkflowTasks:
+        queue.taskQueue === ANY_TASK_QUEUE
+          ? 0
+          : (backlog.workflow.get(queue.taskQueue) ?? 0),
+      pendingActivities:
+        queue.taskQueue === ANY_TASK_QUEUE
+          ? 0
+          : (backlog.activity.get(queue.taskQueue) ?? 0),
       workers: queue.workers.map((worker) => ({
         ...worker,
         busy: holders[worker.role].has(worker.identity),
       })),
     }));
+
+    // A pool with work and no poller is absent from the registry entirely — it
+    // only knows pools something has *asked* about — so it would be missing from
+    // the one report whose job is to explain a queue nobody is serving. That is
+    // the most urgent row this function can return, and until backlog existed
+    // there was no way to know the pool was there at all.
+    const known = new Set(rows.map((row) => row.taskQueue));
+    for (const taskQueue of [
+      ...backlog.workflow.keys(),
+      ...backlog.activity.keys(),
+    ]) {
+      if (known.has(taskQueue)) continue;
+      known.add(taskQueue);
+      rows.push({
+        taskQueue,
+        pendingWorkflowTasks: backlog.workflow.get(taskQueue) ?? 0,
+        pendingActivities: backlog.activity.get(taskQueue) ?? 0,
+        // No poll timestamps and no workers, which is the whole point: this row
+        // exists to say that nothing has ever asked for this pool's work.
+        workers: [],
+      });
+    }
+    return rows;
   }
 
   async function pollWorkflowTask(

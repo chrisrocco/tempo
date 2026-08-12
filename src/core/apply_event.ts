@@ -3,9 +3,11 @@
  * `applyEvent` routes one recorded history event back into the in-memory promise
  * it belongs to. Signals fan out to their handler (or buffer if none is
  * registered yet); every other event completes the parked promise keyed by its
- * `seq`. This is also where the engine checks that history and code still agree.
+ * `seq`. This is also where the engine checks that history and code still agree —
+ * all three of those checks live here, including the one that is not about an
+ * individual event (`assertHistoryAccounted`, at the bottom).
  *
- * ## Two divergence checks, catching different failures
+ * ## Three divergence checks, catching different failures
  *
  * **A completion for an unknown seq** — nothing is parked on it — means history
  * has an operation the code no longer has. That check has always been here.
@@ -27,6 +29,7 @@
  * | `startChild`       | `childStarted`          | type + **`detached`**          |
  * | `cancelChild`      | `childCancelRequested`  | type + **`targetSeq`**         |
  * | `signalWorkflow`   | `workflowSignaled`      | type + **target + name**       |
+ * | `recordPatch`      | `patchRecorded`         | type + **`patchId`**           |
  *
  * So a swap between two same-named activities with different arguments still
  * slips through; argument comparison is expensive on large payloads and risks
@@ -51,9 +54,44 @@
  * skipped rather than rejected. The check is about *disagreement*; treating
  * silence as a mismatch would fail correct workflows in the cancellation window,
  * where a run stops allocating seqs the moment `cancelRequested` is applied.
+ *
+ * ## Absence is not divergence — until the run says it is finished
+ *
+ * That last paragraph is right about *when an event is applied* and it left a real
+ * failure uncovered, which is the third check below (`assertHistoryAccounted`).
+ *
+ * A run that stops short of a seq history holds a marker for is, mid-flight,
+ * indistinguishable from a correct one: it may simply not have got there yet, and
+ * the cancellation window is a case where it never will and should not. But a run
+ * that **declares itself done** has made that absence permanent and load-bearing.
+ * History says an activity was dispatched and is still running; the workflow
+ * returns; the execution is settled on the strength of a replay that never issued
+ * it. The activity is orphaned, the result is wrong, and nothing is raised — the
+ * event that would have disagreed with the code was never applied, so the two
+ * per-event checks above never look at it.
+ *
+ * That is not a hypothetical. It is the measured failure on issue #52: replayed
+ * under changed replay semantics, an execution whose second stage had *completed*
+ * threw `NondeterminismError` at seq 1, while the same execution with that stage
+ * still in flight completed with `done=true`, `result="abandoned"`, zero commands
+ * and no error. The loud case was the lucky one — and it was lucky twice over,
+ * because it was loud only under a driver that applies a whole batch before running
+ * the workflow. Under *this* loop, which stops the instant the workflow settles,
+ * neither of those two lines throws on its own: the events that would have objected
+ * are never reached. The check below is what makes the half that orphans work loud
+ * under either driver.
+ *
+ * So the rule the two halves share, stated once: **an unaccounted seq is a
+ * question until the run settles, and an answer once it does.** Absence stays
+ * legitimate while the run is still parked — it may yet reach that seq, and a
+ * cancelled run deliberately will not — and becomes a divergence at the moment the
+ * run commits to an outcome that cannot be revised. The check is deliberately not
+ * extended to a parked run: a run wedged before a seq it should have reached is
+ * already counted, bounded and reported as a stuck execution (adoption blocker 2),
+ * whereas a settled one has escaped that machinery entirely by looking successful.
  */
 
-import type {Command, HistoryEvent} from '../protocol';
+import type {Command, CompletionEvent, HistoryEvent} from '../protocol';
 import type {WorkflowContext} from './context';
 import {CancelledFailure, NondeterminismError} from './errors';
 
@@ -63,8 +101,11 @@ function describeCommand(cmd: Command): string {
   if (cmd.type === 'startChild')
     return `startChild${cmd.detached ? ' (detached)' : ''}`;
   if (cmd.type === 'cancelChild') return `cancelChild of seq ${cmd.targetSeq}`;
+  if (cmd.type === 'startWorkflow')
+    return `startWorkflow ${cmd.name} as ${cmd.targetId}`;
   if (cmd.type === 'signalWorkflow')
     return `signalWorkflow ${cmd.signalName} to ${cmd.targetId}`;
+  if (cmd.type === 'recordPatch') return `patched ${cmd.patchId}`;
   return cmd.type;
 }
 
@@ -108,6 +149,29 @@ function markerMismatch(
       return describeCommand(cmd);
     return undefined;
   }
+  if (ev.type === 'workflowStarted') {
+    // Both fields are the workflow's own logic and neither is derived, so both are
+    // checkable — unlike `childStarted`, whose id may have been the engine's to
+    // invent. The id is the sharper of the two: it is the dedup key, so a replay
+    // that computes a different one starts a second execution of work history says
+    // was already started, and nothing notices. An independent start threads no
+    // completion back, so there is no waiter to wedge and no result to come out
+    // wrong — the duplicate simply runs.
+    if (cmd.type !== 'startWorkflow' || cmd.targetId !== ev.targetId)
+      return describeCommand(cmd);
+    if (cmd.name !== ev.name) return `startWorkflow ${cmd.name}`;
+    return undefined;
+  }
+  if (ev.type === 'patchRecorded') {
+    // The id is the whole content of the marker, and comparing it is what makes a
+    // patch retired the wrong way loud. Deleting `if (patched('x'))` without
+    // leaving a `deprecatePatch('x')` behind means this seq — which history has
+    // pinned to a version decision — is handed to whatever command comes next, and
+    // every seq after it shifts by one. Presence-only checking would accept that.
+    if (cmd.type !== 'recordPatch' || cmd.patchId !== ev.patchId)
+      return describeCommand(cmd);
+    return undefined;
+  }
   if (ev.type === 'childStarted') {
     if (cmd.type !== 'startChild' || cmd.detached !== ev.detached)
       return describeCommand(cmd);
@@ -122,15 +186,22 @@ function markerMismatch(
   return undefined;
 }
 
-/** How a marker reads in an error message. */
-function describeMarker(ev: HistoryEvent): string {
+/**
+ * How a recorded event reads in an error message. Markers name what they
+ * dispatched; the completions fall through to their bare type, which is all
+ * `assertHistoryAccounted` needs of them.
+ */
+function describeEvent(ev: HistoryEvent): string {
   if (ev.type === 'activityScheduled') return `activityScheduled ${ev.name}`;
   if (ev.type === 'childStarted')
     return `childStarted ${ev.childId}${ev.detached ? ' (detached)' : ''}`;
+  if (ev.type === 'workflowStarted')
+    return `workflowStarted ${ev.name} as ${ev.targetId}`;
   if (ev.type === 'childCancelRequested')
     return `childCancelRequested of seq ${ev.targetSeq}`;
   if (ev.type === 'workflowSignaled')
     return `workflowSignaled ${ev.signalName} to ${ev.targetId}`;
+  if (ev.type === 'patchRecorded') return `patchRecorded ${ev.patchId}`;
   return ev.type;
 }
 
@@ -145,8 +216,10 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     ev.type === 'activityScheduled' ||
     ev.type === 'timerStarted' ||
     ev.type === 'childStarted' ||
+    ev.type === 'workflowStarted' ||
     ev.type === 'childCancelRequested' ||
-    ev.type === 'workflowSignaled'
+    ev.type === 'workflowSignaled' ||
+    ev.type === 'patchRecorded'
   ) {
     // Markers resolve nothing — their presence in history is what keeps replay
     // from re-dispatching the command. They are, however, the record of what was
@@ -157,7 +230,7 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
       throw new NondeterminismError({
         seq: ev.seq,
         expected: `issued ${mismatch}`,
-        actual: describeMarker(ev),
+        actual: describeEvent(ev),
       });
     return;
   }
@@ -206,4 +279,115 @@ function failureError(ev: {error: string; stack?: string}): Error {
   const error = new Error(ev.error);
   error.stack = ev.stack;
   return error;
+}
+
+/**
+ * Markers for work that is owed something back — a result, a firing.
+ *
+ * The same three kinds `server/pending_work.ts` reports as outstanding, and that is
+ * not a coincidence to be tidied away: both modules are asking about *dispatched
+ * work that has not finished*, from opposite ends. That one says what the execution
+ * is waiting on; this one says whether the code still knows it is. They cannot share
+ * the derivation — `core/` may import only `protocol/`, and putting a rule the
+ * engine needs behind the server would be the wrong direction for the rule as well
+ * as for the import — so the shared fact is the marker invariant in `protocol/`,
+ * which both read.
+ *
+ * A detached child is included even though no completion is ever coming for it. It
+ * is running work, and a parent that no longer issues its `startChild` cannot
+ * `cancelChild` it either — `cancelChild` names the spawning seq, and that seq is
+ * now something else's.
+ *
+ * `workflowStarted` is **excluded**, and the contrast is the point rather than an
+ * inconsistency. What makes an unreached `childStarted` a problem is that the seq was
+ * the only handle on the child; an independent execution was never addressable by seq
+ * to begin with — it is reached by an id the workflow's own logic computed, which a
+ * settling run does not invalidate. Including it would fire on precisely the case the
+ * command exists for: a scheduler that stops starting a run it once started has not
+ * orphaned it, because the run was never the scheduler's to hold. A seq that comes
+ * back as something *else* is still caught, by `markerMismatch` above.
+ */
+function dispatchesWork(ev: HistoryEvent): ev is HistoryEvent & {seq: number} {
+  return (
+    ev.type === 'activityScheduled' ||
+    ev.type === 'timerStarted' ||
+    ev.type === 'childStarted'
+  );
+}
+
+/** The events that close a dispatch, so the seq is owed nothing further. */
+function completesWork(ev: HistoryEvent): ev is CompletionEvent {
+  return (
+    ev.type === 'activityCompleted' ||
+    ev.type === 'activityFailed' ||
+    ev.type === 'timerFired' ||
+    ev.type === 'childCompleted' ||
+    ev.type === 'childFailed'
+  );
+}
+
+/**
+ * The third check: a run that settles must account for every piece of dispatched
+ * work history says is still outstanding.
+ *
+ * Called once, by `replay`, after the event loop has finished. Where the two checks
+ * above compare an event against the command at its seq, this one asks the question
+ * neither of them can — **is there work history recorded as dispatched, and not yet
+ * finished, that this replay never issued a command for?** — and it is answerable
+ * only at the end, because the evidence is the events the run never reached.
+ *
+ * An unaccounted outstanding seq is an activity running right now, a timer armed, or
+ * a child executing, with nothing in the code as written today that will ever hear
+ * from it. Settling the execution anyway publishes a result computed without it and
+ * orphans it, silently. Raising instead makes it a workflow-task failure, which is
+ * what the whole poison-task path is built for — counted, backed off, named in
+ * `Client.describe()`, and **recoverable by redeploying corrected workflow code**,
+ * because nothing durable has been written. The wrong answer would not have been
+ * recoverable.
+ *
+ * ## Three exclusions, and why each is not a hole
+ *
+ * - **A parked run.** It has committed to nothing, so there is nothing yet to be
+ *   wrong about, and mid-flight absence is the legitimate case the module comment
+ *   above defends.
+ * - **A cancelled run.** Cancellation *is* the sanctioned way to stop allocating
+ *   seqs mid-run: `cancelRequested` rejects everything outstanding, and every later
+ *   primitive rejects on creation, so an unwinding run legitimately never reaches
+ *   seqs its history holds.
+ * - **Work that already finished.** A seq whose completion is in history orphans
+ *   nothing: the effect happened, and a run that no longer consumes its result has
+ *   ignored a value rather than abandoned a job. It is also the one shape a
+ *   *correct* workflow reaches without any code change at all —
+ *   `continueAsNewSuggested` is a server-provided input that flips partway through a
+ *   run, so `while (!workflowInfo().continueAsNewSuggested)` legitimately runs fewer
+ *   iterations on a later task than it did on an earlier one, leaving completed
+ *   activities behind it. Checking those would fail that workflow, and the failure
+ *   would be a genuine one to fix in the checker rather than in the workflow.
+ *
+ *   Note what the exclusion does *not* extend to: the same hint flipping while an
+ *   activity is still in flight, so the loop exits with work outstanding. That is
+ *   caught, and rightly — rolling over mid-reconciliation abandons the activity, and
+ *   `WorkflowInfo.continueAsNewSuggested` already says to act on the hint at a clean
+ *   checkpoint. The task failure retries, and the retry that sees the completion
+ *   passes.
+ *
+ * Reported at the **earliest** unaccounted seq, by walking `events` in order: that is
+ * where the two versions of the code parted company, and everything after it is
+ * downstream of that. Two passes over history, on the last replay of an execution's
+ * life.
+ */
+export function assertHistoryAccounted(ctx: WorkflowContext): void {
+  if (!ctx.done && !ctx.failed) return;
+  if (ctx.cancelled) return;
+  const finished = new Set<number>();
+  for (const ev of ctx.events) if (completesWork(ev)) finished.add(ev.seq);
+  for (const ev of ctx.events) {
+    if (!dispatchesWork(ev)) continue;
+    if (finished.has(ev.seq) || ctx.requested.has(ev.seq)) continue;
+    throw new NondeterminismError({
+      seq: ev.seq,
+      expected: 'settled without ever issuing it',
+      actual: describeEvent(ev),
+    });
+  }
 }

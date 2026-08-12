@@ -25,6 +25,7 @@ import {
   createRpcServer,
   createServerHost,
 } from '../../src/services';
+import {isolateActivityRegistry} from '../support/isolate_activity_registry';
 import {DEFAULT_PORT} from '../../src/process_flags';
 import {
   DEFAULT_SERVER_URL,
@@ -38,13 +39,15 @@ import {proxyActivities} from '../../src/workflow';
 /** The reference shape: a module namespace holding a constant and an activity. */
 const activities = {
   GREETING: 'Hello',
-  greet: (name: string): string => `Hello, ${name}!`,
+  // A name unique to this file: the registry is one map for the whole process, so two
+  // fixtures sharing an activity name is a conflict a worker now refuses to start on.
+  greetForEntrypoint: (name: string): string => `Hello, ${name}!`,
 };
 
-const act = proxyActivities<typeof activities>({});
+const act = proxyActivities(activities);
 
 async function greeter(name: string): Promise<string> {
-  return act.greet(name);
+  return act.greetForEntrypoint(name);
 }
 
 const workflows = {greeter};
@@ -116,6 +119,8 @@ async function pollUntil<T>(
 }
 
 describe('worker entrypoint — registering what it was handed', () => {
+  isolateActivityRegistry();
+
   it('registers both halves from the module namespaces it was handed', async () => {
     const server = await startServer();
     try {
@@ -157,6 +162,8 @@ describe('worker entrypoint — registering what it was handed', () => {
 });
 
 describe('worker entrypoint — choosing a server', () => {
+  isolateActivityRegistry();
+
   it('connects to the server it was given in code', async () => {
     const server = await startServer();
     const worker = startWorker({
@@ -248,6 +255,8 @@ describe('worker entrypoint — resolving configuration', () => {
 });
 
 describe('worker entrypoint — what it refuses', () => {
+  isolateActivityRegistry();
+
   it('refuses a role the binary cannot serve', () => {
     launchedWith('--role=activity');
 
@@ -285,6 +294,8 @@ describe('worker entrypoint — what it refuses', () => {
 });
 
 describe('worker entrypoint — the options object is the configuration', () => {
+  isolateActivityRegistry();
+
   it('takes the role from code, with no flag in sight', () => {
     const worker = startWorker({
       name: 'greeter',

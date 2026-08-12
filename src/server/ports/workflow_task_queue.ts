@@ -51,6 +51,18 @@ export interface WorkflowTaskQueue {
    * silent worker is mid-task rather than gone. See `LeaseTable.holders`.
    */
   leaseHolders(): Set<string>;
+  /**
+   * How many executions are waiting for a workflow task, per pool. Same contract
+   * as `TaskQueue.backlog` — waiting rather than outstanding, lapsed leases
+   * counted, pools with nothing waiting absent.
+   *
+   * **Coalescing means this counts executions, not wakes.** An execution woken
+   * five times while its task was in flight is one entry here, because that is
+   * what it is: the queue collapses them into a single re-run. A caller reading
+   * this as "pending work items" would be over-counting a queue that is doing
+   * exactly what it should.
+   */
+  backlog(): ReadonlyMap<string, number>;
   /** Ack a leased task; if a wake arrived while it was in-flight, re-enqueue it. */
   complete(token: TaskToken): void;
 }

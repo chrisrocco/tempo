@@ -76,6 +76,22 @@ export interface WorkflowContext {
    * replaced got wrong (issue #39).
    */
   dispatchedSeqs: Set<number>;
+  /**
+   * The patch id recorded at each seq history holds a `patchRecorded` for — the
+   * durable answers `patched` reads back.
+   *
+   * A refinement of `dispatchedSeqs`, not a replacement: that set answers "is this
+   * seq spoken for", and this map answers "spoken for by *which* patch". `patched`
+   * needs both, and needs them keyed by seq rather than by id, because the fact it
+   * is recovering is which position in the command sequence the decision occupies.
+   * `patch_recorded`'s own comment in `protocol/history_events.ts` owns why.
+   *
+   * Derived up front from `events`, alongside `dispatchedSeqs` and for the same
+   * reason: a workflow can reach a `patched` call before the marker proving its
+   * answer has been taken off the batch, and the answer must not depend on where
+   * replay has got to.
+   */
+  patchesBySeq: Map<number, string>;
   commands: Command[];
   /**
    * Every command this replay issued, by seq — including the ones suppressed
@@ -113,6 +129,21 @@ export interface WorkflowContext {
    * is a new run of the same execution, and its parentage does not change.
    */
   parent?: ExecutionParentView;
+  /**
+   * This execution's own id.
+   *
+   * The most stable fact there is: chosen before the first task and unchanged for
+   * the execution's whole life, including across continue-as-new — a rollover bumps
+   * the run, not the execution. So it is safe to branch on, safe to hand to an
+   * activity, and safe to compose ids from.
+   *
+   * Here because a workflow could see who *started* it and not who it is. `parent`
+   * notes the asymmetry in passing — "an id the engine derived from lineage is not
+   * visible to the workflow that owns it" — and this closes it. The use that forces
+   * it: an activity that hands an external system somewhere to call back, which
+   * needs an address the workflow can only get from itself.
+   */
+  workflowId: string;
   /**
    * What this **run** started with. Constant for the whole run: every task of it
    * is built from the same value, so a read cannot vary between replays. That is
@@ -152,12 +183,34 @@ function seqsInHistory(events: HistoryEvent[]): Set<number> {
   return seqs;
 }
 
+/** The version decisions history already holds, by the seq each was made at. */
+function patchesInHistory(events: HistoryEvent[]): Map<number, string> {
+  const patches = new Map<number, string>();
+  for (const ev of events)
+    if (ev.type === 'patchRecorded') patches.set(ev.seq, ev.patchId);
+  return patches;
+}
+
 /**
  * `parent` is optional where `carryover` is required, and the difference is what
  * a caller that forgets it gets. A missing carryover starts the workflow from
  * empty state, which is indistinguishable from a workflow that wrote none —
  * silent. A missing parent makes `workflowInfo().parent` undefined, which any
  * code that needs it must already handle, because a root execution has none.
+ *
+ * `workflowId` is defaulted rather than required, which by that same argument
+ * wants a defence. Every execution has one, so unlike `parent` there is no honest
+ * "absent" — but the default is `''`, and an empty id is not a valid execution id
+ * anywhere in the system. Code that reaches for one gets a failure at the point of
+ * use (`signalWorkflow('')` addresses nothing, and the client answers `no
+ * execution`) rather than quietly addressing the wrong execution. That is the
+ * difference from carryover, where the empty value is a *legitimate* state and so
+ * cannot fail.
+ *
+ * What buys: the production path threads it from `WorkflowTask.workflowId` and
+ * always has it, while the hand-built contexts in `spec/core` — over a hundred of
+ * them, none about identity — do not acquire a parameter they have nothing to say
+ * about.
  */
 export function createContext(
   args: unknown[],
@@ -165,6 +218,7 @@ export function createContext(
   continueAsNewSuggested = false,
   carryover: Carryover = {},
   parent?: ExecutionParentView,
+  workflowId = '',
 ): WorkflowContext {
   return {
     args,
@@ -178,6 +232,7 @@ export function createContext(
     seq: 0,
     condSeq: 0,
     dispatchedSeqs: seqsInHistory(events),
+    patchesBySeq: patchesInHistory(events),
     commands: [],
     requested: new Map(),
     completions: new Map(),
@@ -191,5 +246,6 @@ export function createContext(
     cancelled: false,
     continueAsNewSuggested,
     parent,
+    workflowId,
   };
 }
