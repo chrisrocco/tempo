@@ -12,7 +12,7 @@
  * codebase that already passes (see spec/architecture.spec.ts). Reading the disk
  * lives separately in `readSourceFiles`.
  *
- * Four rules, each mapping to a claim made elsewhere in the docs:
+ * Three rules, each mapping to a claim made elsewhere in the docs:
  *
  * 1. **Layering** — dependencies point strictly down, and each layer declares what
  *    it may reach. Two are worth calling out: `server/` may NOT import `core/`,
@@ -27,11 +27,12 @@
  * 3. **The author entrypoint** — workflow modules import only `workflow.ts` at
  *    runtime, and obey the same purity rule as the core they run inside. A
  *    statement-level `import type` is exempt; see `checkAuthorEntrypoint`.
- * 4. **Package direction** — the engine must not import the dashboard. The
- *    dashboard depends on the engine and not the reverse, which is what lets the
- *    engine ship with no runtime dependencies. This one is here because the
- *    coupling it forbids is the coupling that actually grew: the engine served
- *    the dashboard while the dashboard reached back into `src/`.
+ *
+ * There was a fourth — package direction, forbidding any mention of `dashboard/`
+ * from `src/`. It guarded a one-way edge between two packages in this repo, and
+ * there is now one package. A rule that can no longer fail is not a weaker rule,
+ * it is a rule about nothing; the boundary it protected is now the published
+ * `exports` map, which a consumer's resolver enforces rather than this file.
  */
 
 import {readdirSync, readFileSync, statSync} from 'node:fs';
@@ -47,7 +48,7 @@ export interface SourceFile {
 export interface Violation {
   path: string;
   line: number;
-  rule: 'layering' | 'core-purity' | 'author-entrypoint' | 'package-direction';
+  rule: 'layering' | 'core-purity' | 'author-entrypoint';
   message: string;
 }
 
@@ -246,44 +247,6 @@ function checkLayering(file: SourceFile, stripped: string): Violation[] {
   return violations;
 }
 
-/**
- * The engine must not name the dashboard **at all** — not in an import, and not
- * in a path it spawns.
- *
- * The dashboard is a separate package that depends on the engine, and that edge
- * points one way. It did not always: the engine used to serve the dashboard —
- * carrying a TypeScript transpiler and an import-map generator to do it — while
- * the dashboard reached back into `src/` for the values it needed.
- *
- * **Why a string scan rather than an import scan.** The first version of this
- * rule only inspected import specifiers, and passed while `cli/up.ts` held
- * `path.resolve('dashboard/server/main.ts')` to spawn it. A hardcoded sibling
- * path is the same dependency as an import and a worse one: it survives type
- * checking, and it breaks in any layout where the process is not run from the
- * repo root. Import specifiers are strings too, so scanning strings covers both
- * with one rule.
- *
- * Comments are exempt because `stripCommentsAndStrings` has already blanked
- * them — explaining the boundary is not crossing it.
- */
-function checkPackageDirection(
-  file: SourceFile,
-  stripped: string,
-): Violation[] {
-  const violations: Violation[] = [];
-  stripped.split('\n').forEach((lineText, idx) => {
-    if (!/(^|['"`/])dashboard\//.test(lineText)) return;
-    violations.push({
-      path: file.path,
-      line: idx + 1,
-      rule: 'package-direction',
-      message:
-        "the engine must not name the dashboard — neither importing it nor spawning it by path. The dashboard depends on the engine and reaches it over the RPC; whatever is needed here belongs in the engine, and starting the dashboard is the operator's job",
-    });
-  });
-  return violations;
-}
-
 function checkPurity(
   file: SourceFile,
   stripped: string,
@@ -371,7 +334,6 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
       continue;
     }
     violations.push(...checkLayering(file, stripped));
-    violations.push(...checkPackageDirection(file, stripped));
     // Both layers run inside a replay, so both are held to determinism. Keying
     // this on `core` alone was safe only while `core` was the only thing that
     // ran there: a helper in `patterns/` is called from workflow code just the
@@ -387,9 +349,9 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
 /**
  * Read every matching file under `root`, returning repo-relative POSIX paths.
  *
- * `extensions` defaults to TypeScript because that is what the boundary rules
- * are about; `tools/conventions.ts` asks for `.html` as well, since one of its
- * rules is about the shell the dashboard ships.
+ * `extensions` stays a parameter, defaulted to TypeScript: `tools/conventions.ts`
+ * reads the same tree through this function and has asked for more than `.ts`
+ * before — it read the dashboard's HTML shell, back when there was one.
  */
 export function readSourceFiles(
   root: string,

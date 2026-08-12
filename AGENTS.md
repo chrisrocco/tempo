@@ -28,42 +28,30 @@ the layering, the ban on clock/randomness/IO inside `core/` and `patterns/`, and
 workflow modules import only `workflow.ts`. Run it with `npm run lint`; the
 suite runs the same rules. When it fails, the message names the layer and why.
 
-**Almost nothing is worth a dependency.** The engine has **none** — its runtime
-allowlist is empty, and that is enforced rather than asserted. The dashboard is
-allowed exactly one, `lit`, plus the engine itself. Not `@lit-labs/*` —
-pre-release by definition — and not `@lit/*` either: "part of Lit" means the
-`lit` package. A router, a virtualizer, a context library are each a few dozen
-lines against the platform, and writing them is cheaper than carrying an
-unstable dependency in infrastructure other things depend on. The dev toolchain
-is a separate, equally short list: TypeScript, `tsx`, Jasmine, Prettier, and
-`esbuild`. This is **checked, not trusted** —
-[`tools/dependencies.ts`](tools/dependencies.ts) holds a list per package, and
-`npm run lint` and the suite both fail on anything else. Adding to a list is
-fine; doing it in the same commit that needs it, with a reason, is the point.
+**Almost nothing is worth a dependency.** This package has **none** at runtime —
+its allowlist is empty, and that is enforced rather than asserted. The dev
+toolchain is a separate, equally short list: TypeScript, `tsx`, Jasmine, and
+Prettier. This is **checked, not trusted** —
+[`tools/dependencies.ts`](tools/dependencies.ts) holds both lists, and `npm run
+lint` and the suite both fail on anything else. Adding to a list is fine; doing
+it in the same commit that needs it, with a reason, is the point.
 
-**There is a bundler now, and there did not used to be.** The old rule was that
-`tsx` was the only thing that executed TypeScript, and the dashboard paid for it:
-it shipped a server that compiled TypeScript _per request_ and generated an
-import map at page load, which put the TypeScript compiler in its runtime
-dependencies. "Compile when asked" is not something a build system can express,
-so the no-bundler rule was the thing standing between this repo and one.
+**There is no build step, and no bundler.** `tsx` executes the TypeScript
+directly; nothing here is compiled before it runs. `esbuild` was on the dev list
+for one job — bundling the dashboard's browser code — and left when the
+dashboard did. Adding a build step to the engine would be its own argument, and
+the argument has never been made.
 
-`esbuild` replaced all of it and deleted more than it added — the transpile
-path, the import map, the vendored-package route, and two flavours of extension
-guessing. It is a single binary driven entirely by command-line flags, so the
-same invocation works from an npm script and from a build rule with no config
-file to keep in step. **It bundles the dashboard's browser code and nothing
-else**: the engine still runs from source under `tsx`, and adding a build step
-to it would be its own argument.
-
-**The dashboard is a separate package, and the edge points one way.** It depends
-on the engine — for the RPC it calls and the projection types it renders — and
-the engine has never heard of it. That is why `lit` is not the engine's problem
-and why `services/` does not contain a TypeScript transpiler. It is also
-**checked**: [`tools/boundaries.ts`](tools/boundaries.ts) fails any mention of
-`dashboard/` from `src/` — an import or a spawned path, since a hardcoded
-sibling path is the same dependency and a worse one. This is exactly the
-coupling that grew last time nothing was watching for it.
+**The operator tooling is not here, and that is the standing decision.** The CLI
+went first, then the deployment kit ([#64](https://github.com/chrisrocco/tempo/issues/64)),
+then the dashboard. Each was written here and could only be falsified somewhere
+else — against a real systemd, in a real browser — so each iteration cost a round
+trip through the repo that owns the thing being tested. What this repo owes them
+instead is that everything they need is on the published surface: the `exports`
+map in `package.json`, and `workflow-engine/protocol` in particular, which
+carries every projection type and both of the predicates (`isStuck`,
+`isQueueServed`) a UI would otherwise reimplement and get subtly wrong. A gap
+there is a bug in this package, not a reason to move the tool back in.
 
 **Put seams behind interfaces, implementations behind them.** `server/ports/`
 declares a contract; `server/memory/` and `server/file/` satisfy it. This splits
@@ -127,9 +115,9 @@ tells them when reopening it _would_ be right.
 
 - **The decision lives with the code it constrains**, in the `@fileoverview`
   of the module that owns the idea. Why the listing's order is not
-  configurable is in `server/execution_query.ts`; why the URL carries a
-  duration rather than an instant is in `dashboard/app/time_range.ts`. If you
-  can't name the owning module, re-read
+  configurable is in `server/execution_query.ts`; why a listing's time bounds
+  cross the wire as instants rather than durations is in
+  `protocol/service.ts`. If you can't name the owning module, re-read
   [Homeless documentation is a design smell](#homeless-documentation-is-a-design-smell)
   — it's the same signal.
 - **Say what it cost to decide, not only what was decided.** "No sort control"
@@ -235,35 +223,6 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
   next door imported the default. Named imports (`import {readFileSync} from
 'node:fs'`), type-only imports, and side-effect imports are untouched by
   this. **Checked** — see below.
-- **A spec under `spec/dashboard/` opens with `import 'jasmine';`.**
-  `describe`/`it`/`expect` otherwise arrive as ambient globals from the root
-  `tsconfig.json`'s `types`, which is a fact about the config rather than about
-  the file. These are the specs sitting against the browser boundary —
-  `dashboard/app/tsconfig.json` already sets `types: []` so ambient globals
-  stop leaking into code that must not have them — so they name their harness
-  and keep type-checking under a config that declares none. The rest of the
-  suite still leans on the root config. **Checked** — see below.
-- **DOM sink writes use bracket notation.** In `dashboard/app/`, a write to
-  `innerHTML`, `href`, `src`, `download` and friends is spelled
-  `anchor['href'] = url`. A DOM security scanner matches `.href =` by _syntax_,
-  so bracket notation is what separates a reviewed write from an unreviewed one
-  — which makes it a claim, and the claim has to be true. It changes what a
-  scanner matches, not what the browser does: say why the value is safe in a
-  comment at the assignment. The export anchor in
-  `dashboard/app/execution_detail.ts` is the worked example. **Checked** — see
-  below.
-- **Browser globals are qualified with `window.`** in `dashboard/app/`:
-  `window.localStorage`, `window.location.hash`, `window.document`,
-  `window.setTimeout`, `window.fetch`. Bare, each of these is
-  indistinguishable at the call site from an import or a local, and the
-  dashboard's other half is Node — where `fetch`, `setTimeout`, and
-  `navigator` all exist with different types and behaviour, and the two halves
-  get edited in the same sitting. The list is window-owned _state and
-  services_, not global constructors: `new URL(…)` and `new Blob(…)` stay as
-  they are, because `new window.Blob()` reads as a mistake and nothing about a
-  constructor is ambient. See `WINDOW_GLOBALS` in
-  [`tools/style.ts`](tools/style.ts) for the exact set. **Checked** — see
-  below.
 - **`function` over arrow functions** for statement functions — including
   helpers in specs, which is where the exceptions used to collect. A `const`
   bound to an arrow is still right when the arrow is a _value_ satisfying a
@@ -276,9 +235,8 @@ format`. What neither Prettier nor the Google guide enforces, apply yourself:
 ### The rules that are checked
 
 `npm run lint` runs [`tools/boundaries.ts`](tools/boundaries.ts) for layering,
-[`tools/conventions.ts`](tools/conventions.ts) for the written-shape rules — the
-ones above, plus a few that are documented in the files they constrain rather
-than here — and [`tools/style.ts`](tools/style.ts) for four a regex cannot decide —
+[`tools/conventions.ts`](tools/conventions.ts) for the namespace-import rule
+above, and [`tools/style.ts`](tools/style.ts) for three a regex cannot decide —
 it builds a real TypeScript program, because "is this a promise?" is a question
 about types and "is this await top-level?" is a question about scope. Its
 `@fileoverview` explains each rule and the failure it prevents; in short:
@@ -288,31 +246,29 @@ about types and "is this await top-level?" is a question about scope. Its
   server to one. Writing `void` is how a deliberate fire-and-forget is
   distinguished from a forgotten `await` — a distinction only the author can
   make, so each `void` here carries a comment saying why.
-- **No top-level `await` anywhere, and no `import.meta`.** The Node half of
-  the repo is CommonJS, which has neither: top-level `await` is TS1378 and a
-  module using it does not run, and `import.meta` is a _syntax_ error rather
-  than a diagnostic. Use `void run().then(…)`, and resolve paths from
-  `__dirname`. `tsconfig.json` says why the module system is what it is.
-- **No unqualified browser global in `dashboard/app/`.** The `window.` rule
-  above, and the clearest case for needing a program rather than a regex:
-  `routes.ts` declares a local named `history`, and the bare word appears over
-  a hundred times across the app. Only the checker can tell that local from
-  `window.history` — which is exactly why the qualified form is worth writing.
+- **No top-level `await` anywhere, and no `import.meta`.** The repo is
+  CommonJS, which has neither: top-level `await` is TS1378 and a module using
+  it does not run, and `import.meta` is a _syntax_ error rather than a
+  diagnostic. Use `void run().then(…)`, and resolve paths from `__dirname`.
+  `tsconfig.json` says why the module system is what it is.
 
 The conventions checker is the one that reads the **whole tree** rather than a
-compiler's view of it — `tools/` and `spec/` are in no tsconfig, the first
-default import it found was in `tools/`, and some of its rules are about files no
-compiler reads at all. Its rules are pure functions over file contents, so
-[`spec/conventions.spec.ts`](spec/conventions.spec.ts) can feed them planted
-breakage; the suite runs them, the same way it runs the boundary and dependency
-rules.
+compiler's view of it — `tools/` and `spec/` are in no tsconfig, and the first
+default import it found was in `tools/`. Its rules are pure functions over file
+contents, so [`spec/conventions.spec.ts`](spec/conventions.spec.ts) can feed
+them planted breakage; the suite runs them, the same way it runs the boundary
+and dependency rules.
 
 One more is enforced by the compiler rather than a tool:
 `noPropertyAccessFromIndexSignature` in `tsconfig.json` requires `obj['key']`
 for anything reached through an index signature, so `process.env['PORT']` and a
-declared field stop looking alike at the call site. It points the same way as the
-bracket-notation rule above without being the same rule: this one is about where
-a property came from, that one about which properties are sinks.
+declared field stop looking alike at the call site.
+
+**Several rules used to live here and no longer do.** A harness import for the
+dashboard's specs, bracket notation on DOM sinks, `window.`-qualified browser
+globals, and an IIFE bundle format were all about browser code, and went with
+the dashboard. Each checker's `@fileoverview` records which of its rules left
+and why, so a rule is not silently reinvented.
 
 ## Testing
 

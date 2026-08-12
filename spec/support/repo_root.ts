@@ -13,7 +13,7 @@
  *
  * `__dirname` is fixed to the file, so it holds under `npm test`, under a
  * process spawned with any working directory, and under a sandbox. It is
- * available because the Node half of this repo is CommonJS — see the note in
+ * available because this repo is CommonJS — see the note in
  * `tsconfig.json` for why it is, which is the same reason as this.
  */
 

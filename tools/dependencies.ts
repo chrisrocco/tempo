@@ -2,10 +2,9 @@
  * @fileoverview
  * The dependency allowlist: what this project is permitted to depend on.
  *
- * The engine has no runtime dependencies at all, and the dashboard is allowed
- * exactly one — `lit`. That is a deliberate constraint rather than an accident
- * of nothing being needed yet, so it is checked here rather than trusted, in the
- * same spirit as `boundaries.ts`.
+ * **Nothing, at runtime.** The list is empty and that is the whole claim — a
+ * deliberate constraint rather than an accident of nothing being needed yet, so
+ * it is checked here rather than trusted, in the same spirit as `boundaries.ts`.
  *
  * The reason is that dependencies are a ratchet. Each one is individually
  * reasonable — a router, a virtualizer, a context library — and the sum is a
@@ -13,28 +12,23 @@
  * durable workflow engine is infrastructure other things depend on; its own
  * footprint is part of its contract.
  *
- * **`@lit-labs/*` is not permitted**, and neither is `@lit/*`. "Part of Lit"
- * means the `lit` package. Labs packages are explicitly pre-release and change
- * shape; the things they offer here (routing, virtualization, context) are each
- * a few dozen lines against the platform, and writing them is cheaper than
- * carrying an unstable dependency. AGENTS.md's dependency section owns the rule.
+ * The dev toolchain is a separate list, deliberately short: a type checker, a TS
+ * runner, a test runner, a formatter.
  *
- * The dev toolchain is a separate list, deliberately short: TypeScript, its
- * runner, the test runner, the formatter, and one bundler.
+ * **There is no bundler on it, and there was.** `esbuild` was argued for rather
+ * than installed, and what it was argued for was the dashboard: that package
+ * had shipped a server compiling TypeScript per request and generating an import
+ * map at page load, which put the TypeScript compiler in its *runtime*
+ * dependencies. `esbuild` deleted all of that. Then the dashboard left this repo
+ * and took the only thing being bundled with it, so the bundler went too — a
+ * tool kept for the day something needs it is exactly the drift this list
+ * exists to prevent. The engine itself has never had a build step: it runs from
+ * source under `tsx`, and adding one to it would be its own argument.
  *
- * **`esbuild` is the bundler, and it was argued for rather than installed.**
- * The rule used to be that there was none, and the cost of that was paid in the
- * dashboard: it shipped a server that compiled TypeScript per request and
- * generated an import map at page load, which put the TypeScript compiler in
- * its *runtime* dependencies. That is not expressible under a real build system
- * — "compile when asked" is not a build step — so the no-bundler rule was the
- * thing standing between this repo and one.
- *
- * It earns its place by deleting more than it adds: the transpile path, the
- * import map, the vendored-package route, and two flavours of extension
- * guessing all went with it. It is also a single binary driven entirely by
- * command-line flags, so the same invocation works from npm and from a build
- * rule with no configuration file to keep in step.
+ * **`lit` used to be permitted, and only in the dashboard.** Two lists were
+ * needed then, one per manifest, so a browser dependency could not creep into
+ * the package claiming to have none. One package, one list, and the rule it was
+ * protecting is now structural.
  */
 
 import {readFileSync} from 'node:fs';
@@ -50,26 +44,12 @@ export interface DependencyViolation {
 }
 
 /**
- * What the **engine** ships to anyone who installs it: nothing.
+ * What this package ships to anyone who installs it: nothing.
  *
- * It was one — `lit`, for a dashboard the engine used to serve. That was
- * backwards, and the dashboard is now its own package that depends on the
- * engine rather than the other way round. An empty list here is the claim the
- * fileoverview makes, finally enforced rather than asserted: adding anything is
- * a decision to argue for out loud.
+ * An empty list is the claim the fileoverview makes, enforced rather than
+ * asserted: adding anything is a decision to argue for out loud.
  */
 const ALLOWED_RUNTIME: readonly string[] = [];
-
-/**
- * The **dashboard**, which is allowed exactly one real dependency plus the
- * engine it reports on.
- *
- * `workflow-engine` is the local package, linked by path — it is what makes a
- * field added to a projection a compile error in the browser code rather than
- * `undefined` at runtime, and it is a one-way edge: the engine does not know
- * this package exists.
- */
-const ALLOWED_DASHBOARD_RUNTIME: readonly string[] = ['lit', 'workflow-engine'];
 
 /**
  * Build and test only. Each earns its place by being something we would
@@ -79,7 +59,6 @@ const ALLOWED_DASHBOARD_RUNTIME: readonly string[] = ['lit', 'workflow-engine'];
 const ALLOWED_DEV = [
   '@types/jasmine',
   '@types/node',
-  'esbuild',
   'jasmine',
   'prettier',
   'tsx',
@@ -92,10 +71,6 @@ const ALLOWED_DEV = [
  * conclude the list is stale and add themselves to it.
  */
 function refusal(name: string, field: string): string {
-  if (name.startsWith('@lit-labs/'))
-    return `${name} is a Lit *labs* package — pre-release by definition, and off the list. Whatever it offers (routing, virtualization, context) is a few dozen lines against the platform here; see AGENTS.md on dependencies`;
-  if (name.startsWith('@lit/'))
-    return `${name} is adjacent to Lit but not Lit — "part of Lit" means the \`lit\` package itself`;
   return `${name} is not on the ${field} allowlist in tools/dependencies.ts. Adding a dependency is a decision to make out loud: put it on the list in the same commit that uses it, with a reason`;
 }
 
@@ -108,13 +83,12 @@ export interface Allowlists {
 /**
  * Every manifest in the repo, and what each may depend on.
  *
- * Two lists rather than one, because the two packages have genuinely different
- * budgets: the engine's is empty and the dashboard's is not. A single list
- * would let a browser dependency creep into the thing that claims to have none.
+ * A list of one, kept as a list: it held two while the dashboard was a second
+ * package with a budget of its own, and the shape is what makes adding a
+ * package a matter of stating its budget rather than rewriting this file.
  */
 const PACKAGES: {dir: string; allow: Allowlists}[] = [
   {dir: '.', allow: {runtime: ALLOWED_RUNTIME, dev: ALLOWED_DEV}},
-  {dir: 'dashboard', allow: {runtime: ALLOWED_DASHBOARD_RUNTIME, dev: []}},
 ];
 
 /** Check a parsed package.json against a pair of allowlists. */
@@ -123,7 +97,7 @@ export function checkDependencies(
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
   },
-  allow: Allowlists = {runtime: ALLOWED_DASHBOARD_RUNTIME, dev: ALLOWED_DEV},
+  allow: Allowlists = {runtime: ALLOWED_RUNTIME, dev: ALLOWED_DEV},
 ): DependencyViolation[] {
   const violations: DependencyViolation[] = [];
   for (const [field, allowed] of [

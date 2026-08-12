@@ -45,7 +45,7 @@ on npm and makes no stability promises — clone it, read it, run it.
 - **Crash recovery** — kill the server mid-workflow, restart, and it continues
 - **Inspection** — an execution's status, history, and what it is currently
   waiting on, derived from history rather than stored and reachable through
-  [`src/client/`](src/client/client.ts) or the dashboard
+  [`src/client/`](src/client/client.ts)
 - **Structured lifecycle log** — JSON Lines on stderr, one event per fact, so
   a run can be aggregated without parsing prose
 - **Task queues** — route work to a pool of workers, so several applications
@@ -133,23 +133,28 @@ console.log(await handle.result()); // Hello, world!
 
 `start`, `describe`, `signal`, `cancel`, `terminate`, `reset`, `list`, `queues`,
 `counts`, and `health` are all there — the whole client-facing surface, so
-nothing needs a raw service. The operator UI is one more process:
-
-```bash
-npm start -w @tempo/dashboard
-```
+nothing needs a raw service.
 
 Configuration is flags with defaults, never the environment — see
 [`src/process_flags.ts`](src/process_flags.ts) for why.
 
 ## Running it yourself
 
-**This library does not deploy itself.** There is no CLI, no `tempo up`, and no
-deployment module. Building the artifacts, installing them, and supervising them
-is yours — and that is a decision rather than a gap, because the build system,
-the machine, and the supervisor are yours too. Anything written here about them
-would be a guess made in a repo that cannot test it, corrected in a repo that
-cannot fix it. (The reasoning in full: issue #64.)
+**This library does not deploy itself, and it has no operator tooling.** There is
+no CLI, no `tempo up`, no deployment module, and no dashboard. Building the
+artifacts, installing them, supervising them, and looking at what they are doing
+are yours — and that is a decision rather than a gap, because the build system,
+the machine, the supervisor, and the browser are yours too. Anything written here
+about them would be a guess made in a repo that cannot test it, corrected in a
+repo that cannot fix it. (The reasoning in full: issue #64.)
+
+What that leaves is a contract rather than a shrug: everything such a tool needs
+is on the published surface. `workflow-engine/protocol` is the wire format —
+`RpcRequest`, `RpcResponse`, every projection type a listing or a describe
+returns, and the two predicates (`isStuck`, `isQueueServed`) whose answers must
+not be guessed at twice. A UI reading them is reading the same definitions the
+server writes, so a field added to a projection is a compile error in the tool
+rather than `undefined` at runtime. A gap there is a bug here.
 
 What this library gives a deployment is **two entrypoints, one per artifact** —
 each a file whose whole body is one call:

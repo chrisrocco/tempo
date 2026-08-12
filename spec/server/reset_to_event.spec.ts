@@ -42,7 +42,8 @@ function wait(ms: number): Promise<void> {
  * Not through `createLocalRuntime`: `Runtime` is the author-facing surface and
  * does not expose reset, which is deliberate — whether a workflow author should
  * be able to rewind their own execution is a separate question from whether an
- * operator can. The dashboard reaches this through the RPC, which is this seam.
+ * operator can. An operator tool reaches this through the RPC, which is this
+ * seam.
  */
 function serviceOver(
   store: HistoryStore,
