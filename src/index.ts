@@ -57,8 +57,6 @@ export {startServer, type Server, type StartServerOptions} from './server_main';
 export {
   DEFAULT_SERVER_URL,
   Tempo,
-  registerActivities,
-  resetRegisteredActivities,
   startWorker,
   type StartWorkerOptions,
   type Worker,

@@ -7,13 +7,6 @@
  * from './activities'`). The export name is the registered name, so there is no
  * registration boilerplate.
  *
- * Activities may instead register themselves where they are defined, with
- * `Tempo.registerActivities({greet})` at module scope — the `customElements.define`
- * shape, which makes it impossible to define an activity and forget to wire it.
- * That is a *default* the options object overrides rather than a replacement; see
- * `registeredActivities` for what a process-global buys and costs, and why there is
- * no `registerWorkflows`.
- *
  * **The configuration is `StartWorkerOptions`** — see "The options object is the
  * configuration" below. Everything else is what can reach a worker from outside
  * that object, and there is deliberately little of it:
@@ -261,77 +254,6 @@ function callableEntries(source: object | undefined): [string, AnyFn][] {
 }
 
 /**
- * Activities registered at module scope, waiting for a worker to pick them up.
- *
- * Process-global mutable state, which nothing else in this repo has, so it is worth
- * saying what buys it. The model is `customElements.define`: a definition registers
- * itself where it is written, so an activity cannot be defined and then forgotten
- * on the way to a worker. That failure is otherwise invisible until an execution
- * parks — `activity_worker` answers an unregistered name with `no activity <name>`,
- * which is an activity *failure*, so it retries with backoff rather than telling
- * anyone the worker is misconfigured.
- *
- * The web platform found one global registry insufficient for exactly the reason it
- * is a risk here — tests. Scoped custom element registries exist because a single
- * global broke test isolation and micro-frontends, and this repo builds 42 local
- * runtimes in one spec file. So this is a **default**, not the mechanism:
- * `startWorker` merges it with whatever it was handed, explicitly-passed activities
- * win, and everything that needs isolation keeps passing them. Nothing that worked
- * before behaves differently.
- */
-const registeredActivities = new Map<string, AnyFn>();
-
-/**
- * Register activities from the module that defines them.
- *
- * ```ts
- * export function greet(name: string): string { … }
- * Tempo.registerActivities({greet});
- * ```
- *
- * The key is the registered name, exactly as it is when the module namespace is
- * handed to `startWorker` — this changes where registration is written, not how a
- * name is chosen. Non-callable properties are ignored, so passing a whole module
- * namespace that also exports constants is fine.
- *
- * **Re-registering the same function under the same name is a no-op**, because a
- * module genuinely can evaluate twice — resolved through two paths, or in both a
- * bundle and a `require` — and that is not a mistake anyone made. Registering a
- * *different* function under a name already taken throws, like
- * `customElements.define`: silently keeping one of two implementations is the kind
- * of wrong that surfaces as an activity behaving oddly in production.
- *
- * **There is no `registerWorkflows`, and there cannot be.** Workflow modules may
- * import only `workflow.ts` — `tools/boundaries.ts` enforces it — so workflow code
- * calling into this entrypoint is a boundary violation by construction. The
- * asymmetry is the determinism boundary showing through rather than a decision:
- * activities are ordinary code that may do I/O, workflows are code that must not
- * reach the host at all.
- */
-export function registerActivities(activities: object): void {
-  for (const [name, fn] of callableEntries(activities)) {
-    const existing = registeredActivities.get(name);
-    if (existing && existing !== fn)
-      throw new Error(
-        `activity "${name}" is already registered as a different function — two modules cannot claim one name, because whichever won would be silent`,
-      );
-    registeredActivities.set(name, fn);
-  }
-}
-
-/**
- * Forget everything `registerActivities` recorded.
- *
- * Exists because a process-global registry needs one, and specs are the reason:
- * without it, a module imported by one spec would leak into every spec after it.
- * That is the cost of globalness made explicit rather than hidden — production code
- * has no reason to call this.
- */
-export function resetRegisteredActivities(): void {
-  registeredActivities.clear();
-}
-
-/**
  * Where a remote worker connects. The launch site wins over the code, so the
  * artifact redeploys against another server without a rebuild; the code's value
  * is the default it ships with.
@@ -571,20 +493,7 @@ function composeRemote(args: {
 
 export function startWorker(options: StartWorkerOptions): Worker {
   const workflows = callableEntries(options.workflows);
-  // Module-scope registrations first, then what this call was handed, so an
-  // explicitly-passed activity wins over a registered one of the same name. That
-  // ordering is what keeps the global a default: a spec or a runtime that passes
-  // its own set is unaffected by whatever else the process has imported.
-  //
-  // Snapshotted here rather than read through on every task: a worker's registered
-  // set should not shift under it mid-life, and `roles` and the `WORKER_READY` line
-  // are both derived from it.
-  const activities = [
-    ...new Map([
-      ...registeredActivities,
-      ...callableEntries(options.activities),
-    ]),
-  ];
+  const activities = callableEntries(options.activities);
 
   // Read once, from the process's own arguments past the interpreter and script.
   const argv = process.argv.slice(2);
@@ -702,8 +611,4 @@ function startLocalRun(
 }
 
 /** The namespace a worker entrypoint imports: `Tempo.startWorker({...})`. */
-export const Tempo = {
-  startWorker,
-  registerActivities,
-  resetRegisteredActivities,
-};
+export const Tempo = {startWorker};
