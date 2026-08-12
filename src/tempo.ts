@@ -140,6 +140,7 @@
  * site still overrides the three values a redeploy needs.
  */
 
+import {registeredActivityImpls} from './activity_registry';
 import type {WorkflowFn} from './core';
 import {createLocalRuntime} from './local_runtime';
 import {DEFAULT_PORT, WORKER_FLAG, flagValue} from './process_flags';
@@ -493,7 +494,20 @@ function composeRemote(args: {
 
 export function startWorker(options: StartWorkerOptions): Worker {
   const workflows = callableEntries(options.workflows);
-  const activities = callableEntries(options.activities);
+  // What the workflows declared via `defineActivities` first, then what this call
+  // was handed, so an explicitly-passed activity wins over a declared one of the
+  // same name — a caller that supplies its own set (a spec, a test double) is
+  // unaffected by whatever the loaded workflow modules asked for.
+  //
+  // Snapshotted here rather than read through on every task: a worker's registered
+  // set must not shift after `WORKER_READY` has reported what it serves, and `roles`
+  // is derived from it too.
+  const activities = [
+    ...new Map([
+      ...registeredActivityImpls(),
+      ...callableEntries(options.activities),
+    ]),
+  ];
 
   // Read once, from the process's own arguments past the interpreter and script.
   const argv = process.argv.slice(2);
