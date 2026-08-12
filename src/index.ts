@@ -27,6 +27,8 @@ export type {ExecutionRecord, HistoryStore} from './server';
 export {
   DEFAULT_SERVER_URL,
   Tempo,
+  registerActivities,
+  resetRegisteredActivities,
   startWorker,
   type StartWorkerOptions,
   type Worker,
