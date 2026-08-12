@@ -54,6 +54,12 @@
  * one place its fix could not see (issue #50). `childCancelRequested` is what
  * closes it.
  *
+ * `recordPatch` is the invariant read from the other end: a command that is
+ * *nothing but* its marker. It dispatches no work, so there is no "record the
+ * dispatch" to do — what it makes durable is a decision workflow code took, so that
+ * a later replay by later code reaches the same fork (see `core/workflow_api.patched`).
+ * It is the one command for which the ordering question below does not arise.
+ *
  * ## Where the marker is written, and how little of that is forced
  *
  * Two branches of `applyCommand` write the marker before dispatching and three
@@ -800,6 +806,23 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         targetId: cmd.targetId,
         signalName: cmd.signalName,
         delivered,
+      });
+    } else if (cmd.type === 'recordPatch') {
+      // The one command with no dispatch at all: the marker *is* the effect. The
+      // workflow decided which side of a version branch it is on and is asking for
+      // that to be durable, so there is nothing to enqueue, nothing to arm, nobody
+      // to tell, and no ordering question to answer — the two writes the section
+      // above weighs against each other are one write here.
+      //
+      // Nothing is logged either. Every other line in this function reports work
+      // entering the system; this reports that a replay agreed with itself, which
+      // is the normal case on every task of every patched execution and would be
+      // pure volume. The marker is in history, which is where an operator asking
+      // "did this execution get the fix" looks.
+      await appendEvent(workflowId, {
+        type: 'patchRecorded',
+        seq: cmd.seq,
+        patchId: cmd.patchId,
       });
     }
   }

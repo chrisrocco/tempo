@@ -37,6 +37,16 @@
  *   bare `fetch`). Only promises the engine resolves are safe, because only those
  *   resolve identically on replay.
  *
+ * One more rule, which is about the *source* rather than about a single run:
+ * **changing which commands a workflow issues is a change to the histories already
+ * recorded against it.** Replay reproduces a run only while the code still asks for
+ * what history holds, so adding, removing or reordering a primitive call is safe
+ * only if no execution has passed that point. When one has, `patched` is how the
+ * new branch is added without diverging them — it reads which side of the change an
+ * execution is on out of its own history, so old and new can share one source. And
+ * when it is missed, a replay that settles an execution while history still holds
+ * work it never issued is stopped rather than published (`core/apply_event`).
+ *
  * ## How the boundary is held today
  *
  * Two entrypoints (this file for workflow code, `index.ts` for hosts) plus a
@@ -76,7 +86,9 @@ export {
 } from './core/signals';
 export {
   continueAsNew,
+  deprecatePatch,
   executeChild,
+  patched,
   runActivity,
   signalWorkflow,
   sleep,

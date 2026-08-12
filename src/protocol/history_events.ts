@@ -12,6 +12,12 @@
  * command leaves one (see `server_core`), so they are not a union worth naming —
  * but they are the reason "has a seq" and "completes something" are different
  * questions.
+ *
+ * `patchRecorded` is the one marker that does not record a dispatch. It records a
+ * *decision* the workflow made — which side of a version branch it took — and it is
+ * the only event here that workflow code reads back. It is still a marker in the
+ * sense that matters: it holds a seq, it completes nothing, and its presence is what
+ * keeps replay from re-deciding.
  */
 
 import type {ActivityOptions} from './activity_options';
@@ -239,6 +245,58 @@ export interface WorkflowSignaledEvent extends HistoryEventBase {
 }
 
 /**
+ * Marker: the workflow took the patched branch of `patched(patchId)` at this seq.
+ *
+ * The only marker that records a **decision** rather than a dispatch, and the only
+ * one whose value is read back by workflow code. Everything else here is written so
+ * that replay does not repeat an effect; this is written so that replay reaches the
+ * same fork in the road. `core/workflow_api.patched` owns the argument for why the
+ * decision cannot simply be recomputed — in short, the code that would recompute it
+ * is the code that changed.
+ *
+ * ## Its seq is the whole mechanism
+ *
+ * A version branch changes how many commands the workflow issues, and `seq` is
+ * assigned in call order, so a branch decided differently on a later replay
+ * renumbers everything after it. This marker is keyed by seq for exactly that
+ * reason: it does not merely say "this execution is patched", it says **which
+ * position in the command sequence the decision occupies.** That is what lets
+ * `patched` answer by asking one question of history — *what does this seq already
+ * hold?* — and get an answer that is stable for the life of the execution:
+ *
+ * - this marker, with this id → the patched branch was taken here, take it again;
+ * - some other event → pre-patch code owned this seq, so the pre-patch branch was
+ *   taken here and must be taken again;
+ * - nothing at all → no code has ever reached this seq, so nothing is owed and the
+ *   decision is free to be made now and recorded.
+ *
+ * A patch-id-keyed marker with no seq would answer the first question and not the
+ * third, which is the case that matters: an id-keyed set says "this execution is
+ * patched" and therefore says it about the iterations of a loop that ran *before*
+ * the patch shipped, renumbering their commands on the next replay.
+ *
+ * ## One per call, not one per execution
+ *
+ * A `patched` call inside a loop records a marker per iteration, because each
+ * iteration is a separate position in the command sequence and each is pinned
+ * separately. Deduplicating by id would be cheaper in bytes and wrong in the way
+ * above. The cost is real for a long-lived workflow — it is one more event per
+ * iteration, on the executions that already care most about history size — and the
+ * answer to it is the answer to history growth generally: `continueAsNew`. A run
+ * that rolls over starts with no patch markers and re-decides from the frontier,
+ * which is correct, because it also starts with no commands for them to renumber.
+ *
+ * Carries no `delivered`, no payload, and nothing else: the id and the seq are the
+ * whole fact.
+ */
+export interface PatchRecordedEvent extends HistoryEventBase {
+  type: 'patchRecorded';
+  seq: number;
+  /** The author's name for one change, as passed to `patched`. */
+  patchId: string;
+}
+
+/**
  * Which dispatch produced a signal, when a workflow sent it.
  *
  * Two jobs, and the second is the load-bearing one:
@@ -318,5 +376,6 @@ export type HistoryEvent =
   | ChildStartedEvent
   | ChildCancelRequestedEvent
   | WorkflowSignaledEvent
+  | PatchRecordedEvent
   | SignalEvent
   | CancelRequestedEvent;

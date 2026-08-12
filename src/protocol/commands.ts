@@ -99,6 +99,27 @@ export interface SignalWorkflowCommand extends CommandBase {
 }
 
 /**
+ * Pin a version branch: record that the workflow took the patched side of
+ * `patched(patchId)` at this seq.
+ *
+ * The one command whose entire purpose is its marker. Every other command asks
+ * the server to *do* something and leaves a marker as evidence; this one asks for
+ * the evidence and nothing else, because the thing being made durable is a
+ * decision the workflow already made. `core/workflow_api.patched` owns the
+ * reasoning for why the decision has to be durable at all.
+ *
+ * `patchId` is on the command as well as on the marker so the divergence check
+ * has two sides to compare (`core/apply_event`). Without it a patch marker could
+ * only be checked for *presence*, and swapping two adjacent patches — which
+ * changes which branch each execution takes — would read as agreement.
+ */
+export interface RecordPatchCommand extends CommandBase {
+  type: 'recordPatch';
+  /** The author's name for one change. Compared against `patchRecorded.patchId`. */
+  patchId: string;
+}
+
+/**
  * Terminal command: end the current run and start a fresh one carrying `args`.
  * The core only emits it and halts; the close-and-restart is a server disposition
  * (`server_core.applyWorkflowTaskResult`). Not something the core ever acts on
@@ -115,6 +136,7 @@ export type Command =
   | StartChildCommand
   | CancelChildCommand
   | SignalWorkflowCommand
+  | RecordPatchCommand
   | ContinueAsNewCommand;
 
 /**
@@ -128,4 +150,5 @@ export type CommandSpec =
   | Omit<StartChildCommand, 'seq'>
   | Omit<CancelChildCommand, 'seq'>
   | Omit<SignalWorkflowCommand, 'seq'>
+  | Omit<RecordPatchCommand, 'seq'>
   | Omit<ContinueAsNewCommand, 'seq'>;

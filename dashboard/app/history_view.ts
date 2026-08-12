@@ -127,6 +127,14 @@ export function describeEvent(event: HistoryEvent): EventView {
             label: `signal ${event.signalName} undelivered — no running ${event.targetId}`,
             tone: 'danger',
           };
+    case 'patchRecorded':
+      // Phrased as what it lets a reader conclude rather than as the mechanism.
+      // The question this row answers is "did this execution get the change?", and
+      // the answer is yes for every execution whose history contains one.
+      return {
+        label: `adopted change "${event.patchId}"`,
+        tone: 'muted',
+      };
     case 'cancelRequested':
       return {label: 'cancellation requested', tone: 'danger'};
     default:
@@ -137,13 +145,13 @@ export function describeEvent(event: HistoryEvent): EventView {
 /**
  * The families a reader narrows a history to.
  *
- * Five, rather than the eleven event types, because the question is never "show me
+ * Six, rather than the twelve event types, because the question is never "show me
  * `activityFailed`" — it is "show me the activities", and a dispatch is only
  * legible next to its outcome. Splitting them would let a reader filter to the
  * failures and lose the `activityScheduled` rows that say which activity failed.
  */
 export type EventCategory =
-  'activity' | 'timer' | 'child' | 'signal' | 'cancellation';
+  'activity' | 'timer' | 'child' | 'signal' | 'version' | 'cancellation';
 
 /** Every category, in the order the filter offers them. */
 export const EVENT_CATEGORIES: readonly EventCategory[] = [
@@ -151,6 +159,7 @@ export const EVENT_CATEGORIES: readonly EventCategory[] = [
   'timer',
   'child',
   'signal',
+  'version',
   'cancellation',
 ];
 
@@ -187,6 +196,13 @@ export function eventCategory(event: HistoryEvent): EventCategory {
     // is having, not only the half aimed at it.
     case 'workflowSignaled':
       return 'signal';
+    // Its own family, and the one filter that answers a question about the *code*
+    // rather than about the work: "which changes has this execution adopted, and
+    // where did it pick each one up". Filed with nothing else because it pairs with
+    // nothing else — there is no outcome event to sit beside, and the rows are
+    // interesting precisely as a set.
+    case 'patchRecorded':
+      return 'version';
     case 'cancelRequested':
       return 'cancellation';
     default:

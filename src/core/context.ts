@@ -76,6 +76,22 @@ export interface WorkflowContext {
    * replaced got wrong (issue #39).
    */
   dispatchedSeqs: Set<number>;
+  /**
+   * The patch id recorded at each seq history holds a `patchRecorded` for — the
+   * durable answers `patched` reads back.
+   *
+   * A refinement of `dispatchedSeqs`, not a replacement: that set answers "is this
+   * seq spoken for", and this map answers "spoken for by *which* patch". `patched`
+   * needs both, and needs them keyed by seq rather than by id, because the fact it
+   * is recovering is which position in the command sequence the decision occupies.
+   * `patch_recorded`'s own comment in `protocol/history_events.ts` owns why.
+   *
+   * Derived up front from `events`, alongside `dispatchedSeqs` and for the same
+   * reason: a workflow can reach a `patched` call before the marker proving its
+   * answer has been taken off the batch, and the answer must not depend on where
+   * replay has got to.
+   */
+  patchesBySeq: Map<number, string>;
   commands: Command[];
   /**
    * Every command this replay issued, by seq — including the ones suppressed
@@ -152,6 +168,14 @@ function seqsInHistory(events: HistoryEvent[]): Set<number> {
   return seqs;
 }
 
+/** The version decisions history already holds, by the seq each was made at. */
+function patchesInHistory(events: HistoryEvent[]): Map<number, string> {
+  const patches = new Map<number, string>();
+  for (const ev of events)
+    if (ev.type === 'patchRecorded') patches.set(ev.seq, ev.patchId);
+  return patches;
+}
+
 /**
  * `parent` is optional where `carryover` is required, and the difference is what
  * a caller that forgets it gets. A missing carryover starts the workflow from
@@ -178,6 +202,7 @@ export function createContext(
     seq: 0,
     condSeq: 0,
     dispatchedSeqs: seqsInHistory(events),
+    patchesBySeq: patchesInHistory(events),
     commands: [],
     requested: new Map(),
     completions: new Map(),

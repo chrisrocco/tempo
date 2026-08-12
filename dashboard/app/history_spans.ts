@@ -181,6 +181,17 @@ export function buildTimeline(
           tone: event.delivered ? 'accent' : 'danger',
         });
         break;
+      // A mark for the same reason the two above are, taken to its limit: a version
+      // decision has no duration even in principle. It is not work that was started
+      // and later finished; it is a fork the replay passed through, and the useful
+      // thing about it on a time axis is *when* the execution picked the change up.
+      case 'patchRecorded':
+        marks.push({
+          at,
+          label: `adopted change "${event.patchId}"`,
+          tone: 'muted',
+        });
+        break;
       case 'cancelRequested':
         marks.push({at, label: 'cancellation requested', tone: 'danger'});
         break;
