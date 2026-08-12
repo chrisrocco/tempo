@@ -40,6 +40,25 @@ export interface TaskQueue {
    * See `LeaseTable.holders`.
    */
   leaseHolders(): Set<string>;
+  /**
+   * How many activity tasks are waiting to be handed out, per pool.
+   *
+   * **Waiting, not outstanding.** A task a worker is holding a live lease on is
+   * being worked and is not backlog; `leaseHolders` is what reports those. A
+   * task whose lease has *lapsed* is counted here, because it is going back out
+   * on the next poll — and on a pool nobody is polling, that next poll never
+   * comes, which is precisely the pool an operator is asking about.
+   *
+   * Keyed by pool name, and pools with nothing waiting are absent rather than
+   * present with a zero — the map's keys are then "pools with work", which is
+   * what lets a caller notice a pool that has a backlog and no workers at all.
+   * That pool is invisible everywhere else: the worker registry only knows pools
+   * something has *polled*.
+   *
+   * A count, not a promise about the future: it is a live reading of an
+   * in-memory queue, and says nothing about how long any of it has waited.
+   */
+  backlog(): ReadonlyMap<string, number>;
   /** Ack a leased task. A token whose lease already expired is a no-op (redelivered). */
   complete(token: TaskToken): void;
   /**
