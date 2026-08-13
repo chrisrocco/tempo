@@ -18,6 +18,16 @@
  * the only event here that workflow code reads back. It is still a marker in the
  * sense that matters: it holds a seq, it completes nothing, and its presence is what
  * keeps replay from re-deciding.
+ *
+ * A fourth family completes nothing *and* suppresses nothing: **informational**
+ * events, written for whoever reads the execution later rather than for replay.
+ * `activityStarted`, `activityRetryScheduled`, `conditionParked` and
+ * `conditionUnparked` are these. Three properties separate them from markers, and
+ * `applyEvent` depends on all three: nothing on replay resolves or is suppressed by
+ * them, several may share one key, and their absence from a history written before
+ * they existed is not a divergence. They exist because an engine whose value is
+ * answering "what happened" should not leave its two commonest waiting states —
+ * a backoff gap and a parked condition — as blanks between events.
  */
 
 import type {ActivityOptions} from './activity_options';
@@ -164,6 +174,70 @@ export interface ActivityStartedEvent extends HistoryEventBase {
    * (issue #65).
    */
   identity?: string;
+}
+
+/**
+ * An attempt failed and another is due — the gap between two `activityStarted`s.
+ *
+ * ## What it is for
+ *
+ * `activityStarted` made attempts legible; it did not make the *space between*
+ * them legible. A started attempt with no completion after it means one of two
+ * opposite things — the attempt is running right now, or it failed and the seq is
+ * idle until its backoff expires — and history had no way to say which. Every
+ * reader therefore painted a retrying activity as busy, which is the reading most
+ * likely to be wrong and the least likely to prompt anyone to look.
+ *
+ * `PendingActivityView.nextAttemptAt` answers this, and is deliberately not
+ * enough. It is *live* state: it exists while a backoff is outstanding and is
+ * cleared when the activity settles. So the question is answerable about an
+ * execution retrying right now and unanswerable about one that retried an hour
+ * ago — and the second is what a timeline is, a reconstruction from events alone.
+ *
+ * ## The reversal, named
+ *
+ * `ServerCore.reportActivityResult` argued that what stays out of history is "a
+ * second event per *failure*". This is that event, and the reasoning it displaces
+ * was narrower than it looked rather than wrong: the bloat is bounded by
+ * `maximumAttempts`, a number the author chose, so a policy allowing five attempts
+ * admits at most four of these. The argument was written against an unbounded
+ * per-failure stream. What the attempt counter it defended does is answer the same
+ * question *live*, which is the half that was never in dispute.
+ *
+ * `error` is here because it is otherwise destroyed. `activityFailed` records the
+ * *final* failure; each earlier one overwrites the last in the attempt counter, so
+ * an activity that failed three different ways before succeeding keeps none of
+ * them — and a flap's first failure is usually the one that explains it.
+ */
+export interface ActivityRetryScheduledEvent extends HistoryEventBase {
+  type: 'activityRetryScheduled';
+  /**
+   * The `scheduleActivity` seq. Not unique across events, for the same reason
+   * `activityStarted` is not: a retried activity produces one of each per round.
+   */
+  seq: number;
+  /**
+   * The attempt that **failed**, counting from 1.
+   *
+   * Deliberately the opposite convention from `PendingActivityView.attempt`, which
+   * is the attempt about to *run*. Both are right for what they describe — an event
+   * records something that happened, a pending view claims what is next — and the
+   * pair is exactly the off-by-one that type's own doc warns about. `attempt + 1`
+   * is what runs next.
+   */
+  attempt: number;
+  /** How many the policy allows in all, so a reader need not join to the dispatch. */
+  maxAttempts: number;
+  /** When the next attempt is due, epoch ms. */
+  nextAttemptAt: number;
+  /**
+   * Why this attempt failed.
+   *
+   * A message and no stack, which is the one economy taken here: a stack per
+   * failed attempt is the part that would actually grow, and the final failure —
+   * the one most likely to be opened — keeps its stack on `activityFailed`.
+   */
+  error: string;
 }
 
 /**
@@ -386,6 +460,64 @@ export interface PatchRecordedEvent extends HistoryEventBase {
 }
 
 /**
+ * The workflow parked on a `condition()`, and which one.
+ *
+ * The one state a workflow can be in that history has never recorded. `condition`
+ * leaves no history *by design* — that is what makes it free — and the cost is
+ * that an execution waiting correctly and an execution wedged are identical from
+ * events alone: both are a running record whose last event is arbitrarily old.
+ * `ParkedCondition` answers that, and answers it only for right now.
+ *
+ * For a scheduler this is not a gap at the margin. A paused schedule parks with no
+ * timer at all, deliberately, so *nothing* is pending and *nothing* enters history
+ * for as long as the pause lasts — see `schedule/scheduler.workflow.ts`.
+ * Reconstructed from events, the healthiest state that workflow has is
+ * indistinguishable from its worst.
+ *
+ * ## Transitions, not evaluations
+ *
+ * Written when the parked set *changes*, never per check. `condition` is
+ * re-evaluated at every activation, so an event per evaluation would put a
+ * workflow's history in proportion to how often it is woken — which, for anything
+ * signal-driven, is the one thing history must not scale with. A condition still
+ * parked across ten tasks appends nothing on nine of them.
+ */
+export interface ConditionParkedEvent extends HistoryEventBase {
+  type: 'conditionParked';
+  /**
+   * The condition's id, from the `condSeq` counter.
+   *
+   * **Not a command seq, and named so it cannot be mistaken for one.** Parking is
+   * deliberately kept out of command numbering (see `ParkedCondition.seq`), so
+   * this shares no space with the `seq` on every other event here: no marker check
+   * applies to it, no completion is owed for it, and `assertHistoryAccounted` must
+   * not count it as dispatched work.
+   */
+  condSeq: number;
+  /** Where `condition()` was called, innermost first. Absent when uncaptured. */
+  site?: string;
+}
+
+/**
+ * A parked condition is no longer parked.
+ *
+ * Named for the state change rather than its cause, because the cause is not
+ * always satisfaction: a cancelled run rejects every blocked condition, and a
+ * settling one reports an empty parked set. `conditionResolved` would have been
+ * the more natural word and a claim this event cannot support.
+ *
+ * Its job is to *close the span* the park opened. Without it a reader has to infer
+ * that a park ended because some later event exists, which is wrong precisely when
+ * a workflow parks again on the same line — the loop case, where the spans it
+ * would merge are the ones worth telling apart.
+ */
+export interface ConditionUnparkedEvent extends HistoryEventBase {
+  type: 'conditionUnparked';
+  /** The `conditionParked.condSeq` this closes. */
+  condSeq: number;
+}
+
+/**
  * Which dispatch produced a signal, when a workflow sent it.
  *
  * Two jobs, and the second is the load-bearing one:
@@ -462,11 +594,14 @@ export type HistoryEvent =
   | CompletionEvent
   | ActivityScheduledEvent
   | ActivityStartedEvent
+  | ActivityRetryScheduledEvent
   | TimerStartedEvent
   | ChildStartedEvent
   | WorkflowStartedEvent
   | ChildCancelRequestedEvent
   | WorkflowSignaledEvent
   | PatchRecordedEvent
+  | ConditionParkedEvent
+  | ConditionUnparkedEvent
   | SignalEvent
   | CancelRequestedEvent;

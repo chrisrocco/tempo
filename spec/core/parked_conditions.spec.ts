@@ -162,9 +162,17 @@ describe('capturing a park site — what it must not do', () => {
     await expectAsync(handle.result()).toBeResolvedTo('went');
 
     const history = (await store.get('q-1'))!.history;
-    // A signal and nothing else: no command was emitted, so no marker exists,
-    // and the capture added neither.
-    expect(history.map((e) => e.type)).toEqual(['signal']);
+    // No command was emitted, so no marker exists and the capture added none.
+    // Asserted as "nothing here carries a command seq" rather than as the literal
+    // event list, which is the invariant this test is actually about: the park
+    // itself is now recorded (`conditionParked` / `conditionUnparked`, carrying a
+    // `condSeq`), and that must stay true without ever entering command numbering.
+    expect(history.some((e) => 'seq' in e)).toBe(false);
+    expect(history.map((e) => e.type)).toEqual([
+      'conditionParked',
+      'signal',
+      'conditionUnparked',
+    ]);
   });
 
   it('restores the stack-trace limit it narrowed', async () => {

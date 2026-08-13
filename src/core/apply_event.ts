@@ -212,13 +212,21 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     else ctx.bufferedSignals.push(ev);
     return;
   }
-  // Informational, and deliberately handled before the marker branch below. It
-  // shares a seq with the `scheduleActivity` command — and, on a retried activity,
-  // with other events of its own type — so checking it as a marker would be asking
-  // a question it is not the answer to. Nothing on replay depends on it: it resolves
-  // no waiter, suppresses no command, and its absence from a history written before
-  // it existed is not a divergence.
-  if (ev.type === 'activityStarted') return;
+  // Informational, and deliberately handled before the marker branch below. None
+  // of these is the answer to "what was dispatched at this seq": the two activity
+  // events share their seq with the `scheduleActivity` command and with each other,
+  // and the condition pair carries a `condSeq`, which is not a command seq at all.
+  // Checking any of them as a marker would be asking a question it is not the
+  // answer to. Nothing on replay depends on them — they resolve no waiter, suppress
+  // no command, and their absence from a history written before they existed is not
+  // a divergence.
+  if (
+    ev.type === 'activityStarted' ||
+    ev.type === 'activityRetryScheduled' ||
+    ev.type === 'conditionParked' ||
+    ev.type === 'conditionUnparked'
+  )
+    return;
   if (
     ev.type === 'activityScheduled' ||
     ev.type === 'timerStarted' ||
