@@ -11,3 +11,4 @@ export * from './rpc';
 export * from './schedule';
 export * from './service';
 export * from './task_token';
+export * from './workflow_descriptor';

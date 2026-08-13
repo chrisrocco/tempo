@@ -101,8 +101,16 @@ export {
   type WorkflowInfo,
 } from './core/workflow_api';
 
+export {defineWorkflow} from './workflow_descriptor';
+
 // author-facing option types (erased at runtime; safe on the deterministic surface)
-export type {ActivityOptions, ParentClosePolicy, RetryPolicy} from './protocol';
+export type {
+  ActivityOptions,
+  JsonSchema,
+  ParentClosePolicy,
+  RetryPolicy,
+  WorkflowDescriptor,
+} from './protocol';
 
 export type {ActivityProxy};
 
