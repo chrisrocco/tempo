@@ -38,6 +38,7 @@
  * predictable naming — which is the dedup mechanism — unreachable.
  */
 
+import {DEFAULT_TASK_QUEUE} from '../protocol';
 import type {
   ExecutionDetail,
   ExecutionPage,
@@ -135,8 +136,25 @@ export interface ScheduleClient {
   delete(scheduleId: string): void;
 }
 
+/** How a `ScheduleClient` is wired. */
+export interface ScheduleClientOptions {
+  /**
+   * Which queue the *scheduler executions* run on — that is, wherever
+   * `scheduleWorkflows` was registered. Defaults to `DEFAULT_TASK_QUEUE`.
+   *
+   * Distinct from `ScheduleTarget.taskQueue`, which is where the *work* runs. Pass this
+   * only when schedulers are deliberately given their own worker pool; where a
+   * schedule's runs go is a per-schedule decision and belongs on the definition.
+   */
+  schedulerTaskQueue?: string;
+}
+
 /** Build a `ScheduleClient` over any `WorkflowService` — local runtime or remote server. */
-export function createScheduleClient(service: WorkflowService): ScheduleClient {
+export function createScheduleClient(
+  service: WorkflowService,
+  options: ScheduleClientOptions = {},
+): ScheduleClient {
+  const schedulerTaskQueue = options.schedulerTaskQueue ?? DEFAULT_TASK_QUEUE;
   const send = (
     scheduleId: string,
     signal: string,
@@ -156,9 +174,30 @@ export function createScheduleClient(service: WorkflowService): ScheduleClient {
           `cannot create schedule "${scheduleId}": ${problems.join('; ')}`,
         );
 
-      service.start(SCHEDULER_WORKFLOW_NAME, [definition], {
+      // Normalised here rather than left undefined, so that what gets stored — and
+      // therefore what `describe` reports — always names the queue the runs will go to.
+      // An undefined queue reaching the scheduler would be resolved by the server as
+      // "inherit the starter's queue", which is right only while the scheduler happens
+      // to be colocated with the target's workers and silently changes meaning if it
+      // ever is not.
+      const normalized: ScheduleDefinition = {
+        ...definition,
+        target: {
+          ...definition.target,
+          taskQueue: definition.target.taskQueue ?? DEFAULT_TASK_QUEUE,
+        },
+      };
+
+      service.start(SCHEDULER_WORKFLOW_NAME, [normalized], {
         workflowId: scheduleId,
-        taskQueue: definition.target.taskQueue,
+        // **The scheduler's queue, not the target's.** These were the same value until
+        // it became clear they answer different questions: this one asks where the
+        // *scheduler* runs, which is wherever `scheduleWorkflows` was registered, and
+        // `target.taskQueue` asks where the work runs. Tying them meant a schedule
+        // aimed at a `reports` queue could only run if the scheduler had also been
+        // registered on `reports` — so pointing a schedule at a dedicated pool quietly
+        // stopped the schedule itself from running.
+        taskQueue: schedulerTaskQueue,
       });
     },
 

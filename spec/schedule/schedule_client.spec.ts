@@ -119,6 +119,62 @@ describe('ScheduleClient', () => {
   });
 
   /**
+   * The stored definition names the queue, rather than leaving it for the engine to
+   * resolve as "inherit the starter's". Two reasons, and the second is the one that bites:
+   * `describe` should answer "where do this schedule's runs go" without the reader
+   * knowing the inheritance rule, and inheritance is correct only while the scheduler is
+   * colocated with the target's workers.
+   */
+  it('records the default queue on the definition rather than leaving it unset', async () => {
+    const {client} = harness([]);
+
+    client.create('sc-11', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'target'}, // no queue given
+    });
+    await wait(120);
+
+    expect((await client.describe('sc-11'))?.definition?.target.taskQueue).toBe(
+      'default',
+    );
+  });
+
+  it('keeps an explicit target queue as given', async () => {
+    const {client} = harness([]);
+
+    client.create('sc-12', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'target', taskQueue: 'reports'},
+    });
+    await wait(120);
+
+    expect((await client.describe('sc-12'))?.definition?.target.taskQueue).toBe(
+      'reports',
+    );
+  });
+
+  /**
+   * The scheduler's queue and the target's queue are different questions, and were the
+   * same value until that became clear. Tying them meant a schedule aimed at a dedicated
+   * `reports` pool would only run if `scheduleWorkflows` had also been registered there —
+   * so pointing a schedule at its own pool quietly stopped the schedule itself.
+   */
+  it('runs the scheduler on the scheduler queue, not the target queue', async () => {
+    const ran: string[] = [];
+    const {store, client} = harness(ran);
+
+    client.create('sc-13', {
+      spec: {type: 'interval', everyMs: 40},
+      target: {name: 'target', taskQueue: 'default'},
+    });
+    await wait(300);
+
+    // The runtime's workers serve `default`; the scheduler must be there to have run.
+    expect((await store.get('sc-13'))?.taskQueue).toBe('default');
+    expect(ran.length).toBeGreaterThan(0);
+  });
+
+  /**
    * `listRuns` depends on the run-naming convention holding — `<scheduleId>-<nominal>`.
    * If the scheduler ever names runs differently this fails, which is the only place
    * that link is checked.
