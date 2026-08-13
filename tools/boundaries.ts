@@ -261,11 +261,27 @@ function extractImports(strippedText: string): ImportRef[] {
   const refs: ImportRef[] = [];
   const lines = strippedText.split('\n');
   const re = /(?:\bfrom|\bimport)\s*\(?\s*'([^']+)'/g;
+  // Carried across lines, because the modifier belongs to the *statement* and the
+  // specifier can be several lines below it:
+  //
+  //     import type {
+  //       A,
+  //       B,
+  //     } from '../protocol';
+  //
+  // Read per line, the `} from …` line does not look type-only, and an erased import
+  // was reported as a real one. That made the determinism exemption depend on **line
+  // length**: the same import passed until a name was added and Prettier wrapped it,
+  // which is how it was found. Value imports were never missed — they are attributed
+  // to the same closing line, where `typeOnly` is false either way — so the bug was
+  // false positives only.
+  let openTypeStatement = false;
   lines.forEach((lineText, idx) => {
-    // Per line rather than per match: a line holds one import in this codebase
-    // (Prettier at 80 columns cannot produce two), and the modifier belongs to the
-    // statement rather than to the specifier.
-    const typeOnly = /^\s*(?:import|export)\s+type\s/.test(lineText);
+    const opensType = /^\s*(?:import|export)\s+type\s/.test(lineText);
+    const typeOnly = opensType || openTypeStatement;
+    // A statement is still open when it began a brace list this line did not close.
+    if (opensType && !/\bfrom\s*'/.test(lineText)) openTypeStatement = true;
+    else if (/\bfrom\s*'/.test(lineText)) openTypeStatement = false;
     const namespace = /^\s*import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s/.exec(
       lineText,
     );

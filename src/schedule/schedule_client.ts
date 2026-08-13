@@ -44,11 +44,12 @@ import type {
   ExecutionPage,
   ExecutionSummary,
   ScheduleBounds,
+  ScheduleDefinition,
   ScheduleSpec,
+  ScheduleStatus,
   WorkflowService,
 } from '../protocol';
 import {scheduleSpecProblems} from './next_fire';
-import type {ScheduleDefinition, ScheduleStatus} from './scheduler.workflow';
 
 /**
  * The workflow type a schedule is.
