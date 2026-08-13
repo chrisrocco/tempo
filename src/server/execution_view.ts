@@ -83,7 +83,34 @@ export function describeExecution(
   // waiting on is a fact about all of it: an activity scheduled at event 3 and
   // still unanswered at event 4000 is exactly the case an operator is looking
   // for, and a page-scoped derivation would report it as nothing pending.
-  const pending = pendingWork(rec.history);
+  // **Only while it is running.** `pendingWork` is a pure derivation from history —
+  // a `timerStarted` with no `timerFired` is pending — and history has no way to say
+  // "and then the execution died". So a workflow cancelled while sleeping unwinds
+  // through `CancelledFailure`, settles, and goes on reporting that timer as pending
+  // forever: a settled execution that looks like it is still waiting on something.
+  //
+  // That was reported from a dashboard, where it reads as a leak. The engine is not
+  // leaking — `onFire` drops a fire for a non-running record and `resumeFromHistory`
+  // skips one on restart, and the timer itself is now released when an execution
+  // settles (`server_core`) — but the *report* was wrong, and a wrong report about a
+  // dead execution is the failure this repo keeps finding.
+  //
+  // Suppressed rather than relabelled. `pending` means the engine is waiting on this,
+  // and for a settled execution it is not; anyone asking the different question of
+  // what it was waiting on *when* it died still has the whole history, which is where
+  // that answer honestly lives.
+  const pending =
+    rec.status === 'running'
+      ? pendingWork(rec.history)
+      : {
+          activities: [],
+          timers: [],
+          children: [],
+          // Kept, because it is a fact about what happened rather than about what is
+          // outstanding: an operator reading a settled execution wants to know it was
+          // cancelled rather than that it failed on its own.
+          cancelRequested: pendingWork(rec.history).cancelRequested,
+        };
   return {
     ...summarizeExecution(rec),
     args: rec.args,

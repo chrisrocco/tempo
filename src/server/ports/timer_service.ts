@@ -24,6 +24,16 @@ export interface TimerService {
   schedule(workflowId: string, seq: number, fireAt: number): void;
   /** Remove a scheduled timer that has not yet fired. */
   cancel(workflowId: string, seq: number): void;
+  /**
+   * Remove every timer an execution is still holding.
+   *
+   * Called when an execution settles, and it takes the id rather than a list of seqs
+   * on purpose: the caller would have to derive those from history, and at the moment
+   * of settling its copy of that history is stale — the batch that ended the execution
+   * may itself have armed a timer. The table is the only thing that already knows, so
+   * it does the filtering and nothing can be missed.
+   */
+  cancelAll(workflowId: string): void;
   /** Startup sweep: re-arm (or immediately fire past-due) timers in the table. */
   recover(): void;
   /** Clear all in-flight timers (teardown). */

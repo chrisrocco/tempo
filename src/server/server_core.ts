@@ -966,6 +966,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         status: 'completed',
         historyLength: rec.history.length,
       });
+      // A settled execution is not waiting on anything, so nothing should still be
+      // armed on its behalf. Dropping them is not required for correctness: onFire
+      // already ignores a fire for a non-running record, and `resumeFromHistory` skips
+      // one on restart — but an hour-long sleep in a cancelled workflow otherwise keeps
+      // a live handle for an hour, and long sleeps in cancelled executions is exactly
+      // the scheduler shape.
+      timerService.cancelAll(workflowId);
       onSettled(workflowId, 'completed', {result: result.result});
       // Children before the parent: by the time the generation above is woken by
       // this outcome, the generation below has already been dealt with, so an
@@ -989,6 +996,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         historyLength: rec.history.length,
         failure: errorMessage(result.failure),
       });
+      // A settled execution is not waiting on anything, so nothing should still be
+      // armed on its behalf. Dropping them is not required for correctness: onFire
+      // already ignores a fire for a non-running record, and `resumeFromHistory` skips
+      // one on restart — but an hour-long sleep in a cancelled workflow otherwise keeps
+      // a live handle for an hour, and long sleeps in cancelled executions is exactly
+      // the scheduler shape.
+      timerService.cancelAll(workflowId);
       onSettled(workflowId, 'failed', {failure: result.failure});
       await closeChildren(workflowId);
       await notifyParentOfTerminal(workflowId);
@@ -1280,6 +1294,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     await historyStore.setStatus(workflowId, 'terminated', {
       failure: new Error(reason),
     });
+    // Same as the two dispositions above: nothing should stay armed for an
+    // execution that is not waiting on it.
+    timerService.cancelAll(workflowId);
     log('execution.settled', {
       workflowId,
       status: 'terminated',
