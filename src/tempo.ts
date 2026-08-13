@@ -466,6 +466,26 @@ function composeRemote(args: {
     });
   };
 
+  // Started before the loops, because its digest is what they put on every poll — the
+  // pair is how the server tells a current report from a stale one.
+  //
+  // Only the workflow role reports. An activity worker registers activity names, which
+  // the catalogue is not about, and an empty report from it would be indistinguishable
+  // from a workflow worker that registered nothing.
+  const reporter = args.roles.includes('workflow')
+    ? startWorkflowReporter(
+        service,
+        args.workflows.map(([name, fn]) => ({
+          name,
+          ...(workflowDescriptor(fn) ?? {}),
+        })),
+        {
+          identity: args.loop?.identity ?? DEFAULT_IDENTITY,
+          ...(args.taskQueue === undefined ? {} : {taskQueue: args.taskQueue}),
+        },
+      )
+    : undefined;
+
   const loops: WorkerLoop[] = [];
   if (args.roles.includes('workflow')) {
     const registry = createWorkflowRegistry();
@@ -476,6 +496,7 @@ function composeRemote(args: {
         ...args.loop,
         onError,
         taskQueue: args.taskQueue,
+        ...(reporter === undefined ? {} : {servesHash: reporter.hash}),
       }),
     );
   }
@@ -491,23 +512,6 @@ function composeRemote(args: {
       }),
     );
   }
-
-  // What this worker can run, described. Only the workflow role reports: an activity
-  // worker registers activity names, which the catalogue is not about, and reporting an
-  // empty set from it would look like a workflow worker with nothing registered.
-  const reporter = args.roles.includes('workflow')
-    ? startWorkflowReporter(
-        service,
-        args.workflows.map(([name, fn]) => ({
-          name,
-          ...(workflowDescriptor(fn) ?? {}),
-        })),
-        {
-          identity: args.loop?.identity ?? DEFAULT_IDENTITY,
-          ...(args.taskQueue === undefined ? {} : {taskQueue: args.taskQueue}),
-        },
-      )
-    : undefined;
 
   return {
     stop: () => {

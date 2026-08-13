@@ -66,7 +66,7 @@ export interface WorkerRegistry {
     role: WorkerRole,
     taskQueue: string | undefined,
     identity?: string,
-    serves?: readonly string[],
+    servesHash?: string,
   ): void;
   /**
    * Every queue that has ever been polled, in the order first seen, each with
@@ -124,8 +124,8 @@ interface Observed {
   identity: string;
   role: WorkerRole;
   lastPolledAt: number;
-  /** What it last said it can run. Absent when it never said — see `PollRequest.serves`. */
-  serves?: readonly string[];
+  /** The digest from its most recent poll. Absent when it sent none. */
+  servesHash?: string;
 }
 
 export function createWorkerRegistry(
@@ -150,8 +150,25 @@ export function createWorkerRegistry(
     return `${role} ${identity}`;
   }
 
+  /**
+   * The names a worker resolves to, or nothing when the answer is unknown.
+   *
+   * Unknown covers three cases that all deserve silence rather than a claim: the worker
+   * has never reported, it sends no digest on its polls, or its report is stale because
+   * the digest moved. `WorkerInfo.serves` documents why they are not distinguished.
+   */
+  function servesOf(
+    taskQueue: string,
+    observed: Observed,
+  ): {serves?: readonly string[]} {
+    if (observed.servesHash === undefined) return {};
+    const report = reported.get(`${observed.identity} ${taskQueue}`);
+    if (!report || report.hash !== observed.servesHash) return {};
+    return {serves: report.workflows.map((w) => w.name)};
+  }
+
   return {
-    recordPoll(role, taskQueue, identity, serves) {
+    recordPoll(role, taskQueue, identity, servesHash) {
       const key = taskQueue ?? ANY_TASK_QUEUE;
       let entry = seen.get(key);
       if (!entry) {
@@ -174,16 +191,16 @@ export function createWorkerRegistry(
       const worker = onQueue.get(workerKey);
       if (worker) {
         worker.lastPolledAt = at;
-        // Overwritten on every poll rather than merged, so a redeployed worker
-        // replaces its manifest instead of accumulating the union of what it has
-        // ever been able to run — which is the case #65 is about.
-        if (serves !== undefined) worker.serves = serves;
+        // Overwritten on every poll, so a redeployed worker replaces its digest
+        // rather than keeping the one it started with — which is what lets a stale
+        // report be recognised as stale.
+        if (servesHash !== undefined) worker.servesHash = servesHash;
       } else
         onQueue.set(workerKey, {
           identity,
           role,
           lastPolledAt: at,
-          ...(serves === undefined ? {} : {serves}),
+          ...(servesHash === undefined ? {} : {servesHash}),
         });
     },
 
@@ -224,11 +241,18 @@ export function createWorkerRegistry(
             role: observed.role,
             taskQueue: q.taskQueue,
             lastPolledAt: observed.lastPolledAt,
-            // Omitted rather than set to `undefined`, so a worker that said nothing
-            // produces a row with no such key. The two are equivalent over JSON and
-            // are not equivalent to `toEqual`, and a row carrying an explicit
-            // `serves: undefined` reads as an assertion where silence is meant.
-            ...(observed.serves === undefined ? {} : {serves: observed.serves}),
+            // Resolved here rather than relayed, by matching the digest on the poll
+            // against the digest the report was pushed under. They agree only while the
+            // server's copy still describes what this worker is running; a redeployed
+            // worker's poll carries a new digest from its first poll onward, so its
+            // stale report stops being reported the moment it is stale rather than when
+            // the replacement happens to arrive.
+            //
+            // Omitted rather than set to `undefined`, so a worker with nothing resolved
+            // produces a row with no such key. The two are equivalent over JSON and are
+            // not equivalent to `toEqual`, and an explicit `serves: undefined` reads as
+            // an assertion where silence is meant.
+            ...servesOf(q.taskQueue, observed),
           }))
           // Newest poll first, tie-broken by identity so two reads of an idle
           // fleet cannot disagree about the order.

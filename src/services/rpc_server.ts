@@ -78,7 +78,7 @@ async function dispatch(
         (await host.pollWorkflowTask({
           taskQueue: request.taskQueue,
           identity: request.identity,
-          serves: request.serves,
+          servesHash: request.servesHash,
         })) ?? null
       );
     case 'completeWorkflowTask':
@@ -90,7 +90,7 @@ async function dispatch(
         (await host.pollActivityTask({
           taskQueue: request.taskQueue,
           identity: request.identity,
-          serves: request.serves,
+          servesHash: request.servesHash,
         })) ?? null
       );
     case 'completeActivityTask':

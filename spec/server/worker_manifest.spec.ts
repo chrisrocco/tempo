@@ -19,84 +19,93 @@ import {
   type QueueLiveness,
 } from '../../src/protocol';
 import {createServerHost} from '../../src/services';
+import {reportHash} from '../../src/worker';
+
+/** Report `names`, then poll as that worker would — the two halves of the protocol. */
+async function servingWorker(
+  host: ReturnType<typeof createServerHost>,
+  identity: string,
+  taskQueue: string,
+  names: string[],
+): Promise<void> {
+  const workflows = names.map((name) => ({name}));
+  const hash = reportHash(workflows);
+  await host.reportWorkflows({identity, taskQueue, hash, workflows});
+  await host.pollWorkflowTask({taskQueue, identity, servesHash: hash});
+}
 
 describe('a worker reporting what it can run', () => {
-  it('carries the manifest from the poll to the fleet view', async () => {
-    const host = createServerHost();
-    try {
-      await host.pollWorkflowTask({
-        taskQueue: 'reports',
-        identity: 'w1@host',
-        serves: ['nightly', 'weekly'],
-      });
+  let host: ReturnType<typeof createServerHost>;
 
-      const [queue] = await host.listQueues();
-      expect(queue?.taskQueue).toBe('reports');
-      expect(queue?.workers[0]?.serves).toEqual(['nightly', 'weekly']);
-    } finally {
-      host.shutdown();
-    }
+  beforeEach(() => {
+    host = createServerHost();
+  });
+
+  afterEach(() => {
+    host.shutdown();
+  });
+
+  it('resolves the report against the digest on the poll', async () => {
+    await servingWorker(host, 'w1@host', 'reports', ['nightly', 'weekly']);
+
+    const [queue] = await host.listQueues();
+    expect(queue?.taskQueue).toBe('reports');
+    expect(queue?.workers[0]?.serves).toEqual(['nightly', 'weekly']);
   });
 
   /**
-   * Overwritten, not merged. A worker redeployed under one identity must not read as
-   * serving the union of everything it has ever been able to run — that union is
-   * precisely what would hide the version skew this exists to expose (#65).
+   * The staleness check, and the reason the poll carries a digest at all. A worker
+   * redeployed since it reported polls with a new hash, so the server's copy stops being
+   * reported from that first poll — rather than staying authoritative until a replacement
+   * report happens to arrive up to thirty seconds later.
    */
-  it('replaces the manifest on each poll rather than accumulating it', async () => {
-    const host = createServerHost();
-    try {
-      const poll = async (serves: string[]): Promise<void> => {
-        await host.pollWorkflowTask({
-          taskQueue: 'reports',
-          identity: 'w1@host',
-          serves,
-        });
-      };
-      await poll(['old']);
-      await poll(['new']);
+  it('reports nothing while the digest and the report disagree', async () => {
+    await servingWorker(host, 'w1@host', 'reports', ['old']);
 
-      const [queue] = await host.listQueues();
-      expect(queue?.workers[0]?.serves).toEqual(['new']);
-    } finally {
-      host.shutdown();
-    }
+    // Redeployed: polling with a digest for a set it has not reported yet.
+    await host.pollWorkflowTask({
+      taskQueue: 'reports',
+      identity: 'w1@host',
+      servesHash: reportHash([{name: 'new'}]),
+    });
+
+    expect((await host.listQueues())[0]?.workers[0]?.serves).toBeUndefined();
+  });
+
+  it('resolves again once the new report lands', async () => {
+    await servingWorker(host, 'w1@host', 'reports', ['old']);
+    await servingWorker(host, 'w1@host', 'reports', ['new']);
+
+    expect((await host.listQueues())[0]?.workers[0]?.serves).toEqual(['new']);
   });
 
   it('reports two workers on one queue separately, which is what makes skew a diff', async () => {
-    const host = createServerHost();
-    try {
-      await host.pollWorkflowTask({
-        taskQueue: 'orders',
-        identity: 'v1@host',
-        serves: ['charge'],
-      });
-      await host.pollWorkflowTask({
-        taskQueue: 'orders',
-        identity: 'v2@host',
-        serves: ['charge', 'refund'],
-      });
+    await servingWorker(host, 'v1@host', 'orders', ['charge']);
+    await servingWorker(host, 'v2@host', 'orders', ['charge', 'refund']);
 
-      const [queue] = await host.listQueues();
-      expect(queue?.workers.map((w) => w.serves)).toEqual([
-        ['charge'],
-        ['charge', 'refund'],
-      ]);
-    } finally {
-      host.shutdown();
-    }
+    const [queue] = await host.listQueues();
+    expect(queue?.workers.map((w) => w.serves)).toEqual([
+      ['charge'],
+      ['charge', 'refund'],
+    ]);
   });
 
-  it('leaves the manifest absent when a worker does not send one', async () => {
-    const host = createServerHost();
-    try {
-      await host.pollWorkflowTask({taskQueue: 'legacy', identity: 'old@host'});
+  it('reports nothing for a worker that sends no digest', async () => {
+    await host.pollWorkflowTask({taskQueue: 'legacy', identity: 'old@host'});
 
-      const [queue] = await host.listQueues();
-      expect(queue?.workers[0]?.serves).toBeUndefined();
-    } finally {
-      host.shutdown();
-    }
+    expect((await host.listQueues())[0]?.workers[0]?.serves).toBeUndefined();
+  });
+
+  // A digest with no report behind it is unknown, not empty: the worker is telling us
+  // something we cannot yet interpret, which is not the same as telling us nothing runs.
+  it('reports nothing for a digest it has never seen a report for', async () => {
+    await host.pollWorkflowTask({
+      taskQueue: 'reports',
+      identity: 'w1@host',
+      servesHash: 'never-reported',
+    });
+
+    expect((await host.listQueues())[0]?.workers[0]?.serves).toBeUndefined();
   });
 });
 

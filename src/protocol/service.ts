@@ -538,23 +538,34 @@ export interface PollRequest {
    */
   identity?: string;
   /**
-   * The names this worker has registered for the role it is polling as: workflow
-   * types on a workflow poll, activity names on an activity poll.
+   * A digest of what this worker has registered — the same value it sends with
+   * `reportWorkflows`.
    *
-   * Sent on **every** poll rather than announced once, and repeated rather than
-   * diffed. The repetition is what makes it self-healing — a worker redeployed under
-   * the same identity, or a server restarted beneath a live fleet, converges on the
-   * next poll instead of holding a manifest that was true earlier. Announcing once
-   * would be wrong in exactly the case this exists to expose: a fleet running two
-   * versions of one worker binary (#65).
+   * This carried the **names themselves** at first, which was correct and expensive:
+   * a poll runs at the idle interval, five milliseconds, so a worker with fifty
+   * workflows re-sent about a kilobyte a couple of hundred times a second to repeat an
+   * answer that changes only when the binary does.
    *
-   * **Absent means unknown, not none.** A worker that sends no manifest is reported
-   * as unknown rather than as serving nothing, because "this queue serves no
-   * workflows" and "we cannot tell" want different responses from whoever is reading.
+   * A digest keeps every property that mattered and costs sixteen bytes. It is sent on
+   * **every** poll rather than announced once, which is what makes it self-healing: a
+   * worker redeployed under one identity, or a server restarted beneath a live fleet,
+   * converges on the next poll.
+   *
+   * ## It is a staleness check, not only a saving
+   *
+   * The names now arrive on a slow push, which raises a question the poll answers: is
+   * the copy the server holds still the one this worker is running? Matching hashes say
+   * yes. A mismatch says the report is stale — a worker redeployed since it last
+   * reported — and stale is treated as **unknown** rather than as fact, which is why
+   * `isNameServed` is three-valued.
+   *
+   * **Absent means unknown, not none**, the same as before: a worker that sends no
+   * digest is reported as unknown rather than as serving nothing, because "this queue
+   * serves no workflows" and "we cannot tell" want different responses.
    *
    * Reported, never enforced — see `isNameServed` for why refusing would be wrong.
    */
-  serves?: readonly string[];
+  servesHash?: string;
 }
 
 /**
@@ -605,19 +616,22 @@ export interface WorkerInfo {
   /** Epoch ms of its most recent poll. */
   lastPolledAt: number;
   /**
-   * What it said it can run, as of its most recent poll — workflow types for a
-   * `workflow` worker, activity names for an `activity` one. See
-   * `PollRequest.serves`.
+   * The workflow names this worker has registered — **resolved**, not merely relayed.
    *
-   * **Absent means it did not say**, not that it can run nothing. Only a worker
-   * predating this field, or one built by a caller that constructs polls by hand,
-   * leaves it out — and reporting silence as emptiness would turn "we cannot tell"
-   * into "this queue serves nothing", which is a much stronger claim than the
-   * server is entitled to make.
+   * It is the report this worker last pushed, but only when the digest on its most
+   * recent poll still matches the digest that report was sent under. When they differ
+   * the worker has been redeployed since it reported, so the server's copy describes
+   * code that is no longer running, and this is absent rather than wrong.
    *
-   * Two workers on one queue reporting *different* sets is a fleet running two
-   * versions of one worker binary, which is the condition #65 says is invisible.
-   * This is what makes it a diff rather than a mystery.
+   * **Absent therefore means unknown**, and covers three cases that deserve the same
+   * treatment: a worker that never reported, one that reports no digest on its polls,
+   * and one whose report has gone stale. None of them justify the stronger claim that
+   * the queue serves nothing — see `isNameServed`, which is three-valued for exactly
+   * this reason.
+   *
+   * Two workers on one queue resolving to *different* sets is a fleet running two
+   * versions of one worker binary, the condition #65 says is invisible. This is what
+   * makes it a diff rather than a mystery.
    */
   serves?: readonly string[];
   /**

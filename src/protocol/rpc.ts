@@ -61,7 +61,7 @@ export type RpcRequest =
       method: 'pollWorkflowTask';
       taskQueue?: string;
       identity?: string;
-      serves?: readonly string[];
+      servesHash?: string;
     }
   | {
       method: 'completeWorkflowTask';
@@ -74,7 +74,7 @@ export type RpcRequest =
       method: 'pollActivityTask';
       taskQueue?: string;
       identity?: string;
-      serves?: readonly string[];
+      servesHash?: string;
     }
   | {
       method: 'completeActivityTask';

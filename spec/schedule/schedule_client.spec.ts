@@ -21,6 +21,7 @@ import {
   createServerHost,
 } from '../../src/services';
 import {MemoryHistoryStore} from '../../src/server';
+import {reportHash} from '../../src/worker';
 import {isolateActivityRegistry} from '../support/isolate_activity_registry';
 import {
   createScheduleClient,
@@ -335,12 +336,27 @@ describe('ScheduleClient warnings against a polling fleet', () => {
     await new Promise<void>((r) => server.close(() => r()));
   });
 
-  /** One poll is all it takes for the server to know what a worker serves. */
-  const workerServing = async (serves: string[]): Promise<void> => {
+  /**
+   * A worker declaring itself: report what it runs, then poll carrying that report's
+   * digest. Both halves are needed — the report supplies the names and the digest is what
+   * tells the server its copy is still current.
+   */
+  const workerServing = async (
+    names: string[],
+    identity = 'w1@host',
+  ): Promise<void> => {
+    const workflows = names.map((name) => ({name}));
+    const hash = reportHash(workflows);
+    await service.reportWorkflows({
+      identity,
+      taskQueue: 'default',
+      hash,
+      workflows,
+    });
     await service.pollWorkflowTask({
       taskQueue: 'default',
-      identity: 'w1@host',
-      serves,
+      identity,
+      servesHash: hash,
     });
   };
 
