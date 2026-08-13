@@ -61,6 +61,7 @@ export {
   SCHEDULER_WORKFLOW_NAME,
   type ScheduleClient,
   type ScheduleClientOptions,
+  type ScheduleCreation,
   type ScheduleSummary,
   type ScheduleView,
 } from './schedule_client';
