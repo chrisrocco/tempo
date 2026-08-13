@@ -428,13 +428,21 @@ export interface ServerCore {
    *   the same reason — history bloat — and it applies here with more force, since
    *   every task replays the whole history.
    *
-   *   **Narrowed from "no per-attempt history events".** Each *pickup* now appends
-   *   an `activityStarted` (see `pollActivityTask`), because the alternative left
-   *   queue time and execution time indistinguishable and made a retried activity's
-   *   span cover every attempt plus every backoff gap as one bar. The bloat argument
-   *   was the right shape and the wrong weight: storage is cheap and the diagnostic
-   *   is not. What stays out is a second event per *failure*, which the retained
-   *   reason and the counter on the record already answer.
+   *   **Narrowed twice, and what survives is a line rather than a rule.** Each
+   *   *pickup* appends an `activityStarted` (see `pollActivityTask`), because the
+   *   alternative left queue time and execution time indistinguishable and made a
+   *   retried activity's span cover every attempt plus every backoff gap as one bar.
+   *   Each activity retry now appends an `activityRetryScheduled` too, because a
+   *   started attempt with no completion could otherwise mean either "running" or
+   *   "idle in backoff" — opposite readings of the same silence.
+   *
+   *   What stays out is a per-failure event for a *workflow task*, and the reason it
+   *   stays out is the reason the other two came in. An activity's failures are
+   *   bounded by `maximumAttempts`, a number the author chose; a workflow task's are
+   *   bounded by nothing at all, by the design at the top of this comment. The rule
+   *   is therefore about the budget, not about history bloat in the abstract: events
+   *   per failure are affordable exactly where the failures are capped. Here they
+   *   are not, and the counter with the retained reason is what answers instead.
    */
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   /** Claim the next activity task; `identity` names the worker (see above). */
@@ -902,11 +910,6 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   ): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
-    // Before the dispositions below, all of which return early. What the replay
-    // ended parked on is true regardless of how the task then settles — and a
-    // task that *completes* the execution reports an empty list, which is what
-    // clears the entry left by the task that parked.
-    await recordParked(workflowId, rec, result.parked);
     // Note what is deliberately *not* here: storing carryover on every task.
     //
     // The record's carryover is what every task of this run is built from, so
@@ -945,6 +948,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (!caN)
       for (const cmd of result.commands)
         await applyCommand(workflowId, rec.runId, rec.taskQueue, cmd);
+    // After the batch and before the dispositions, and both halves are load-bearing.
+    //
+    // *Before the dispositions* because they all return early: what the replay ended
+    // parked on is true regardless of how the task then settles, and a task that
+    // completes the execution reports an empty list, which is what clears the entry
+    // left by the task that parked.
+    //
+    // *After the batch* because this now appends history of its own. An activation
+    // that dispatches and then parks did those things in that order — recording the
+    // park first would put a workflow's wait ahead of the dispatch it is waiting for,
+    // which is wrong in the one place these events exist to be read: a timeline.
+    await recordParked(workflowId, rec, result.parked);
     if (result.done) {
       await historyStore.setStatus(workflowId, 'completed', {
         result: result.result,
@@ -1005,6 +1020,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    *
    * An absent `parked` means the worker predates this and said nothing, which is
    * different from a worker reporting an empty list. Only the latter clears.
+   *
+   * The same guard is what makes the history events below affordable. They record
+   * the *transition*, so a condition still parked across ten tasks appends nothing
+   * on nine of them — history stays proportional to how often a workflow's waiting
+   * changes rather than to how often it is woken, which for anything signal-driven
+   * are very different numbers. See `ConditionParkedEvent`.
    */
   async function recordParked(
     workflowId: string,
@@ -1020,6 +1041,24 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       )
     )
       return;
+    const was = new Set(stored.map((s) => s.seq));
+    const now = new Set(parked.map((p) => p.seq));
+    // Unparks before parks. A task that leaves one condition and arrives at
+    // another did those things in that order, and a reader building spans off
+    // these events would otherwise see the two overlap.
+    for (const s of stored)
+      if (!now.has(s.seq))
+        await appendEvent(workflowId, {
+          type: 'conditionUnparked',
+          condSeq: s.seq,
+        });
+    for (const p of parked)
+      if (!was.has(p.seq))
+        await appendEvent(workflowId, {
+          type: 'conditionParked',
+          condSeq: p.seq,
+          site: p.site,
+        });
     await historyStore.setParkedConditions(workflowId, parked);
   }
 
@@ -1100,6 +1139,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       );
       if (scheduled && shouldRetry(retry, attempts)) {
         const delayMs = backoffMs(retry, attempts);
+        // One clock for both copies below. Two `Date.now()` calls would let the
+        // event and the pending view disagree about when the same attempt is due.
+        const nextAttemptAt = Date.now() + delayMs;
         log('activity.retry_scheduled', {
           workflowId,
           seq,
@@ -1109,13 +1151,28 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           delayMs,
           error: result.error,
         });
+        // In history as well as in the log and the pending view, because neither of
+        // those survives the question being asked later: the view is cleared when
+        // the activity settles, and the log is a separate stream with its own
+        // retention and no ordering against this history. This is the copy still
+        // there when someone reconstructs the execution afterwards, and it is what
+        // stops a backoff gap reading as a running attempt — see
+        // `ActivityRetryScheduledEvent`.
+        await appendEvent(workflowId, {
+          type: 'activityRetryScheduled',
+          seq,
+          attempt: attempts,
+          maxAttempts: maxAttempts(retry),
+          nextAttemptAt,
+          error: result.error,
+        });
         // Written before the redispatch is armed, so an operator polling during
         // the backoff never sees an activity waiting on a retry with no time
         // attached to it.
         await historyStore.setActivityNextAttempt(
           workflowId,
           seq,
-          Date.now() + delayMs,
+          nextAttemptAt,
         );
         redispatchAfter(workflowId, scheduled, rec.taskQueue, delayMs);
         return;
