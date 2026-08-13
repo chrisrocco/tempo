@@ -10,8 +10,12 @@ modules, or there is nowhere for the explanation to live. Structure first, then
 document.
 
 **Organize by responsibility, not by technical kind.** The top-level split is
-`protocol/`, `core/`, `server/`, `services/`, `worker/`, `client/` — each a job
-the system does. Resist `types/`, `utils/`, `helpers/`, `handlers/`: those group
+`protocol/`, `core/`, `patterns/`, `schedule/`, `server/`, `services/`,
+`worker/`, `client/` — each a job the system does, and each declaring what it may
+import in [`tools/boundaries.ts`](tools/boundaries.ts). A new area of behaviour
+gets its own layer there rather than a folder inside a neighbour: absence from
+that map means _unrestricted_, so skipping the declaration exempts the new code
+rather than leaving it safely unchecked. Resist `types/`, `utils/`, `helpers/`, `handlers/`: those group
 files by what they _are_ rather than what they are _for_, and a concept spread
 across them belongs to no one.
 
@@ -154,6 +158,13 @@ one of the few places that legitimately sit outside the code:
   nothing.
 - **[`ROADMAP.md`](ROADMAP.md)** — what is not built yet, and the invariants
   that hold while building it.
+- **[`GLOSSARY.md`](GLOSSARY.md)** — one term per concept, and the tiebreaker
+  when two names are in circulation. Outside the code because vocabulary spans
+  every module by definition: the words for `execution`, `task queue` and
+  `marker` are used in `core/`, `server/`, `worker/` and `protocol/` alike, so no
+  one module can own them without the others deferring to a neighbour. Use its
+  terms in comments and commit messages, and add a row rather than inventing a
+  synonym.
 - **GitHub issues** — in-flight design work: proposals, scoping, and decisions
   about code that doesn't exist yet, so there's no module to host them.
 - **This file** — contributor conventions: process, not implementation.
@@ -170,6 +181,7 @@ to something that no longer exists.
 
 | Read                                      | For                                                                   |
 | ----------------------------------------- | --------------------------------------------------------------------- |
+| [`GLOSSARY.md`](GLOSSARY.md)              | The vocabulary — read first, so the rest reads as one voice           |
 | `src/workflow.ts`                         | The determinism boundary — the organizing idea, and the author rules  |
 | `src/core/replay.ts`                      | Activation vs. replay, what suppresses a command, observe-don't-await |
 | `src/core/condition.ts`                   | How a workflow waits, and why `condition` exists                      |
