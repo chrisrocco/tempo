@@ -352,6 +352,11 @@ the module that owns each idea. There is no `docs/` tree to drift out of sync.
 [`AGENTS.md`](AGENTS.md) explains that convention and how to structure code so
 it keeps working.
 
+[`GLOSSARY.md`](GLOSSARY.md) fixes one term per concept. Worth skimming before
+the reading order below, because a few of the distinctions it draws —
+**execution** against **run**, **marker** against **informational event** — are
+ones the code relies on and prose tends to collapse.
+
 Read in this order the first time; each builds on the last:
 
 | Read                                                                                   | What it covers                                                        |
