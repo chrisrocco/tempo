@@ -33,7 +33,7 @@ import type {WorkflowWorker} from './workflow_worker';
  * Read once per process rather than per poll: `os.hostname()` can hit the
  * network on a misconfigured host, and this runs every few milliseconds.
  */
-const DEFAULT_IDENTITY = `${process.pid}@${os.hostname()}`;
+export const DEFAULT_IDENTITY = `${process.pid}@${os.hostname()}`;
 
 // Ref'd on purpose: a worker process must stay alive between polls. The loops are
 // bounded by an explicit stop(), so this never keeps a process alive spuriously.

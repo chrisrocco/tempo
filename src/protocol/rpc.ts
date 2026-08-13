@@ -11,6 +11,7 @@ import type {
   ActivityResult,
   ExecutionStatus,
   StartWorkflowOptions,
+  WorkflowReportRequest,
   WorkflowTaskResult,
 } from './service';
 import type {TaskToken} from './task_token';
@@ -48,6 +49,8 @@ export type RpcRequest =
     }
   | {method: 'listExecutions'; filter?: ExecutionFilter}
   | {method: 'listQueues'}
+  | {method: 'listWorkflows'}
+  | {method: 'reportWorkflows'; report: WorkflowReportRequest}
   | {method: 'groupExecutions'}
   // Liveness plus what is already in memory. Reaching a server is what the
   // reply proves; see `ServerHealth` for why there is no `ok` field in it.

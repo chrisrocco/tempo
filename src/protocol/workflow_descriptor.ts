@@ -88,6 +88,40 @@ export interface WorkflowProp {
   type?: WorkflowPropType;
 }
 
+/**
+ * One workflow as a worker reports it: the name it is registered under, plus whatever it
+ * says about itself.
+ *
+ * The name is here and not on `WorkflowDescriptor` because a descriptor is written by an
+ * author who does not know it — the name is the key in `startWorker({workflows})`, chosen
+ * at registration. This is the pairing, made where both are known.
+ */
+export interface WorkflowReport extends WorkflowDescriptor {
+  /** The registered name — what `start` takes and what a task is routed by. */
+  name: string;
+}
+
+/**
+ * A workflow as a catalogue shows it, gathered across every worker that reports one.
+ *
+ * `title` is resolved rather than optional here, because every reader would otherwise
+ * write the same `?? name` fallback and one of them would forget.
+ */
+export interface WorkflowSummary extends WorkflowReport {
+  title: string;
+  /** The queues some worker serves it on, in the order first seen. */
+  taskQueues: string[];
+  /**
+   * True when workers disagree about what this workflow is.
+   *
+   * Two workers reporting different descriptions for one name is a fleet running two
+   * versions of a worker binary (#65). The catalogue keeps the first report and raises
+   * this rather than silently choosing, because which one is right is not a question the
+   * server can answer — only that they differ, which is the part worth surfacing.
+   */
+  conflicting?: boolean;
+}
+
 /** What a workflow says about itself. */
 export interface WorkflowDescriptor {
   /**

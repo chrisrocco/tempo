@@ -335,6 +335,12 @@ export function createLocalService(
     async groupExecutions() {
       return groupExecutions(await historyStore.list());
     },
+    async listWorkflows() {
+      return core.listWorkflows();
+    },
+    async reportWorkflows(report) {
+      core.reportWorkflows(report);
+    },
     async listQueues() {
       // Under the in-process runtime this reports one entry, `ANY_TASK_QUEUE`,
       // because `createLocalRuntime`'s loops poll with no queue at all — one

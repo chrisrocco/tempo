@@ -158,6 +158,9 @@ import type {
   ParentClosePolicy,
   ParkedCondition,
   QueueWorkers,
+  WorkflowReport,
+  WorkflowReportRequest,
+  WorkflowSummary,
   SignalSource,
   TaskToken,
   WorkflowTask,
@@ -377,6 +380,10 @@ export interface ServerCore {
    * `worker_registry.ts`.
    */
   listQueues(): QueueWorkers[];
+  /** Record what a worker says it has registered. See `WorkflowReportRequest`. */
+  reportWorkflows(report: WorkflowReportRequest): void;
+  /** Every workflow any worker has reported, deduped by name. */
+  listWorkflows(): WorkflowSummary[];
   /**
    * Drop the timers this core is holding, so a host can shut down.
    *
@@ -1488,6 +1495,53 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    * silent worker is mid-task rather than gone — the distinction the whole
    * identity-on-poll change exists to make. See `WorkerInfo.busy`.
    */
+  /**
+   * Fold every worker's report into one catalogue, keyed by workflow name.
+   *
+   * First report wins on a disagreement, and the disagreement is *reported* rather than
+   * resolved: two workers describing one name differently is a fleet running two versions
+   * of a worker binary, and which is right is not something the server can know. Choosing
+   * silently would be the thing that hides it — so `conflicting` is raised and the reader
+   * decides what to do about it.
+   *
+   * Comparison is on the description only. Two workers serving the same workflow from the
+   * same code will report identical descriptions, and the queues they serve it on are
+   * accumulated rather than compared, since serving one workflow from two pools is a
+   * deployment choice rather than a disagreement.
+   */
+  function listWorkflows(): WorkflowSummary[] {
+    const byName = new Map<string, WorkflowSummary>();
+    // The description each name was *first* reported with, kept beside the summary so the
+    // comparison is against what a worker actually sent rather than against a summary this
+    // function has already added resolved fields to.
+    const firstSeen = new Map<string, string>();
+
+    for (const report of workerRegistry.reports())
+      for (const workflow of report.workflows) {
+        const described = JSON.stringify(workflow);
+        const existing = byName.get(workflow.name);
+        if (!existing) {
+          byName.set(workflow.name, {
+            ...workflow,
+            title: workflow.title ?? workflow.name,
+            taskQueues: [report.taskQueue],
+          });
+          firstSeen.set(workflow.name, described);
+          continue;
+        }
+        if (!existing.taskQueues.includes(report.taskQueue))
+          existing.taskQueues.push(report.taskQueue);
+        if (firstSeen.get(workflow.name) !== described)
+          existing.conflicting = true;
+      }
+
+    return [...byName.values()];
+  }
+
+  function reportWorkflows(report: WorkflowReportRequest): void {
+    workerRegistry.recordReport(report);
+  }
+
   function listQueues(): QueueWorkers[] {
     const holders = {
       workflow: workflowTaskQueue.leaseHolders(),
@@ -1787,6 +1841,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     resetToEvent,
     resumeFromHistory,
     listQueues,
+    listWorkflows,
+    reportWorkflows,
     stop() {
       for (const handle of progressTimers) clearTimeout(handle);
       progressTimers.clear();

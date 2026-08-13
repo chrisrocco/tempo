@@ -16,6 +16,7 @@ import type {ActivityOptions} from './activity_options';
 import type {Command} from './commands';
 import type {HistoryEvent} from './history_events';
 import type {TaskToken} from './task_token';
+import type {WorkflowReport, WorkflowSummary} from './workflow_descriptor';
 
 /**
  * `terminated` is deliberately its own status rather than a flavour of `failed`.
@@ -507,6 +508,21 @@ export const ANY_TASK_QUEUE = '*';
  * Every field is optional, and each absence degrades a different thing rather than
  * breaking dispatch — a caller supplying none still gets tasks.
  */
+/** What a worker sends when it declares what it can run. */
+export interface WorkflowReportRequest {
+  identity: string;
+  taskQueue?: string;
+  /**
+   * A digest of `workflows`, which the worker also puts on every poll.
+   *
+   * This is what makes a slow push safe: the server can tell whether the copy it holds is
+   * still the one the worker is running, without the worker resending it. A mismatch means
+   * stale, and stale is reported as *unknown* rather than as fact.
+   */
+  hash: string;
+  workflows: readonly WorkflowReport[];
+}
+
 export interface PollRequest {
   /**
    * Which pool to take work from. **Omitted means any queue**, which exists for the
@@ -815,6 +831,22 @@ export interface WorkflowService {
   listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage>;
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
+  /**
+   * Every workflow any worker has reported, deduped by name.
+   *
+   * The catalogue a dashboard lists. Sourced from what workers push rather than from
+   * executions, so a workflow that has never run still appears — which is the point, since
+   * the question it answers is "what can I start".
+   */
+  listWorkflows(): Promise<WorkflowSummary[]>;
+  /**
+   * A worker declaring what it has registered.
+   *
+   * Pushed rather than polled, and on its own call rather than on the poll, because
+   * descriptions are large and the poll runs at the idle interval — see
+   * `PollRequest.servesHash` for how the two are reconciled.
+   */
+  reportWorkflows(report: WorkflowReportRequest): Promise<void>;
   /** Every execution counted by status, grouped by task queue and by name. */
   groupExecutions(): Promise<ExecutionGroups>;
   // ── worker-facing (poll a task, respond when done) ──

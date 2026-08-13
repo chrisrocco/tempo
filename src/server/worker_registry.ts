@@ -48,7 +48,9 @@ import {
   ANY_TASK_QUEUE,
   type WorkerInfo,
   type WorkerRole,
-} from '../protocol/service';
+  type WorkflowReport,
+  type WorkflowReportRequest,
+} from '../protocol';
 
 export interface WorkerRegistry {
   /**
@@ -80,6 +82,24 @@ export interface WorkerRegistry {
    * closes it.
    */
   queues(): ObservedQueue[];
+  /**
+   * Record what a worker says it has registered.
+   *
+   * Kept per worker rather than merged into one catalogue, because two workers reporting
+   * different descriptions for one name is the fact worth surfacing (#65) and a merge
+   * would be the thing that hides it.
+   */
+  recordReport(report: WorkflowReportRequest): void;
+  /** What each worker last reported, one row per worker that has reported at all. */
+  reports(): ReportedWorkflows[];
+}
+
+/** One worker's reported set, with the digest it was reported under. */
+export interface ReportedWorkflows {
+  identity: string;
+  taskQueue: string;
+  hash: string;
+  workflows: readonly WorkflowReport[];
 }
 
 /** A worker as polls alone can describe it: everything but whether it is busy. */
@@ -120,6 +140,10 @@ export function createWorkerRegistry(
   // parsed back out of it, so no separator has to be chosen that an
   // operator-supplied identity cannot contain.
   const workers = new Map<string, Map<string, Observed>>();
+  // Keyed by identity and queue, and deliberately *not* by role: a worker reports what it
+  // has registered, which is a property of the process rather than of the loop that
+  // happens to be asking. A process serving both roles reports once.
+  const reported = new Map<string, ReportedWorkflows>();
 
   /** Distinct per (role, identity); never parsed, only compared. */
   function workerKeyOf(role: WorkerRole, identity: string): string {
@@ -161,6 +185,28 @@ export function createWorkerRegistry(
           lastPolledAt: at,
           ...(serves === undefined ? {} : {serves}),
         });
+    },
+
+    recordReport(report) {
+      const key = `${report.identity} ${report.taskQueue ?? ANY_TASK_QUEUE}`;
+      // Replaced wholesale, never merged. A worker redeployed under one identity must
+      // report what it runs *now*; accumulating the union across deploys is precisely
+      // what would hide a fleet running two versions of one worker binary.
+      reported.set(key, {
+        identity: report.identity,
+        taskQueue: report.taskQueue ?? ANY_TASK_QUEUE,
+        hash: report.hash,
+        workflows: [...report.workflows],
+      });
+    },
+
+    reports() {
+      // Copied, like `queues()`, so a caller cannot hold a reference that changes under
+      // it while it renders.
+      return [...reported.values()].map((r) => ({
+        ...r,
+        workflows: [...r.workflows],
+      }));
     },
 
     queues() {

@@ -63,6 +63,10 @@ async function dispatch(
       );
     case 'listExecutions':
       return host.listExecutions(request.filter);
+    case 'listWorkflows':
+      return host.listWorkflows();
+    case 'reportWorkflows':
+      return host.reportWorkflows(request.report);
     case 'listQueues':
       return host.listQueues();
     case 'groupExecutions':

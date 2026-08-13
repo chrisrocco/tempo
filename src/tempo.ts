@@ -150,13 +150,16 @@ import {DEFAULT_PORT, WORKER_FLAG, flagValue} from './process_flags';
 import {DEFAULT_TASK_QUEUE} from './protocol';
 import {createJsonLogger} from './server';
 import {createRemoteService} from './services';
+import {workflowDescriptor} from './workflow_descriptor';
 import {
   createActivityRegistry,
   createActivityWorker,
   createWorkflowRegistry,
   createWorkflowWorker,
+  DEFAULT_IDENTITY,
   runActivityWorker,
   runWorkflowWorker,
+  startWorkflowReporter,
   type ActivityFn,
   type WorkerLoop,
   type WorkerLoopOptions,
@@ -489,9 +492,30 @@ function composeRemote(args: {
     );
   }
 
+  // What this worker can run, described. Only the workflow role reports: an activity
+  // worker registers activity names, which the catalogue is not about, and reporting an
+  // empty set from it would look like a workflow worker with nothing registered.
+  const reporter = args.roles.includes('workflow')
+    ? startWorkflowReporter(
+        service,
+        args.workflows.map(([name, fn]) => ({
+          name,
+          ...(workflowDescriptor(fn) ?? {}),
+        })),
+        {
+          identity: args.loop?.identity ?? DEFAULT_IDENTITY,
+          ...(args.taskQueue === undefined ? {} : {taskQueue: args.taskQueue}),
+        },
+      )
+    : undefined;
+
   return {
-    stop: () =>
-      Promise.all(loops.map((loop) => loop.stop())).then(() => undefined),
+    stop: () => {
+      reporter?.stop();
+      return Promise.all(loops.map((loop) => loop.stop())).then(
+        () => undefined,
+      );
+    },
   };
 }
 
