@@ -20,11 +20,8 @@
 import {createLocalRuntime} from '../../src';
 import {MemoryHistoryStore} from '../../src/server';
 import {isolateActivityRegistry} from '../support/isolate_activity_registry';
-import {
-  scheduler,
-  type ScheduleDefinition,
-  type ScheduleStatus,
-} from '../../src/schedule/scheduler.workflow';
+import {scheduler} from '../../src/schedule/scheduler.workflow';
+import type {ScheduleDefinition, ScheduleStatus} from '../../src/protocol';
 import {nextFire} from '../../src/schedule/activities';
 
 function wait(ms: number): Promise<void> {

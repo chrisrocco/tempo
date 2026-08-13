@@ -24,10 +24,9 @@ import {MemoryHistoryStore} from '../../src/server';
 import {isolateActivityRegistry} from '../support/isolate_activity_registry';
 import {
   createScheduleClient,
-  nextFire,
-  scheduleWorkflows,
   type ScheduleDefinition,
 } from '../../src/schedule';
+import {nextFire, scheduleWorkflows} from '../../src/schedule/worker';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
