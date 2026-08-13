@@ -162,6 +162,9 @@ export function runWorkflowWorker(
     const task = await service.pollWorkflowTask({
       taskQueue: options.taskQueue,
       identity,
+      // Read on every poll rather than captured once: a registry can gain a name
+      // after the loop starts, and the manifest is only useful if it is current.
+      serves: worker.names(),
     });
     if (!task) return false;
     let result;
@@ -191,6 +194,7 @@ export function runActivityWorker(
     const task = await service.pollActivityTask({
       taskQueue: options.taskQueue,
       identity,
+      serves: worker.names(),
     });
     if (!task) return false;
     // One attempt per delivery; the lease redelivers on failure/crash

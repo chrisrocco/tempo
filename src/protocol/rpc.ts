@@ -54,7 +54,12 @@ export type RpcRequest =
   | {method: 'health'}
   // `identity` names the polling worker; see `WorkerInfo`. Absent from a client
   // that does not identify itself, which still gets tasks.
-  | {method: 'pollWorkflowTask'; taskQueue?: string; identity?: string}
+  | {
+      method: 'pollWorkflowTask';
+      taskQueue?: string;
+      identity?: string;
+      serves?: readonly string[];
+    }
   | {
       method: 'completeWorkflowTask';
       token: TaskToken;
@@ -62,7 +67,12 @@ export type RpcRequest =
     }
   | {method: 'failWorkflowTask'; token: TaskToken; reason: string}
   | {method: 'heartbeatActivityTask'; token: TaskToken}
-  | {method: 'pollActivityTask'; taskQueue?: string; identity?: string}
+  | {
+      method: 'pollActivityTask';
+      taskQueue?: string;
+      identity?: string;
+      serves?: readonly string[];
+    }
   | {
       method: 'completeActivityTask';
       token: TaskToken;

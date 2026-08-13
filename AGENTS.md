@@ -53,8 +53,8 @@ else — against a real systemd, in a real browser — so each iteration cost a 
 trip through the repo that owns the thing being tested. What this repo owes them
 instead is that everything they need is on the published surface: the `exports`
 map in `package.json`, and `workflow-engine/protocol` in particular, which
-carries every projection type and both of the predicates (`isStuck`,
-`isQueueServed`) a UI would otherwise reimplement and get subtly wrong. A gap
+carries every projection type and all three predicates (`isStuck`,
+`isQueueServed`, `isNameServed`) a UI would otherwise reimplement and get subtly wrong. A gap
 there is a bug in this package, not a reason to move the tool back in.
 
 **Put seams behind interfaces, implementations behind them.** `server/ports/`

@@ -589,6 +589,22 @@ export interface WorkerInfo {
   /** Epoch ms of its most recent poll. */
   lastPolledAt: number;
   /**
+   * What it said it can run, as of its most recent poll — workflow types for a
+   * `workflow` worker, activity names for an `activity` one. See
+   * `PollRequest.serves`.
+   *
+   * **Absent means it did not say**, not that it can run nothing. Only a worker
+   * predating this field, or one built by a caller that constructs polls by hand,
+   * leaves it out — and reporting silence as emptiness would turn "we cannot tell"
+   * into "this queue serves nothing", which is a much stronger claim than the
+   * server is entitled to make.
+   *
+   * Two workers on one queue reporting *different* sets is a fleet running two
+   * versions of one worker binary, which is the condition #65 says is invisible.
+   * This is what makes it a diff rather than a mystery.
+   */
+  serves?: readonly string[];
+  /**
    * Holding a task right now — which is *why* it may have stopped polling.
    *
    * The field that makes a quiet queue readable. The activity loop is
@@ -684,6 +700,51 @@ export function isQueueServed(
     const at = q[field];
     return at !== undefined && now - at <= QUEUE_STALE_MS;
   });
+}
+
+/**
+ * Can anything on `taskQueue` actually run `name` — a workflow type for a
+ * `workflow` role, an activity name for an `activity` one?
+ *
+ * The companion to `isQueueServed`, and the difference between them is the whole
+ * point of #88. `isQueueServed` asks *is anyone there*; this asks *can any of them
+ * do this*. A queue can be busily served by workers that have never heard of the
+ * workflow being dispatched to it, and until a poll carried a manifest the server
+ * could not tell that from a deploy still rolling out.
+ *
+ * ## Three answers, not two
+ *
+ * `true` and `false` are the easy ones. **`undefined` means nobody said**, and
+ * collapsing it into `false` is the mistake this signature exists to prevent: a
+ * worker that reports no manifest would then read as a worker that can run nothing,
+ * and every queue served by an older binary would look broken.
+ *
+ * So a caller gets to distinguish "confirmed missing" from "unknown", which matters
+ * because they warrant different words — "no worker on `reports` runs `nightly`"
+ * against "cannot confirm; workers here do not report what they serve".
+ *
+ * ## Never a reason to refuse
+ *
+ * `false` is a **report**, not a veto. `spec/integration/distributed.spec.ts` settles
+ * this: an unregistered name used to fail an execution on the reading that it was a
+ * typo, and that was wrong, because once tasks route by queue it far more often means
+ * a deploy still rolling — *"failing fast would trade a recoverable state for an
+ * unrecoverable one"*. What a manifest adds is the ability to say which of the two it
+ * is, not permission to act on the answer.
+ */
+export function isNameServed(
+  queues: readonly QueueLiveness[],
+  taskQueue: string,
+  role: WorkerRole,
+  name: string,
+): boolean | undefined {
+  const workers = workersServing(queues, taskQueue, role);
+  if (workers.length === 0) return undefined;
+  // Silence from *any* worker makes the whole answer unknown: one that did not say
+  // may be the one that can run it, so a `false` derived from the others would be a
+  // claim the fleet does not support.
+  if (workers.some((w) => w.serves === undefined)) return undefined;
+  return workers.some((w) => w.serves?.includes(name) === true);
 }
 
 /**
