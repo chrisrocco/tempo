@@ -70,14 +70,35 @@ export interface ScheduleExhausted {
  */
 export function nextFire(
   spec: ScheduleSpec,
-  afterMs: number,
+  afterMs: number | undefined,
   bounds: ScheduleBounds = {},
 ): NextFire | ScheduleExhausted {
-  const nominalTimeMs = nextFireAfter(spec, afterMs, bounds);
-  if (nominalTimeMs === undefined) return {exhausted: true};
-
   // The one clock read in this layer.
   const now = Date.now();
+
+  // **The catch-up policy.** Two cases, and collapsing them into one is wrong in both
+  // directions — the first draft did, and the specs caught it twice.
+  //
+  // *Nothing handled yet* — a schedule that has never fired. Search from **now**. Its
+  // first run is the next future boundary, because a boundary that passed before the
+  // schedule existed was not missed, it was never owed. Anchoring to the epoch instead
+  // would have the first cycle walk every boundary since 1970: for a 40ms interval,
+  // some forty billion of them, firing flat out and starving the queue. Measured, not
+  // theorised. Someone who genuinely wants a backdated start says so with
+  // `notBeforeMs`.
+  //
+  // *A high-water mark exists* — search from it, but never look back further than one
+  // period. So an outage's backlog collapses to **one** fire: a nightly job that missed
+  // three nights runs once, now, and is then back on schedule. That is the right
+  // default for automation and the wrong one for accounting, which is what backfill
+  // over an explicit range is for (#69) — a deliberate request rather than an accident
+  // of downtime.
+  const from =
+    afterMs === undefined ? now : Math.max(afterMs, now - spec.everyMs);
+
+  const nominalTimeMs = nextFireAfter(spec, from, bounds);
+  if (nominalTimeMs === undefined) return {exhausted: true};
+
   return {nominalTimeMs, delayMs: Math.max(0, nominalTimeMs - now)};
 }
 
