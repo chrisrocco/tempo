@@ -267,7 +267,10 @@ describe('worker identity — end to end through a server host', () => {
     const host = createServerHost();
     await host.start('greeter', [], {taskQueue: 'email'});
 
-    const task = await host.pollWorkflowTask('email', 'w1@host');
+    const task = await host.pollWorkflowTask({
+      taskQueue: 'email',
+      identity: 'w1@host',
+    });
     expect(task).toBeDefined();
 
     const busyRow = workersServing(
@@ -300,7 +303,7 @@ describe('worker identity — end to end through a server host', () => {
   it('does not report a worker that only polled an empty queue as busy', async () => {
     const host = createServerHost();
 
-    await host.pollWorkflowTask('email', 'w1@host');
+    await host.pollWorkflowTask({taskQueue: 'email', identity: 'w1@host'});
 
     const [row] = workersServing(await host.listQueues(), 'email', 'workflow');
     expect(row?.identity).toBe('w1@host');

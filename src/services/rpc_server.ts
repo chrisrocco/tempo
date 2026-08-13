@@ -71,8 +71,10 @@ async function dispatch(
       return host.health();
     case 'pollWorkflowTask':
       return (
-        (await host.pollWorkflowTask(request.taskQueue, request.identity)) ??
-        null
+        (await host.pollWorkflowTask({
+          taskQueue: request.taskQueue,
+          identity: request.identity,
+        })) ?? null
       );
     case 'completeWorkflowTask':
       return host.completeWorkflowTask(request.token, request.result);
@@ -80,8 +82,10 @@ async function dispatch(
       return host.failWorkflowTask(request.token, request.reason);
     case 'pollActivityTask':
       return (
-        (await host.pollActivityTask(request.taskQueue, request.identity)) ??
-        null
+        (await host.pollActivityTask({
+          taskQueue: request.taskQueue,
+          identity: request.identity,
+        })) ?? null
       );
     case 'completeActivityTask':
       return host.completeActivityTask(request.token, request.result);

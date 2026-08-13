@@ -158,7 +158,7 @@ describe('worker registry — through the server', () => {
 
     // Nothing has been started, so this poll comes back empty — which is
     // exactly the case that has to register.
-    const task = await host.pollWorkflowTask('email');
+    const task = await host.pollWorkflowTask({taskQueue: 'email'});
     const queues = await host.listQueues();
     host.shutdown();
 
@@ -170,7 +170,7 @@ describe('worker registry — through the server', () => {
   it('records the role that polled, not merely that something did', async () => {
     const host = createServerHost();
 
-    await host.pollActivityTask('email');
+    await host.pollActivityTask({taskQueue: 'email'});
     const queues = await host.listQueues();
     host.shutdown();
 
@@ -190,8 +190,8 @@ describe('worker registry — through the server', () => {
   it('keeps separate queues separate, so one worker does not cover another pool', async () => {
     const host = createServerHost();
 
-    await host.pollWorkflowTask('email');
-    await host.pollWorkflowTask('billing');
+    await host.pollWorkflowTask({taskQueue: 'email'});
+    await host.pollWorkflowTask({taskQueue: 'billing'});
     const queues = await host.listQueues();
     host.shutdown();
 

@@ -497,6 +497,51 @@ export type WorkerRole = 'workflow' | 'activity';
 export const ANY_TASK_QUEUE = '*';
 
 /**
+ * What a worker says about itself when asking for a task.
+ *
+ * An object rather than a positional list, for the reason `WorkflowWorker.replayTask`
+ * gives about its own signature: a list lets a call site omit a field and type-check
+ * anyway, and it grows by one each time the fleet view learns to report something new.
+ * This one has now grown once.
+ *
+ * Every field is optional, and each absence degrades a different thing rather than
+ * breaking dispatch — a caller supplying none still gets tasks.
+ */
+export interface PollRequest {
+  /**
+   * Which pool to take work from. **Omitted means any queue**, which exists for the
+   * in-process runtime: one set of loops there serves every execution regardless of
+   * how it was routed, so `createLocalRuntime` keeps working as a harness whatever
+   * queue names a workflow uses. A deployed worker always names its queue.
+   */
+  taskQueue?: string;
+  /**
+   * Who is asking. Optional, because a worker that does not name itself still gets
+   * tasks — only the fleet view suffers, reporting that something polled without
+   * being able to say what. See `WorkerInfo`.
+   */
+  identity?: string;
+  /**
+   * The names this worker has registered for the role it is polling as: workflow
+   * types on a workflow poll, activity names on an activity poll.
+   *
+   * Sent on **every** poll rather than announced once, and repeated rather than
+   * diffed. The repetition is what makes it self-healing — a worker redeployed under
+   * the same identity, or a server restarted beneath a live fleet, converges on the
+   * next poll instead of holding a manifest that was true earlier. Announcing once
+   * would be wrong in exactly the case this exists to expose: a fleet running two
+   * versions of one worker binary (#65).
+   *
+   * **Absent means unknown, not none.** A worker that sends no manifest is reported
+   * as unknown rather than as serving nothing, because "this queue serves no
+   * workflows" and "we cannot tell" want different responses from whoever is reading.
+   *
+   * Reported, never enforced — see `isNameServed` for why refusing would be wrong.
+   */
+  serves?: readonly string[];
+}
+
+/**
  * How recently a queue must have been polled to count as served.
  *
  * Generous next to the 5ms idle poll interval, because the thing being detected
@@ -725,10 +770,7 @@ export interface WorkflowService {
    * reporting that something polled without being able to say what. See
    * `WorkerInfo`.
    */
-  pollWorkflowTask(
-    taskQueue?: string,
-    identity?: string,
-  ): Promise<WorkflowTask | undefined>;
+  pollWorkflowTask(request?: PollRequest): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
     result: WorkflowTaskResult,
@@ -741,10 +783,9 @@ export interface WorkflowService {
    * control flow. The execution keeps running and the task is retried.
    */
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
-  /** Claim the next activity task on `taskQueue`; omitted means any (see above). */
+  /** Claim the next activity task; see `PollRequest`. */
   pollActivityTask(
-    taskQueue?: string,
-    identity?: string,
+    request?: PollRequest,
   ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /**
