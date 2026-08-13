@@ -67,6 +67,14 @@ export class MemoryTimerService implements TimerService {
     this.timers.delete(key);
   }
 
+  cancelAll(workflowId: string): void {
+    for (const [key, entry] of [...this.timers]) {
+      if (entry.workflowId !== workflowId) continue;
+      if (entry.handle) clearTimeout(entry.handle);
+      this.timers.delete(key);
+    }
+  }
+
   recover(): void {
     const now = Date.now();
     for (const [key, entry] of [...this.timers]) {
