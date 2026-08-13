@@ -76,7 +76,7 @@ export interface WorkflowDefinition<
  *   title: 'Greet a customer',
  *   description: 'Sends the welcome email and records the touchpoint.',
  *   props: [
- *     {name: 'customerId', required: true, schema: {type: 'string'}},
+ *     {name: 'customerId', required: true, type: 'string'},
  *     {name: 'locale', description: 'Defaults to the account language.'},
  *   ],
  *   async start(props: {customerId: string; locale?: string}) {
@@ -105,10 +105,9 @@ export interface WorkflowDefinition<
  * *runtime* description, and the two are related by convention rather than by the
  * compiler.
  *
- * That duplication is real and is the price of having no schema library: deriving one from
- * the other needs zod or its equivalent, which would be a runtime dependency this package
- * does not have. A consumer who already uses zod can close the gap on their side and hand
- * the result in as `schema`.
+ * That duplication is real, and is the price of taking no schema library: deriving one from
+ * the other needs one, which would be a runtime dependency this package does not have — and one whose major versions would then skew against every consumer that had
+ * its own copy.
  */
 export function defineWorkflow<S extends AnyWorkflowFn>(
   definition: WorkflowDefinition<S>,

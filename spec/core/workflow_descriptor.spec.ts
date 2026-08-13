@@ -11,6 +11,7 @@
  */
 
 import 'jasmine';
+import type {WorkflowProp} from '../../src/protocol';
 import {createLocalRuntime} from '../../src';
 import {defineWorkflow} from '../../src/workflow';
 import {workflowDescriptor} from '../../src/workflow_descriptor';
@@ -33,8 +34,8 @@ describe('defineWorkflow', () => {
   });
 
   it('reads back everything except the function', () => {
-    const props = [
-      {name: 'customerId', required: true, schema: {type: 'string'}},
+    const props: WorkflowProp[] = [
+      {name: 'customerId', required: true, type: 'string'},
       {name: 'locale', description: 'Defaults to the account language.'},
     ];
     const fn = defineWorkflow({
@@ -152,7 +153,7 @@ describe('a described workflow on a runtime', () => {
   it('registers and runs exactly as an undescribed one does', async () => {
     const greeter = defineWorkflow({
       title: 'Greet a customer',
-      props: [{name: 'name', required: true, schema: {type: 'string'}}],
+      props: [{name: 'name', required: true, type: 'string'}],
       async start(props: {name: string}) {
         return `hello ${props.name}`;
       },

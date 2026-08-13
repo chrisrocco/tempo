@@ -11,19 +11,36 @@
  * In `protocol/` because it is data that will cross the wire to a reader who has no
  * access to the functions. Nothing here is used during replay.
  *
+ * ## Small and closed, rather than a schema language
+ *
+ * A prop's type is one of four names, not a schema document. This started as an opaque
+ * JSON Schema and was narrowed deliberately.
+ *
+ * JSON Schema is a real specification and a reasonable thing to reach for — but it is not
+ * *one* thing. There are drafts that disagree in ways that bite (an array-valued `items`
+ * in draft-07 is `prefixItems` in 2020-12), so adopting it is not a decision but the start
+ * of one: which draft, and which subset does a form renderer actually honour. That is the
+ * same version-skew problem a schema library would have brought, one layer down, and
+ * without a library to report when the answer is wrong.
+ *
+ * Worse, it would have been a claim this package does not keep. Typed honestly, an opaque
+ * schema is `{[key: string]: unknown}` — a name over "any object", which the engine never
+ * reads and never checks. Anyone meeting a field called `schema` reasonably assumes
+ * `minLength` and `pattern` mean something here. They would not.
+ *
+ * Four names are checkable by the compiler, exhaustively switchable by a renderer, and
+ * describe exactly what gets rendered. `json` keeps anything structured expressible — a
+ * text area whose contents are parsed — so nothing becomes impossible, only unstructured.
+ * Widening this later is easy; walking back from a field named after a standard we only
+ * partly implement would not have been.
+ *
  * ## The engine describes; it does not validate
  *
- * `input` is a JSON Schema and the engine **never reads it** — it is stored, carried, and
- * handed to whoever asked. That is the distinction that keeps this cheap: describing is
- * data, validating is a library, and this package has no runtime dependencies and intends
- * to keep none.
- *
- * The consequence is deliberate rather than reluctant. A consumer who writes schemas with
- * zod converts at the boundary — `zodToJsonSchema(Input)` — and keeps zod as *their*
- * dependency. A consumer who writes the object by hand is equally served. And whether
- * arguments are checked before a workflow runs stays where it already is: the workflow's
- * own first lines, or the caller. Adding validation here would change failure semantics
- * for every execution, which is a separate decision with its own argument to make.
+ * A prop's `type` is carried and handed to whoever asked. It is not enforced when a
+ * workflow starts, and that stays true deliberately: whether arguments are checked belongs
+ * in the workflow's own first lines or in the caller, and moving it here would change
+ * failure semantics for every execution — a separate decision with its own argument to
+ * make.
  *
  * ## Every field is optional
  *
@@ -34,13 +51,13 @@
  */
 
 /**
- * A JSON Schema document, carried opaquely.
+ * What kind of value a prop takes.
  *
- * Typed as an open record rather than a modelled schema type, and that is not laziness:
- * modelling it would commit this package to a dialect and a version of one, and would
- * imply the engine understands what it holds. It does not. The looseness is the contract.
+ * A closed union so a renderer can switch exhaustively and the compiler will tell it when
+ * this grows. `json` is the escape hatch for anything structured: a free-form value the
+ * caller supplies as JSON, rendered as a text area rather than a typed control.
  */
-export type JsonSchema = {readonly [key: string]: unknown};
+export type WorkflowPropType = 'string' | 'number' | 'boolean' | 'json';
 
 /**
  * One value a workflow must be started with.
@@ -61,13 +78,14 @@ export interface WorkflowProp {
   /** Whether the workflow needs it. Absent means optional. */
   required?: boolean;
   /**
-   * The value's type, as a JSON Schema, carried opaquely — the engine never reads it.
+   * What kind of value it takes.
    *
-   * Absent is allowed and means "no stated type", which a form renders as free text. That
-   * is better than the alternative of forcing a schema onto every prop and getting
-   * `{type: 'string'}` written reflexively where the author meant "I have not decided".
+   * Absent means "not stated", which a form renders as free text — better than forcing a
+   * type onto every prop and collecting `'string'` written reflexively where the author
+   * had not decided. A reader that needs a default should treat absent as `'string'`
+   * rather than refusing to render the field.
    */
-  schema?: JsonSchema;
+  type?: WorkflowPropType;
 }
 
 /** What a workflow says about itself. */
