@@ -60,6 +60,7 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
   protocol: [],
   core: ['protocol'],
   patterns: ['protocol', 'core'],
+  schedule: ['protocol'],
   server: ['protocol'],
   worker: ['protocol', 'core'],
   client: ['protocol', 'core'],
@@ -73,6 +74,8 @@ const LAYER_RATIONALE: Record<string, string> = {
   core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/ — and never patterns/, which is built on top of it',
   patterns:
     'patterns/ is workflow-authoring helpers built from the primitives core/ exports; it depends on core/, never the reverse',
+  schedule:
+    'schedule/ is when-does-this-fire arithmetic over protocol/ spec types. It must not reach core/: it runs inside an activity, on the I/O side of the determinism boundary, which is the whole reason calendar work lives here — a timezone database may eventually be a dependency here and must never become one of core/',
   server:
     'server/ runs NO user code — workflow replay happens in the workflow worker, so it must not reach into core/',
   worker: 'worker/ is written against protocol/ and runs core/',
