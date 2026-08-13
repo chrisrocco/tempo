@@ -39,21 +39,25 @@ describe('nextFire activity', () => {
   });
 
   /**
-   * The nominal time is a property of the spec, not of when the question was asked —
-   * which is what lets a retried attempt of this activity produce the same execution
-   * id, and therefore what makes a repeated fire idempotent rather than a duplicate
-   * run.
+   * The idempotency guarantee, stated exactly: **asked at any point within the same
+   * period, the nominal time does not move.** That is what lets a retried attempt of
+   * this activity produce the same execution id, and therefore what makes a repeated
+   * fire claim one run rather than two — a retry happens seconds later, not periods
+   * later.
+   *
+   * It is deliberately *not* "the same however late you ask". Asked a period or more
+   * late the answer advances, because the catch-up policy searches from at most one
+   * period back; a question asked an hour late should be answered with the boundary
+   * just gone, not the one an hour ago.
    */
-  it('gives the same nominal time however late it is asked', () => {
+  it('gives the same nominal time anywhere within one period', () => {
     const at = (now: number): number => {
       jasmine.clock().mockDate(new Date(now));
       const result = nextFire(every(1000), 1_000);
       return isExhausted(result) ? -1 : result.nominalTimeMs;
     };
 
-    expect([at(1_001), at(1_500), at(1_999), at(50_000)]).toEqual([
-      2_000, 2_000, 2_000, 2_000,
-    ]);
+    expect([at(1_001), at(1_500), at(1_999)]).toEqual([2_000, 2_000, 2_000]);
   });
 
   /**
@@ -62,10 +66,40 @@ describe('nextFire activity', () => {
    * had; only the waiting is over.
    */
   it('clamps a past-due boundary to fire now rather than reporting a negative delay', () => {
-    jasmine.clock().mockDate(new Date(500_000));
+    // Half a period late: the boundary at 2000 has passed, and is still the one owed.
+    jasmine.clock().mockDate(new Date(2_500));
     const result = nextFire(every(1000), 1_000);
 
     expect(result).toEqual({nominalTimeMs: 2_000, delayMs: 0});
+  });
+
+  /**
+   * The two catch-up cases, which are genuinely different questions. Collapsing them
+   * was a real bug and the scheduler specs caught it from both sides: treating "never
+   * fired" as "handled through the epoch" made a new schedule walk every boundary
+   * since 1970, and treating it as "look back one period" made a new hourly schedule
+   * fire immediately for a boundary that passed before it existed.
+   */
+  it('searches from now when nothing has been handled yet', () => {
+    jasmine.clock().mockDate(new Date(10_000));
+    // Hourly boundaries; the most recent one is far in the past. A new schedule must
+    // not fire for it — that boundary was never owed.
+    const result = nextFire(every(3_600_000), undefined);
+
+    if (isExhausted(result)) throw new Error('unreachable');
+    expect(result.nominalTimeMs).toBe(3_600_000);
+    expect(result.delayMs).toBe(3_590_000);
+  });
+
+  it('collapses an outage backlog to one fire, not a replay of the gap', () => {
+    // Ten periods have passed since the last handled boundary.
+    jasmine.clock().mockDate(new Date(10_000));
+    const result = nextFire(every(1000), 0);
+
+    if (isExhausted(result)) throw new Error('unreachable');
+    // The boundary just gone, fired now — not boundary 1000 and then a walk forward.
+    expect(result.nominalTimeMs).toBe(10_000);
+    expect(result.delayMs).toBe(0);
   });
 
   it('reports exhausted when the bounds have run out', () => {

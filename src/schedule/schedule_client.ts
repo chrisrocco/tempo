@@ -1,0 +1,228 @@
+/**
+ * @fileoverview
+ * `ScheduleClient` — create, inspect and operate schedules.
+ *
+ * ## Why this is not a set of RPCs
+ *
+ * The plan was seven wire methods: `createSchedule`, `listSchedules`,
+ * `describeSchedule`, `updateSchedule`, `deleteSchedule`, `setSchedulePaused`,
+ * `triggerSchedule`. Each would have touched `protocol/rpc.ts`,
+ * `services/rpc_server.ts`, `services/server_host.ts`, `services/remote_service.ts`,
+ * `services/local_service.ts` and `client/` — five files in three layers, per method,
+ * to smear one feature across the whole engine.
+ *
+ * None of it would have added a *capability*. A schedule is an execution, so every
+ * operation already exists on `WorkflowService`:
+ *
+ * | schedule operation | what it actually is |
+ * | --- | --- |
+ * | create | `start` the scheduler workflow under a chosen id |
+ * | pause / resume / trigger / update | `signal` |
+ * | describe | `describeExecution` — args are the definition, carryover the status |
+ * | list | `listExecutions({name})` |
+ * | delete | `cancel` |
+ *
+ * So this is a *vocabulary* over the existing seam rather than an extension of it,
+ * which is what lets the whole slice live in one directory importing only
+ * `protocol/`. It works against a local runtime and a remote server without knowing
+ * which it has, because `WorkflowService` is the seam both implement.
+ *
+ * The one thing an RPC layer would have bought — rejecting a bad spec before it becomes
+ * a running workflow — is here as `scheduleSpecProblems`, checked in `create`.
+ *
+ * ## What it deliberately does not hide
+ *
+ * The ids. A schedule's id is chosen by the caller and its runs are named
+ * `<scheduleId>-<nominalTime>`, so `listRuns` is a prefix query and a caller who wants
+ * to cancel one run can address it directly. An opaque handle would have made the
+ * predictable naming — which is the dedup mechanism — unreachable.
+ */
+
+import type {
+  ExecutionDetail,
+  ExecutionPage,
+  ExecutionSummary,
+  ScheduleBounds,
+  ScheduleSpec,
+  WorkflowService,
+} from '../protocol';
+import {scheduleSpecProblems} from './next_fire';
+import type {ScheduleDefinition, ScheduleStatus} from './scheduler.workflow';
+
+/**
+ * The workflow type a schedule is.
+ *
+ * Exported because it is the filter for "list every schedule", and because a consumer
+ * registering the workflow under a different name would produce schedules this client
+ * cannot find. `scheduleWorkflows` is keyed by it for that reason.
+ */
+export const SCHEDULER_WORKFLOW_NAME = 'scheduler';
+
+/** A schedule as a listing shows it. */
+export interface ScheduleSummary {
+  scheduleId: string;
+  /** `running` for a live schedule; a terminal status means it was deleted or exhausted. */
+  status: ExecutionSummary['status'];
+}
+
+/** A schedule as `describe` shows it: what it should do, and what it has done. */
+export interface ScheduleView {
+  scheduleId: string;
+  status: ExecutionSummary['status'];
+  /**
+   * The definition currently in force — the args of the run in progress, so an
+   * `update` is reflected here from its next rollover.
+   */
+  definition: ScheduleDefinition | undefined;
+  /**
+   * What the schedule has done. Absent only before the first rollover, since carryover
+   * reports what a run *started* with and the first run started with nothing.
+   */
+  schedule: ScheduleStatus | undefined;
+}
+
+/** Everything an operator does to a schedule. */
+export interface ScheduleClient {
+  /**
+   * Create a schedule and start it.
+   *
+   * The spec is validated here rather than discovered by the scheduler, because a bad
+   * spec should be a rejected call and not a workflow that starts and immediately
+   * fails: the second is durable, appears in listings, and has to be cleaned up.
+   *
+   * The id is the caller's, and is the schedule's identity for the rest of its life —
+   * `describe`, `pause` and `delete` all take it, and its runs are named after it.
+   */
+  create(scheduleId: string, definition: ScheduleDefinition): void;
+  /** Every schedule, live or finished. */
+  list(): Promise<ScheduleSummary[]>;
+  /** One schedule's definition and status, or undefined if there is no such schedule. */
+  describe(scheduleId: string): Promise<ScheduleView | undefined>;
+  /**
+   * One page of the executions a schedule has started, ordered by creation like any
+   * other listing, with `nextCursor` to continue.
+   *
+   * Paged rather than complete because a schedule's runs are unbounded — an hourly one
+   * makes nearly nine thousand a year — so a method that walked them all would get
+   * slower every day the schedule stayed up.
+   */
+  listRuns(scheduleId: string, cursor?: string): Promise<ExecutionPage>;
+  /** Stop firing on the spec. Triggers still work; see `trigger`. */
+  pause(scheduleId: string): void;
+  /** Resume firing on the spec. */
+  resume(scheduleId: string): void;
+  /**
+   * Run the target now, regardless of the spec and regardless of pause.
+   *
+   * Not deduplicated against a boundary or against another trigger — asking twice runs
+   * twice, deliberately, because that is what asking twice means. This is the "last
+   * night's job failed, run it now" operation.
+   */
+  trigger(scheduleId: string): void;
+  /**
+   * Replace the definition. Takes effect at the schedule's next rollover, which is its
+   * next fire or its next signal.
+   */
+  update(scheduleId: string, definition: ScheduleDefinition): void;
+  /**
+   * Stop the schedule for good.
+   *
+   * **Runs it already started keep running.** The scheduler starts them with
+   * `startWorkflow`, so they are nobody's children and a cancel does not cascade to
+   * them — deleting a schedule stops the schedule, not the work it set off. Cancel a
+   * particular run by its own id if that is what is wanted.
+   */
+  delete(scheduleId: string): void;
+}
+
+/** Build a `ScheduleClient` over any `WorkflowService` — local runtime or remote server. */
+export function createScheduleClient(service: WorkflowService): ScheduleClient {
+  const send = (
+    scheduleId: string,
+    signal: string,
+    payload?: unknown,
+  ): void => {
+    service.signal(scheduleId, signal, payload);
+  };
+
+  return {
+    create(scheduleId, definition) {
+      const problems = scheduleSpecProblems(
+        definition.spec as ScheduleSpec,
+        (definition.bounds ?? {}) as ScheduleBounds,
+      );
+      if (problems.length > 0)
+        throw new Error(
+          `cannot create schedule "${scheduleId}": ${problems.join('; ')}`,
+        );
+
+      service.start(SCHEDULER_WORKFLOW_NAME, [definition], {
+        workflowId: scheduleId,
+        taskQueue: definition.target.taskQueue,
+      });
+    },
+
+    async list() {
+      // Walked to the end rather than returning a page. Listings are capped, and there
+      // is no useful answer to "some of your schedules" — an operator asking what is
+      // scheduled needs all of it. Safe to walk because the count is bounded by how
+      // many schedules a person created, which is tens, unlike the runs below.
+      const schedules: ScheduleSummary[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await service.listExecutions({
+          name: SCHEDULER_WORKFLOW_NAME,
+          cursor,
+        });
+        for (const item of page.executions)
+          schedules.push({scheduleId: item.workflowId, status: item.status});
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+      return schedules;
+    },
+
+    async describe(scheduleId) {
+      const detail: ExecutionDetail | undefined =
+        await service.describeExecution(scheduleId);
+      if (!detail) return undefined;
+      return {
+        scheduleId,
+        status: detail.status,
+        definition: detail.args[0] as ScheduleDefinition | undefined,
+        schedule: detail.carryover?.['schedule'] as ScheduleStatus | undefined,
+      };
+    },
+
+    async listRuns(scheduleId, cursor) {
+      // A prefix query, which works because the scheduler names every run
+      // `<scheduleId>-<nominalTime>`. The trailing separator matters: without it
+      // `nightly` would also match `nightly-report`'s runs.
+      //
+      // One page, unlike `list` above, and the asymmetry is the point: a schedule's runs
+      // grow without bound — an hourly one produces nearly nine thousand a year — so
+      // walking to the end is a request that gets slower every day it is left running.
+      // The cursor is passed through instead.
+      const page = await service.listExecutions({
+        workflowIdPrefix: `${scheduleId}-`,
+        cursor,
+      });
+      return page;
+    },
+
+    pause(scheduleId) {
+      send(scheduleId, 'pauseSchedule');
+    },
+    resume(scheduleId) {
+      send(scheduleId, 'resumeSchedule');
+    },
+    trigger(scheduleId) {
+      send(scheduleId, 'triggerSchedule');
+    },
+    update(scheduleId, definition) {
+      send(scheduleId, 'updateSchedule', definition);
+    },
+    delete(scheduleId) {
+      service.cancel(scheduleId);
+    },
+  };
+}

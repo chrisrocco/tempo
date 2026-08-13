@@ -12,6 +12,7 @@
 
 import {createClient, type WorkflowHandle} from './client';
 import type {WorkflowFn} from './core';
+import type {WorkflowService} from './protocol';
 import type {HistoryStore} from './server';
 import {createLocalService} from './services';
 import {
@@ -36,6 +37,20 @@ export interface Runtime {
   resume(): Promise<void>;
   /** Stop background timers so the process can exit. */
   shutdown(): void;
+  /**
+   * The seam this runtime is a composition over.
+   *
+   * Exposed because anything built *on* `WorkflowService` rather than on a handle —
+   * `createScheduleClient`, or any operator tool — otherwise works against a server and
+   * not in local mode, which is backwards: local mode is where someone tries a thing
+   * first. A remote caller has always been able to get one from `createRemoteService`,
+   * so this is the missing half of that symmetry rather than a new kind of access.
+   *
+   * `start` and `getHandle` above remain the ergonomic path and are unchanged. This is
+   * the whole client-facing surface — `signal`, `cancel`, `terminate`, `listExecutions`,
+   * `describeExecution` — for callers that need the parts a handle does not expose.
+   */
+  readonly service: WorkflowService;
 }
 
 export interface LocalRuntimeOptions {
@@ -90,6 +105,7 @@ export function createLocalRuntime(options: LocalRuntimeOptions = {}): Runtime {
     shutdown() {
       service.shutdown();
     },
+    service,
   };
   return runtime;
 }
