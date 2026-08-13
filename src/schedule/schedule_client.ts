@@ -38,7 +38,7 @@
  * predictable naming — which is the dedup mechanism — unreachable.
  */
 
-import {DEFAULT_TASK_QUEUE} from '../protocol';
+import {DEFAULT_TASK_QUEUE, isNameServed} from '../protocol';
 import type {
   ExecutionDetail,
   ExecutionPage,
@@ -82,19 +82,47 @@ export interface ScheduleView {
   schedule: ScheduleStatus | undefined;
 }
 
+/** What `create` did, and anything about it that looked wrong. */
+export interface ScheduleCreation {
+  scheduleId: string;
+  /**
+   * Things that will stop this schedule working, in plain sentences. Empty is the
+   * normal case.
+   *
+   * **Advisory, and produced after the schedule has already started.** Refusing would
+   * be wrong for the reason `spec/integration/distributed.spec.ts` records: a queue
+   * with no worker for a name far more often means a deploy still rolling than a
+   * mistake, and failing fast would trade a recoverable state for an unrecoverable
+   * one. So a schedule is always created, and the caller is told what it noticed.
+   *
+   * **Silence is not a clean bill of health.** These come from `isNameServed`, which
+   * answers `undefined` when the workers on a queue do not report what they can run —
+   * and this warns only on a definite `false`. Warning on "cannot tell" would fire
+   * constantly for any fleet whose workers predate manifests, which is how a warning
+   * becomes something people learn to ignore.
+   */
+  warnings: string[];
+}
+
 /** Everything an operator does to a schedule. */
 export interface ScheduleClient {
   /**
    * Create a schedule and start it.
    *
-   * The spec is validated here rather than discovered by the scheduler, because a bad
-   * spec should be a rejected call and not a workflow that starts and immediately
-   * fails: the second is durable, appears in listings, and has to be cleaned up.
+   * The spec is validated first and a bad one **rejects**, because it should be a
+   * refused call rather than a workflow that starts and immediately fails: the second
+   * is durable, appears in listings, and has to be cleaned up.
    *
    * The id is the caller's, and is the schedule's identity for the rest of its life —
    * `describe`, `pause` and `delete` all take it, and its runs are named after it.
+   *
+   * **Warnings are advisory and arrive after the schedule exists.** See
+   * `ScheduleCreation.warnings` for why nothing here refuses on them.
    */
-  create(scheduleId: string, definition: ScheduleDefinition): void;
+  create(
+    scheduleId: string,
+    definition: ScheduleDefinition,
+  ): Promise<ScheduleCreation>;
   /** Every schedule, live or finished. */
   list(): Promise<ScheduleSummary[]>;
   /** One schedule's definition and status, or undefined if there is no such schedule. */
@@ -136,6 +164,58 @@ export interface ScheduleClient {
   delete(scheduleId: string): void;
 }
 
+/**
+ * The two ways a schedule can be created successfully and never do anything, stated as
+ * sentences — or nothing, when the fleet cannot say.
+ *
+ * Both failures look identical from outside: a schedule that exists, reports `running`,
+ * and produces no runs. They are the last cases of that shape left in this feature, which
+ * is why they are worth a round trip at creation.
+ *
+ * `isNameServed` answers **three** ways, and only a definite `false` speaks here. Its
+ * `undefined` means the workers on that queue do not report what they can run, and
+ * warning then would fire for every fleet whose worker binaries predate manifests —
+ * training the reader to ignore the warning that matters. Saying nothing when we do not
+ * know is the whole reason the predicate has a third answer.
+ */
+async function unservedWarnings(
+  service: WorkflowService,
+  definition: ScheduleDefinition,
+  schedulerTaskQueue: string,
+): Promise<string[]> {
+  const queues = await service.listQueues();
+  const warnings: string[] = [];
+
+  // The forgotten `scheduleWorkflows` registration. The schedule is started, the
+  // execution is created, and no worker will ever replay it.
+  if (
+    isNameServed(
+      queues,
+      schedulerTaskQueue,
+      'workflow',
+      SCHEDULER_WORKFLOW_NAME,
+    ) === false
+  )
+    warnings.push(
+      `no worker on task queue "${schedulerTaskQueue}" runs "${SCHEDULER_WORKFLOW_NAME}", ` +
+        `so this schedule will not fire. Register it: ` +
+        `Tempo.startWorker({workflows: {...yours, ...scheduleWorkflows}}).`,
+    );
+
+  // The schedule fires correctly and its runs pile up unstarted.
+  const targetQueue = definition.target.taskQueue ?? DEFAULT_TASK_QUEUE;
+  if (
+    isNameServed(queues, targetQueue, 'workflow', definition.target.name) ===
+    false
+  )
+    warnings.push(
+      `no worker on task queue "${targetQueue}" runs "${definition.target.name}", ` +
+        `so this schedule will fire and its runs will not start.`,
+    );
+
+  return warnings;
+}
+
 /** How a `ScheduleClient` is wired. */
 export interface ScheduleClientOptions {
   /**
@@ -164,7 +244,7 @@ export function createScheduleClient(
   };
 
   return {
-    create(scheduleId, definition) {
+    async create(scheduleId, definition) {
       const problems = scheduleSpecProblems(
         definition.spec as ScheduleSpec,
         (definition.bounds ?? {}) as ScheduleBounds,
@@ -199,6 +279,19 @@ export function createScheduleClient(
         // stopped the schedule itself from running.
         taskQueue: schedulerTaskQueue,
       });
+
+      // Checked *after* starting, not before. The schedule exists either way — see
+      // `ScheduleCreation.warnings` — so holding the create behind an advisory read
+      // would add a round trip to the path that always succeeds, in order to maybe
+      // say something about the path that already succeeded.
+      return {
+        scheduleId,
+        warnings: await unservedWarnings(
+          service,
+          normalized,
+          schedulerTaskQueue,
+        ),
+      };
     },
 
     async list() {

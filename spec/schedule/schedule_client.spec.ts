@@ -12,7 +12,14 @@
  * fail rather than something in production doing so.
  */
 
+import type {AddressInfo} from 'node:net';
+import type {Server} from 'node:http';
 import {createLocalRuntime} from '../../src';
+import {
+  createRemoteService,
+  createRpcServer,
+  createServerHost,
+} from '../../src/services';
 import {MemoryHistoryStore} from '../../src/server';
 import {isolateActivityRegistry} from '../support/isolate_activity_registry';
 import {
@@ -60,7 +67,7 @@ describe('ScheduleClient', () => {
     const ran: string[] = [];
     const {client} = harness(ran);
 
-    client.create('sc-1', fast);
+    await client.create('sc-1', fast);
     await wait(300);
 
     expect(ran.length).toBeGreaterThan(1);
@@ -74,8 +81,8 @@ describe('ScheduleClient', () => {
   it('finds its own schedules in a listing', async () => {
     const {client} = harness([]);
 
-    client.create('sc-2', hourly);
-    client.create('sc-3', hourly);
+    await client.create('sc-2', hourly);
+    await client.create('sc-3', hourly);
     await wait(120);
 
     const ids = (await client.list()).map((s) => s.scheduleId).sort();
@@ -85,12 +92,12 @@ describe('ScheduleClient', () => {
   it('rejects a bad spec instead of starting a doomed workflow', async () => {
     const {client} = harness([]);
 
-    expect(() =>
+    await expectAsync(
       client.create('sc-4', {
         spec: {type: 'interval', everyMs: 0},
         target: {name: 'target'},
       }),
-    ).toThrowError(/cannot create schedule "sc-4".*positive integer/);
+    ).toBeRejectedWithError(/cannot create schedule "sc-4".*positive integer/);
 
     // Nothing was started, which is the point — a rejected spec leaves no execution to
     // find and clean up later.
@@ -101,7 +108,7 @@ describe('ScheduleClient', () => {
     const ran: string[] = [];
     const {client} = harness(ran);
 
-    client.create('sc-5', fast);
+    await client.create('sc-5', fast);
     await wait(300);
 
     const view = await client.describe('sc-5');
@@ -118,6 +125,19 @@ describe('ScheduleClient', () => {
     expect(await client.describe('never-made')).toBeUndefined();
   });
 
+  // Silent under `createLocalRuntime`, and correctly so: its drain loops poll with no
+  // identity, which by design records no worker row (see `worker_registry`). With no
+  // fleet to describe, `isNameServed` answers `undefined` and this says nothing. The
+  // warnings are exercised against a real polling fleet below.
+  it('says nothing about a fleet it cannot see', async () => {
+    const {client} = harness([]);
+
+    const created = await client.create('sc-14', hourly);
+
+    expect(created.scheduleId).toBe('sc-14');
+    expect(created.warnings).toEqual([]);
+  });
+
   /**
    * The stored definition names the queue, rather than leaving it for the engine to
    * resolve as "inherit the starter's". Two reasons, and the second is the one that bites:
@@ -128,7 +148,7 @@ describe('ScheduleClient', () => {
   it('records the default queue on the definition rather than leaving it unset', async () => {
     const {client} = harness([]);
 
-    client.create('sc-11', {
+    await client.create('sc-11', {
       spec: {type: 'interval', everyMs: 3_600_000},
       target: {name: 'target'}, // no queue given
     });
@@ -142,7 +162,7 @@ describe('ScheduleClient', () => {
   it('keeps an explicit target queue as given', async () => {
     const {client} = harness([]);
 
-    client.create('sc-12', {
+    await client.create('sc-12', {
       spec: {type: 'interval', everyMs: 3_600_000},
       target: {name: 'target', taskQueue: 'reports'},
     });
@@ -163,7 +183,7 @@ describe('ScheduleClient', () => {
     const ran: string[] = [];
     const {store, client} = harness(ran);
 
-    client.create('sc-13', {
+    await client.create('sc-13', {
       spec: {type: 'interval', everyMs: 40},
       target: {name: 'target', taskQueue: 'default'},
     });
@@ -183,7 +203,7 @@ describe('ScheduleClient', () => {
     const ran: string[] = [];
     const {client} = harness(ran);
 
-    client.create('sc-6', fast);
+    await client.create('sc-6', fast);
     await wait(300);
 
     const page = await client.listRuns('sc-6');
@@ -198,7 +218,7 @@ describe('ScheduleClient', () => {
     const ran: string[] = [];
     const {client} = harness(ran);
 
-    client.create('sc-7', hourly);
+    await client.create('sc-7', hourly);
     await wait(100);
     client.pause('sc-7');
     for (let i = 0; i < 60; i++) {
@@ -219,7 +239,7 @@ describe('ScheduleClient', () => {
     const ran: string[] = [];
     const {client} = harness(ran);
 
-    client.create('sc-8', hourly);
+    await client.create('sc-8', hourly);
     await wait(100);
     expect(ran).toEqual([]);
 
@@ -235,7 +255,7 @@ describe('ScheduleClient', () => {
     const ran: string[] = [];
     const {client} = harness(ran);
 
-    client.create('sc-9', hourly);
+    await client.create('sc-9', hourly);
     await wait(100);
     client.update('sc-9', {...hourly, spec: {type: 'interval', everyMs: 40}});
 
@@ -259,7 +279,7 @@ describe('ScheduleClient', () => {
     const ran: string[] = [];
     const {store, client} = harness(ran);
 
-    client.create('sc-10', fast);
+    await client.create('sc-10', fast);
     await wait(300);
     const runs = (await client.listRuns('sc-10')).executions;
     expect(runs.length).toBeGreaterThan(0);
@@ -280,5 +300,155 @@ describe('ScheduleClient', () => {
       const rec = await store.get(run.workflowId);
       expect(rec?.status).toBe('completed');
     }
+  });
+});
+
+/**
+ * The warnings, against a fleet that actually polls.
+ *
+ * A real server over RPC, with a worker's poll simulated directly — that is enough,
+ * because a manifest reaches the registry through the poll and nothing else. What this
+ * covers that a hand-built `QueueWorkers[]` would not is the whole path: poll → RPC →
+ * registry → `listQueues` → predicate → sentence.
+ *
+ * These are the last two "created fine, never runs" shapes in schedules. Both look
+ * identical from outside — a schedule that exists, reports `running`, and produces
+ * nothing.
+ */
+describe('ScheduleClient warnings against a polling fleet', () => {
+  let host: ReturnType<typeof createServerHost>;
+  let server: Server;
+  let service: ReturnType<typeof createRemoteService>;
+
+  beforeEach(async () => {
+    host = createServerHost();
+    server = createRpcServer(host);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const {port} = server.address() as AddressInfo;
+    service = createRemoteService(`http://127.0.0.1:${port}`);
+  });
+
+  afterEach(async () => {
+    host.shutdown();
+    (
+      server as Server & {closeAllConnections?: () => void}
+    ).closeAllConnections?.();
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
+  /** One poll is all it takes for the server to know what a worker serves. */
+  const workerServing = async (serves: string[]): Promise<void> => {
+    await service.pollWorkflowTask({
+      taskQueue: 'default',
+      identity: 'w1@host',
+      serves,
+    });
+  };
+
+  it('says nothing when both the scheduler and the target are served', async () => {
+    await workerServing(['scheduler', 'nightlyReport']);
+    const client = createScheduleClient(service);
+
+    const created = await client.create('s-1', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'nightlyReport'},
+    });
+
+    expect(created.warnings).toEqual([]);
+  });
+
+  it('warns when no worker runs the target workflow', async () => {
+    await workerServing(['scheduler']);
+    const client = createScheduleClient(service);
+
+    const created = await client.create('s-2', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'nightlyReport'},
+    });
+
+    expect(created.warnings.length).toBe(1);
+    expect(created.warnings[0]).toContain('nightlyReport');
+    expect(created.warnings[0]).toContain('runs will not start');
+  });
+
+  /**
+   * The forgotten `scheduleWorkflows` registration — the hole this closes. The schedule
+   * is created, the execution exists, and no worker will ever replay it.
+   */
+  it('warns when no worker runs the scheduler itself', async () => {
+    await workerServing(['nightlyReport']);
+    const client = createScheduleClient(service);
+
+    const created = await client.create('s-3', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'nightlyReport'},
+    });
+
+    expect(created.warnings.length).toBe(1);
+    expect(created.warnings[0]).toContain('scheduleWorkflows');
+  });
+
+  it('reports both when neither is served', async () => {
+    await workerServing(['somethingElse']);
+    const client = createScheduleClient(service);
+
+    const created = await client.create('s-4', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'nightlyReport'},
+    });
+
+    expect(created.warnings.length).toBe(2);
+  });
+
+  /**
+   * Created regardless, which is the point. A queue with no worker for a name usually
+   * means a deploy still rolling, and refusing would trade a recoverable state for an
+   * unrecoverable one.
+   */
+  it('creates the schedule anyway, warning or not', async () => {
+    await workerServing(['somethingElse']);
+    const client = createScheduleClient(service);
+
+    await client.create('s-5', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'nightlyReport'},
+    });
+
+    expect((await client.describe('s-5'))?.status).toBe('running');
+  });
+
+  /**
+   * Silence rather than a guess. Nothing polls `reports`, so `isNameServed` cannot
+   * distinguish an empty pool from one whose workers have not started — and warning on
+   * "cannot tell" is how a warning becomes noise people filter out.
+   */
+  it('stays quiet about a queue nobody polls', async () => {
+    await workerServing(['scheduler', 'nightlyReport']);
+    const client = createScheduleClient(service);
+
+    const created = await client.create('s-6', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'nightlyReport', taskQueue: 'reports'},
+    });
+
+    expect(created.warnings).toEqual([]);
+  });
+
+  // A worker that reports no manifest makes the answer unknown, not negative — so an
+  // older worker binary in the fleet silences the warning rather than triggering it.
+  it('stays quiet when a worker on the queue reports no manifest', async () => {
+    await workerServing(['scheduler']);
+    await service.pollWorkflowTask({
+      taskQueue: 'default',
+      identity: 'old@host',
+    });
+    const client = createScheduleClient(service);
+
+    const created = await client.create('s-7', {
+      spec: {type: 'interval', everyMs: 3_600_000},
+      target: {name: 'nightlyReport'},
+    });
+
+    expect(created.warnings).toEqual([]);
   });
 });
