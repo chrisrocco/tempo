@@ -212,6 +212,13 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     else ctx.bufferedSignals.push(ev);
     return;
   }
+  // Informational, and deliberately handled before the marker branch below. It
+  // shares a seq with the `scheduleActivity` command — and, on a retried activity,
+  // with other events of its own type — so checking it as a marker would be asking
+  // a question it is not the answer to. Nothing on replay depends on it: it resolves
+  // no waiter, suppresses no command, and its absence from a history written before
+  // it existed is not a divergence.
+  if (ev.type === 'activityStarted') return;
   if (
     ev.type === 'activityScheduled' ||
     ev.type === 'timerStarted' ||

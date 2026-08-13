@@ -422,11 +422,19 @@ export interface ServerCore {
    *
    * - **`terminate` is mandatory**, not a convenience. Retrying forever with no
    *   way out is worse than the bug.
-   * - **No per-attempt history events.** The counter lives on `ExecutionRecord`;
+   * - **No per-attempt *failure* events.** The counter lives on `ExecutionRecord`;
    *   history records the *first* failure so the log shows something went wrong,
-   *   not one event per attempt. Temporal keeps attempt counts in mutable state
-   *   for the same reason — history bloat — and it applies here with more force,
-   *   since every task replays the whole history.
+   *   not one event per failure. Temporal keeps attempt counts in mutable state for
+   *   the same reason — history bloat — and it applies here with more force, since
+   *   every task replays the whole history.
+   *
+   *   **Narrowed from "no per-attempt history events".** Each *pickup* now appends
+   *   an `activityStarted` (see `pollActivityTask`), because the alternative left
+   *   queue time and execution time indistinguishable and made a retried activity's
+   *   span cover every attempt plus every backoff gap as one bar. The bloat argument
+   *   was the right shape and the wrong weight: storage is cheap and the diagnostic
+   *   is not. What stays out is a second event per *failure*, which the retained
+   *   reason and the counter on the record already answer.
    */
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   /** Claim the next activity task; `identity` names the worker (see above). */
@@ -1638,6 +1646,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     activityLeases.set(task.token, {
       workflowId: task.workflowId,
       seq: task.seq,
+    });
+    // Stamped here rather than reported by the worker at completion, for two
+    // reasons. One clock: a `startedAt` from the worker is on the worker's clock,
+    // and a skewed one could claim to have started after the server recorded it
+    // finished. And it is written *now*, so an attempt still running is visible —
+    // a value carried on the completion event would say nothing until it was over,
+    // which is the half of the question an operator actually asks first.
+    await appendEvent(task.workflowId, {
+      type: 'activityStarted',
+      seq: task.seq,
+      identity,
     });
     // Armed on poll, not on dispatch: both deadlines bound the attempt, and the
     // attempt begins when a worker takes the task, not when it was queued.

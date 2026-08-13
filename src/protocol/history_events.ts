@@ -120,6 +120,53 @@ export interface ActivityScheduledEvent extends HistoryEventBase {
 }
 
 /**
+ * A worker took an activity task and the attempt began.
+ *
+ * Not a marker, and the distinction matters: `activityScheduled` is written by the
+ * engine to stop a re-emitted command from re-dispatching, whereas this is written
+ * for whoever is *looking* at the execution later. Nothing on replay depends on it,
+ * nothing is suppressed by it, and its absence from an older history is not a
+ * divergence.
+ *
+ * ## What it is for
+ *
+ * Without it the only two activity timestamps are `activityScheduled.ts` and the
+ * completion's, so every reader — timeline, dashboard, operator — sees one span that
+ * silently conflates **queue time** with **execution time**. Those have opposite
+ * remedies: queue time says the worker pool is saturated, execution time says the
+ * activity is slow. That distinction is what makes "a worker process runs one
+ * activity at a time" (issue #44) measurable rather than a suspicion.
+ *
+ * ## One per attempt, and that is the point
+ *
+ * **Several of these can share one `seq`** — this is the only event type of which
+ * that is true, so code reading history by seq must not assume uniqueness. A retried
+ * activity is picked up more than once, and each pickup appends one.
+ *
+ * That reverses part of an earlier decision, deliberately. `server_core` argued
+ * against per-attempt events on history-bloat grounds, which kept attempt counts in
+ * mutable state and left retries invisible in the log: a span over a retried
+ * activity covered every attempt *and* every backoff gap, indistinguishably. The
+ * trade is now the other way round — storage is cheap, and an engine whose whole
+ * value is answering "what happened" should not economise on the answer. The reasoning
+ * at `ServerCore.failWorkflowTask` was updated rather than left contradicting this.
+ */
+export interface ActivityStartedEvent extends HistoryEventBase {
+  type: 'activityStarted';
+  /** The `scheduleActivity` seq this attempt is for. Not unique across events — see above. */
+  seq: number;
+  /**
+   * The worker that took it, when it named itself.
+   *
+   * Optional because `identity` is optional on the poll. Free to carry — the server
+   * already has it — and it answers a question nothing else in history can: *which*
+   * process ran this attempt, which is where a fleet running mixed code shows itself
+   * (issue #65).
+   */
+  identity?: string;
+}
+
+/**
  * Marker: a timer has been started. Records the absolute `fireAt` so a resumed
  * process re-arms it from history (past-due timers fire at once) — history stays
  * the single source of truth for time, so a workflow's sense of "now" is never
@@ -414,6 +461,7 @@ export type CompletionEvent =
 export type HistoryEvent =
   | CompletionEvent
   | ActivityScheduledEvent
+  | ActivityStartedEvent
   | TimerStartedEvent
   | ChildStartedEvent
   | WorkflowStartedEvent

@@ -220,10 +220,13 @@ describe('pollForever', () => {
       0,
     );
     // Its history is activities and timers only — a constant per cycle, rather
-    // than something that scales with the size of the feed.
+    // than something that scales with the size of the feed. `activityStarted` is
+    // one of that constant: one pickup per poll, however many items the poll
+    // returned.
     expect([...new Set(rec!.history.map((e) => e.type))].sort()).toEqual([
       'activityCompleted',
       'activityScheduled',
+      'activityStarted',
       'timerFired',
       'timerStarted',
     ]);
