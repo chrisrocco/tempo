@@ -71,7 +71,18 @@ export interface ScheduleTarget {
   /** Workflow type to start. */
   name: string;
   args?: unknown[];
-  /** Which pool runs it. Defaults to the scheduler's own queue. */
+  /**
+   * Which pool runs the work. Defaults to `DEFAULT_TASK_QUEUE` — the same default a
+   * client `start` gets, so a schedule lands where an unqualified execution lands.
+   *
+   * Filled in by `ScheduleClient.create` rather than left for the engine to resolve, and
+   * the difference matters: an undefined queue reaching the server means "inherit the
+   * starter's queue", which for a schedule is wherever the *scheduler* happens to be
+   * registered. That is right by colocation rather than by statement, and it changes
+   * meaning silently if schedulers are ever moved to their own pool. Normalising at
+   * creation means the stored definition names the queue, so `describe` answers "where
+   * do this schedule's runs go" without anyone having to know that rule.
+   */
   taskQueue?: string;
 }
 
