@@ -64,6 +64,7 @@ export interface WorkerRegistry {
     role: WorkerRole,
     taskQueue: string | undefined,
     identity?: string,
+    serves?: readonly string[],
   ): void;
   /**
    * Every queue that has ever been polled, in the order first seen, each with
@@ -103,6 +104,8 @@ interface Observed {
   identity: string;
   role: WorkerRole;
   lastPolledAt: number;
+  /** What it last said it can run. Absent when it never said — see `PollRequest.serves`. */
+  serves?: readonly string[];
 }
 
 export function createWorkerRegistry(
@@ -124,7 +127,7 @@ export function createWorkerRegistry(
   }
 
   return {
-    recordPoll(role, taskQueue, identity) {
+    recordPoll(role, taskQueue, identity, serves) {
       const key = taskQueue ?? ANY_TASK_QUEUE;
       let entry = seen.get(key);
       if (!entry) {
@@ -145,8 +148,19 @@ export function createWorkerRegistry(
       }
       const workerKey = workerKeyOf(role, identity);
       const worker = onQueue.get(workerKey);
-      if (worker) worker.lastPolledAt = at;
-      else onQueue.set(workerKey, {identity, role, lastPolledAt: at});
+      if (worker) {
+        worker.lastPolledAt = at;
+        // Overwritten on every poll rather than merged, so a redeployed worker
+        // replaces its manifest instead of accumulating the union of what it has
+        // ever been able to run — which is the case #65 is about.
+        if (serves !== undefined) worker.serves = serves;
+      } else
+        onQueue.set(workerKey, {
+          identity,
+          role,
+          lastPolledAt: at,
+          ...(serves === undefined ? {} : {serves}),
+        });
     },
 
     queues() {
@@ -155,11 +169,20 @@ export function createWorkerRegistry(
       return [...seen.values()].map((q) => ({
         ...q,
         workers: [...(workers.get(q.taskQueue)?.values() ?? [])]
+          // Field by field rather than spread, because `taskQueue` comes from the
+          // enclosing row and not from the worker. The cost is that a new field on
+          // `Observed` is silently dropped here unless it is added — `serves` was,
+          // and the spec that caught it is `worker_manifest.spec.ts`.
           .map((observed) => ({
             identity: observed.identity,
             role: observed.role,
             taskQueue: q.taskQueue,
             lastPolledAt: observed.lastPolledAt,
+            // Omitted rather than set to `undefined`, so a worker that said nothing
+            // produces a row with no such key. The two are equivalent over JSON and
+            // are not equivalent to `toEqual`, and a row carrying an explicit
+            // `serves: undefined` reads as an assertion where silence is meant.
+            ...(observed.serves === undefined ? {} : {serves: observed.serves}),
           }))
           // Newest poll first, tie-broken by identity so two reads of an idle
           // fleet cannot disagree about the order.

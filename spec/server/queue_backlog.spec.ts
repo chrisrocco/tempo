@@ -172,7 +172,7 @@ describe('listQueues — the pool nobody is serving', () => {
     await host.start('greeter', [], {taskQueue: 'email'});
     await host.start('greeter', [], {taskQueue: 'email'});
 
-    await host.pollWorkflowTask('email', 'w1@host');
+    await host.pollWorkflowTask({taskQueue: 'email', identity: 'w1@host'});
 
     const [row] = await host.listQueues();
     // One claimed, one still waiting — the reading that separates "behind" from
@@ -186,7 +186,7 @@ describe('listQueues — the pool nobody is serving', () => {
     await host.start('greeter', [], {taskQueue: 'email'});
 
     // A worker polling every pool, which the registry files under `*`.
-    await host.pollWorkflowTask(undefined, 'w1@host');
+    await host.pollWorkflowTask({identity: 'w1@host'});
 
     const queues = await host.listQueues();
     const wildcard = queues.find((q) => q.taskQueue === ANY_TASK_QUEUE);
@@ -200,7 +200,7 @@ describe('listQueues — the pool nobody is serving', () => {
     const host = createServerHost();
     await host.start('greeter', [], {taskQueue: 'email'});
 
-    await host.pollWorkflowTask('email', 'w1@host');
+    await host.pollWorkflowTask({taskQueue: 'email', identity: 'w1@host'});
 
     const [row] = await host.listQueues();
     expect(row?.pendingWorkflowTasks).toBe(0);

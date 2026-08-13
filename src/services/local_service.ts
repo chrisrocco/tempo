@@ -47,6 +47,7 @@ import type {
   ActivityResult,
   ExecutionStatus,
   LeasedActivityTask,
+  PollRequest,
   StartWorkflowOptions,
   TaskToken,
   WorkflowService,
@@ -341,11 +342,8 @@ export function createLocalService(
       return core.listQueues();
     },
     // ── worker-facing seam (for out-of-process workers; unused by the in-proc loops) ──
-    pollWorkflowTask(
-      taskQueue?: string,
-      identity?: string,
-    ): Promise<WorkflowTask | undefined> {
-      return core.pollWorkflowTask(taskQueue, identity);
+    pollWorkflowTask(request?: PollRequest): Promise<WorkflowTask | undefined> {
+      return core.pollWorkflowTask(request);
     },
     completeWorkflowTask(
       token: TaskToken,
@@ -357,10 +355,9 @@ export function createLocalService(
       return core.failWorkflowTask(token, reason);
     },
     pollActivityTask(
-      taskQueue?: string,
-      identity?: string,
+      request?: PollRequest,
     ): Promise<LeasedActivityTask | undefined> {
-      return core.pollActivityTask(taskQueue, identity);
+      return core.pollActivityTask(request);
     },
     completeActivityTask(
       token: TaskToken,

@@ -26,6 +26,7 @@ import type {
   ServerHealth,
   ExecutionStatus,
   LeasedActivityTask,
+  PollRequest,
   RpcRequest,
   RpcResponse,
   StartWorkflowOptions,
@@ -162,14 +163,12 @@ export function createRemoteService(
       return (await call({method: 'groupExecutions'})) as ExecutionGroups;
     },
     async pollWorkflowTask(
-      taskQueue?: string,
-      identity?: string,
+      request: PollRequest = {},
     ): Promise<WorkflowTask | undefined> {
       return (
         ((await call({
           method: 'pollWorkflowTask',
-          taskQueue,
-          identity,
+          ...request,
         })) as WorkflowTask | null) ?? undefined
       );
     },
@@ -204,14 +203,12 @@ export function createRemoteService(
       await call({method: 'failWorkflowTask', token, reason});
     },
     async pollActivityTask(
-      taskQueue?: string,
-      identity?: string,
+      request: PollRequest = {},
     ): Promise<LeasedActivityTask | undefined> {
       return (
         ((await call({
           method: 'pollActivityTask',
-          taskQueue,
-          identity,
+          ...request,
         })) as LeasedActivityTask | null) ?? undefined
       );
     },

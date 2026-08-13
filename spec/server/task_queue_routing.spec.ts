@@ -66,8 +66,10 @@ describe('workflow tasks route to their execution', () => {
     await historyStore.create('wf', 'w', [], 'gpu');
     workflowTaskQueue.enqueue('wf', 'gpu');
 
-    expect(await core.pollWorkflowTask('cpu')).toBeUndefined();
-    expect((await core.pollWorkflowTask('gpu'))?.workflowId).toBe('wf');
+    expect(await core.pollWorkflowTask({taskQueue: 'cpu'})).toBeUndefined();
+    expect((await core.pollWorkflowTask({taskQueue: 'gpu'}))?.workflowId).toBe(
+      'wf',
+    );
   });
 
   // The in-process runtime serves everything with one set of loops, so it must
@@ -84,15 +86,17 @@ describe('workflow tasks route to their execution', () => {
     const {core, workflowTaskQueue, historyStore} = makeCore();
     await historyStore.create('wf', 'w', [], 'gpu');
     workflowTaskQueue.enqueue('wf', 'gpu');
-    const first = await core.pollWorkflowTask('gpu');
+    const first = await core.pollWorkflowTask({taskQueue: 'gpu'});
     workflowTaskQueue.complete(first!.token);
 
     // A signal wakes it without repeating the queue — the common case, since
     // most wakes have no idea how the execution was routed.
     await core.appendSignal('wf', 'ping', 1);
 
-    expect(await core.pollWorkflowTask('cpu')).toBeUndefined();
-    expect((await core.pollWorkflowTask('gpu'))?.workflowId).toBe('wf');
+    expect(await core.pollWorkflowTask({taskQueue: 'cpu'})).toBeUndefined();
+    expect((await core.pollWorkflowTask({taskQueue: 'gpu'}))?.workflowId).toBe(
+      'wf',
+    );
   });
 });
 
@@ -103,8 +107,10 @@ describe('activities inherit their execution queue', () => {
 
     await core.applyWorkflowTaskResult('wf', scheduleActivity(0));
 
-    expect(await core.pollActivityTask('default')).toBeUndefined();
-    expect((await core.pollActivityTask('agents'))?.name).toBe('work');
+    expect(await core.pollActivityTask({taskQueue: 'default'})).toBeUndefined();
+    expect((await core.pollActivityTask({taskQueue: 'agents'}))?.name).toBe(
+      'work',
+    );
   });
 
   it('goes to the queue the activity names, overriding its execution', async () => {
@@ -116,8 +122,10 @@ describe('activities inherit their execution queue', () => {
       scheduleActivity(0, {taskQueue: 'gpu'}),
     );
 
-    expect(await core.pollActivityTask('agents')).toBeUndefined();
-    expect((await core.pollActivityTask('gpu'))?.name).toBe('work');
+    expect(await core.pollActivityTask({taskQueue: 'agents'})).toBeUndefined();
+    expect((await core.pollActivityTask({taskQueue: 'gpu'}))?.name).toBe(
+      'work',
+    );
   });
 
   it('still inherits after a restart re-dispatches it from history', async () => {
@@ -136,10 +144,12 @@ describe('activities inherit their execution queue', () => {
     const restarted = makeCore(historyStore);
     await restarted.core.resumeFromHistory(await historyStore.list());
 
-    expect(await restarted.core.pollActivityTask('default')).toBeUndefined();
-    expect((await restarted.core.pollActivityTask('agents'))?.name).toBe(
-      'work',
-    );
+    expect(
+      await restarted.core.pollActivityTask({taskQueue: 'default'}),
+    ).toBeUndefined();
+    expect(
+      (await restarted.core.pollActivityTask({taskQueue: 'agents'}))?.name,
+    ).toBe('work');
   });
 });
 

@@ -159,7 +159,13 @@ export function runWorkflowWorker(
 ): WorkerLoop {
   const identity = options.identity ?? DEFAULT_IDENTITY;
   return runPollLoop('workflow worker', options, async () => {
-    const task = await service.pollWorkflowTask(options.taskQueue, identity);
+    const task = await service.pollWorkflowTask({
+      taskQueue: options.taskQueue,
+      identity,
+      // Read on every poll rather than captured once: a registry can gain a name
+      // after the loop starts, and the manifest is only useful if it is current.
+      serves: worker.names(),
+    });
     if (!task) return false;
     let result;
     try {
@@ -185,7 +191,11 @@ export function runActivityWorker(
 ): WorkerLoop {
   const identity = options.identity ?? DEFAULT_IDENTITY;
   return runPollLoop('activity worker', options, async () => {
-    const task = await service.pollActivityTask(options.taskQueue, identity);
+    const task = await service.pollActivityTask({
+      taskQueue: options.taskQueue,
+      identity,
+      serves: worker.names(),
+    });
     if (!task) return false;
     // One attempt per delivery; the lease redelivers on failure/crash
     // (at-least-once), unless the attempt heartbeats to keep its claim.

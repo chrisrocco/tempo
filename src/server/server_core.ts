@@ -153,6 +153,7 @@ import type {
   ContinueAsNewCommand,
   HistoryEvent,
   LeasedActivityTask,
+  PollRequest,
   ExecutionStatus,
   ParentClosePolicy,
   ParkedCondition,
@@ -392,10 +393,7 @@ export interface ServerCore {
    * Claim the next workflow task. `identity` names the worker asking, so the
    * server can count the fleet and explain a quiet queue; see `WorkerInfo`.
    */
-  pollWorkflowTask(
-    taskQueue?: string,
-    identity?: string,
-  ): Promise<WorkflowTask | undefined>;
+  pollWorkflowTask(request?: PollRequest): Promise<WorkflowTask | undefined>;
   completeWorkflowTask(
     token: TaskToken,
     result: WorkflowTaskResult,
@@ -447,8 +445,7 @@ export interface ServerCore {
   failWorkflowTask(token: TaskToken, reason: string): Promise<void>;
   /** Claim the next activity task; `identity` names the worker (see above). */
   pollActivityTask(
-    taskQueue?: string,
-    identity?: string,
+    request?: PollRequest,
   ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /**
@@ -1528,14 +1525,14 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
 
   async function pollWorkflowTask(
-    taskQueue?: string,
-    identity?: string,
+    request: PollRequest = {},
   ): Promise<WorkflowTask | undefined> {
+    const {taskQueue, identity, serves} = request;
     // Before the queue is consulted, so an idle poll counts. A worker waiting
     // on an empty queue is the strongest evidence of liveness there is, and
     // recording only polls that found work would report a healthy idle fleet as
     // absent — the exact inversion of what this is for.
-    workerRegistry.recordPoll('workflow', taskQueue, identity);
+    workerRegistry.recordPoll('workflow', taskQueue, identity, serves);
     while (true) {
       const leased = workflowTaskQueue.poll(taskQueue, identity);
       if (!leased) return undefined;
@@ -1692,12 +1689,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
 
   async function pollActivityTask(
-    taskQueue?: string,
-    identity?: string,
+    request: PollRequest = {},
   ): Promise<LeasedActivityTask | undefined> {
+    const {taskQueue, identity, serves} = request;
     // See the note in `pollWorkflowTask`: recorded before the queue is
     // consulted, so an idle poll still counts as liveness.
-    workerRegistry.recordPoll('activity', taskQueue, identity);
+    workerRegistry.recordPoll('activity', taskQueue, identity, serves);
     const task = activityTaskQueue.poll(taskQueue, identity);
     if (!task) return undefined;
     activityLeases.set(task.token, {
