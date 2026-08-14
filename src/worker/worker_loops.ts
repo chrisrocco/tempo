@@ -33,7 +33,7 @@ import type {WorkflowWorker} from './workflow_worker';
  * Read once per process rather than per poll: `os.hostname()` can hit the
  * network on a misconfigured host, and this runs every few milliseconds.
  */
-const DEFAULT_IDENTITY = `${process.pid}@${os.hostname()}`;
+export const DEFAULT_IDENTITY = `${process.pid}@${os.hostname()}`;
 
 // Ref'd on purpose: a worker process must stay alive between polls. The loops are
 // bounded by an explicit stop(), so this never keeps a process alive spuriously.
@@ -75,6 +75,13 @@ export interface WorkerLoopOptions {
   errorBackoffMs?: number;
   /** Ceiling for the error backoff. Default 5s. */
   maxErrorBackoffMs?: number;
+  /**
+   * A digest of what this worker has registered, from `startWorkflowReporter`.
+   *
+   * Optional, and a worker that omits it still gets tasks — it is only reported as
+   * unknown rather than as serving nothing. See `PollRequest.servesHash`.
+   */
+  servesHash?: string;
   /** Where failures are reported. Defaults to a rate-limited stderr reporter. */
   onError?: (error: unknown, consecutive: number) => void;
 }
@@ -162,9 +169,12 @@ export function runWorkflowWorker(
     const task = await service.pollWorkflowTask({
       taskQueue: options.taskQueue,
       identity,
-      // Read on every poll rather than captured once: a registry can gain a name
-      // after the loop starts, and the manifest is only useful if it is current.
-      serves: worker.names(),
+      // Fixed for the life of the loop, because what a worker has registered is fixed
+      // when the process starts. It rides every poll so a server that restarts learns of
+      // this worker again without being asked.
+      ...(options.servesHash === undefined
+        ? {}
+        : {servesHash: options.servesHash}),
     });
     if (!task) return false;
     let result;
@@ -194,7 +204,9 @@ export function runActivityWorker(
     const task = await service.pollActivityTask({
       taskQueue: options.taskQueue,
       identity,
-      serves: worker.names(),
+      ...(options.servesHash === undefined
+        ? {}
+        : {servesHash: options.servesHash}),
     });
     if (!task) return false;
     // One attempt per delivery; the lease redelivers on failure/crash

@@ -48,7 +48,9 @@ import {
   ANY_TASK_QUEUE,
   type WorkerInfo,
   type WorkerRole,
-} from '../protocol/service';
+  type WorkflowReport,
+  type WorkflowReportRequest,
+} from '../protocol';
 
 export interface WorkerRegistry {
   /**
@@ -64,7 +66,7 @@ export interface WorkerRegistry {
     role: WorkerRole,
     taskQueue: string | undefined,
     identity?: string,
-    serves?: readonly string[],
+    servesHash?: string,
   ): void;
   /**
    * Every queue that has ever been polled, in the order first seen, each with
@@ -80,6 +82,24 @@ export interface WorkerRegistry {
    * closes it.
    */
   queues(): ObservedQueue[];
+  /**
+   * Record what a worker says it has registered.
+   *
+   * Kept per worker rather than merged into one catalogue, because two workers reporting
+   * different descriptions for one name is the fact worth surfacing (#65) and a merge
+   * would be the thing that hides it.
+   */
+  recordReport(report: WorkflowReportRequest): void;
+  /** What each worker last reported, one row per worker that has reported at all. */
+  reports(): ReportedWorkflows[];
+}
+
+/** One worker's reported set, with the digest it was reported under. */
+export interface ReportedWorkflows {
+  identity: string;
+  taskQueue: string;
+  hash: string;
+  workflows: readonly WorkflowReport[];
 }
 
 /** A worker as polls alone can describe it: everything but whether it is busy. */
@@ -104,8 +124,8 @@ interface Observed {
   identity: string;
   role: WorkerRole;
   lastPolledAt: number;
-  /** What it last said it can run. Absent when it never said — see `PollRequest.serves`. */
-  serves?: readonly string[];
+  /** The digest from its most recent poll. Absent when it sent none. */
+  servesHash?: string;
 }
 
 export function createWorkerRegistry(
@@ -120,14 +140,35 @@ export function createWorkerRegistry(
   // parsed back out of it, so no separator has to be chosen that an
   // operator-supplied identity cannot contain.
   const workers = new Map<string, Map<string, Observed>>();
+  // Keyed by identity and queue, and deliberately *not* by role: a worker reports what it
+  // has registered, which is a property of the process rather than of the loop that
+  // happens to be asking. A process serving both roles reports once.
+  const reported = new Map<string, ReportedWorkflows>();
 
   /** Distinct per (role, identity); never parsed, only compared. */
   function workerKeyOf(role: WorkerRole, identity: string): string {
     return `${role} ${identity}`;
   }
 
+  /**
+   * The names a worker resolves to, or nothing when the answer is unknown.
+   *
+   * Unknown covers three cases that all deserve silence rather than a claim: the worker
+   * has never reported, it sends no digest on its polls, or its report is stale because
+   * the digest moved. `WorkerInfo.serves` documents why they are not distinguished.
+   */
+  function servesOf(
+    taskQueue: string,
+    observed: Observed,
+  ): {serves?: readonly string[]} {
+    if (observed.servesHash === undefined) return {};
+    const report = reported.get(`${observed.identity} ${taskQueue}`);
+    if (!report || report.hash !== observed.servesHash) return {};
+    return {serves: report.workflows.map((w) => w.name)};
+  }
+
   return {
-    recordPoll(role, taskQueue, identity, serves) {
+    recordPoll(role, taskQueue, identity, servesHash) {
       const key = taskQueue ?? ANY_TASK_QUEUE;
       let entry = seen.get(key);
       if (!entry) {
@@ -150,17 +191,39 @@ export function createWorkerRegistry(
       const worker = onQueue.get(workerKey);
       if (worker) {
         worker.lastPolledAt = at;
-        // Overwritten on every poll rather than merged, so a redeployed worker
-        // replaces its manifest instead of accumulating the union of what it has
-        // ever been able to run — which is the case #65 is about.
-        if (serves !== undefined) worker.serves = serves;
+        // Overwritten on every poll, so a redeployed worker replaces its digest
+        // rather than keeping the one it started with — which is what lets a stale
+        // report be recognised as stale.
+        if (servesHash !== undefined) worker.servesHash = servesHash;
       } else
         onQueue.set(workerKey, {
           identity,
           role,
           lastPolledAt: at,
-          ...(serves === undefined ? {} : {serves}),
+          ...(servesHash === undefined ? {} : {servesHash}),
         });
+    },
+
+    recordReport(report) {
+      const key = `${report.identity} ${report.taskQueue ?? ANY_TASK_QUEUE}`;
+      // Replaced wholesale, never merged. A worker redeployed under one identity must
+      // report what it runs *now*; accumulating the union across deploys is precisely
+      // what would hide a fleet running two versions of one worker binary.
+      reported.set(key, {
+        identity: report.identity,
+        taskQueue: report.taskQueue ?? ANY_TASK_QUEUE,
+        hash: report.hash,
+        workflows: [...report.workflows],
+      });
+    },
+
+    reports() {
+      // Copied, like `queues()`, so a caller cannot hold a reference that changes under
+      // it while it renders.
+      return [...reported.values()].map((r) => ({
+        ...r,
+        workflows: [...r.workflows],
+      }));
     },
 
     queues() {
@@ -178,11 +241,18 @@ export function createWorkerRegistry(
             role: observed.role,
             taskQueue: q.taskQueue,
             lastPolledAt: observed.lastPolledAt,
-            // Omitted rather than set to `undefined`, so a worker that said nothing
-            // produces a row with no such key. The two are equivalent over JSON and
-            // are not equivalent to `toEqual`, and a row carrying an explicit
-            // `serves: undefined` reads as an assertion where silence is meant.
-            ...(observed.serves === undefined ? {} : {serves: observed.serves}),
+            // Resolved here rather than relayed, by matching the digest on the poll
+            // against the digest the report was pushed under. They agree only while the
+            // server's copy still describes what this worker is running; a redeployed
+            // worker's poll carries a new digest from its first poll onward, so its
+            // stale report stops being reported the moment it is stale rather than when
+            // the replacement happens to arrive.
+            //
+            // Omitted rather than set to `undefined`, so a worker with nothing resolved
+            // produces a row with no such key. The two are equivalent over JSON and are
+            // not equivalent to `toEqual`, and an explicit `serves: undefined` reads as
+            // an assertion where silence is meant.
+            ...servesOf(q.taskQueue, observed),
           }))
           // Newest poll first, tie-broken by identity so two reads of an idle
           // fleet cannot disagree about the order.

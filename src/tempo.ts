@@ -150,13 +150,16 @@ import {DEFAULT_PORT, WORKER_FLAG, flagValue} from './process_flags';
 import {DEFAULT_TASK_QUEUE} from './protocol';
 import {createJsonLogger} from './server';
 import {createRemoteService} from './services';
+import {workflowDescriptor} from './workflow_descriptor';
 import {
   createActivityRegistry,
   createActivityWorker,
   createWorkflowRegistry,
   createWorkflowWorker,
+  DEFAULT_IDENTITY,
   runActivityWorker,
   runWorkflowWorker,
+  startWorkflowReporter,
   type ActivityFn,
   type WorkerLoop,
   type WorkerLoopOptions,
@@ -463,6 +466,26 @@ function composeRemote(args: {
     });
   };
 
+  // Started before the loops, because its digest is what they put on every poll — the
+  // pair is how the server tells a current report from a stale one.
+  //
+  // Only the workflow role reports. An activity worker registers activity names, which
+  // the catalogue is not about, and an empty report from it would be indistinguishable
+  // from a workflow worker that registered nothing.
+  const reporter = args.roles.includes('workflow')
+    ? startWorkflowReporter(
+        service,
+        args.workflows.map(([name, fn]) => ({
+          name,
+          ...(workflowDescriptor(fn) ?? {}),
+        })),
+        {
+          identity: args.loop?.identity ?? DEFAULT_IDENTITY,
+          ...(args.taskQueue === undefined ? {} : {taskQueue: args.taskQueue}),
+        },
+      )
+    : undefined;
+
   const loops: WorkerLoop[] = [];
   if (args.roles.includes('workflow')) {
     const registry = createWorkflowRegistry();
@@ -473,6 +496,7 @@ function composeRemote(args: {
         ...args.loop,
         onError,
         taskQueue: args.taskQueue,
+        ...(reporter === undefined ? {} : {servesHash: reporter.hash}),
       }),
     );
   }
@@ -490,8 +514,12 @@ function composeRemote(args: {
   }
 
   return {
-    stop: () =>
-      Promise.all(loops.map((loop) => loop.stop())).then(() => undefined),
+    stop: () => {
+      reporter?.stop();
+      return Promise.all(loops.map((loop) => loop.stop())).then(
+        () => undefined,
+      );
+    },
   };
 }
 

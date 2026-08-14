@@ -65,15 +65,6 @@ function assertCarryoverFits(name: string, carryover: Carryover): void {
 export interface WorkflowWorker {
   has(name: string): boolean;
   /**
-   * Every workflow type registered here.
-   *
-   * The sibling of `has`, and it exists so a poll can say what this worker can run
-   * (see `PollRequest.serves`). `has` answers about one name the server already
-   * chose; this answers before the server has chosen anything, which is the only
-   * way a queue can be reported as unserved *for a name* rather than merely quiet.
-   */
-  names(): string[];
-  /**
    * Replay one task and report what the workflow did.
    *
    * Takes the whole `WorkflowTask` rather than the fields it happens to read.
@@ -98,9 +89,6 @@ export function createWorkflowWorker(
   return {
     has(name: string): boolean {
       return registry.has(name);
-    },
-    names(): string[] {
-      return [...registry.keys()];
     },
     async replayTask(task: WorkflowTask): Promise<WorkflowTaskResult> {
       const {name} = task;

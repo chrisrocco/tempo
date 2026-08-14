@@ -24,6 +24,8 @@ import type {
   LeasedActivityTask,
   PollRequest,
   QueueWorkers,
+  WorkflowReportRequest,
+  WorkflowSummary,
   ServerHealth,
   StartResult,
   StartWorkflowOptions,
@@ -112,6 +114,10 @@ export interface ServerHost {
   health(): ServerHealth;
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
+  /** Every workflow any worker has reported, deduped by name. */
+  listWorkflows(): Promise<WorkflowSummary[]>;
+  /** Record what a worker says it has registered. */
+  reportWorkflows(report: WorkflowReportRequest): Promise<void>;
   /** Every execution counted by status, grouped by task queue and by name. */
   groupExecutions(): Promise<ExecutionGroups>;
   pollWorkflowTask(request?: PollRequest): Promise<WorkflowTask | undefined>;
@@ -311,6 +317,12 @@ export function createServerHost(
           ? {}
           : {dataLocation: historyStore.location}),
       };
+    },
+    async listWorkflows() {
+      return core.listWorkflows();
+    },
+    async reportWorkflows(report) {
+      core.reportWorkflows(report);
     },
     async listQueues() {
       return core.listQueues();

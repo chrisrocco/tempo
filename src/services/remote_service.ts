@@ -22,6 +22,8 @@ import type {
   ExecutionGroups,
   ExecutionPage,
   QueueWorkers,
+  WorkflowReportRequest,
+  WorkflowSummary,
   RemoteWorkflowService,
   ServerHealth,
   ExecutionStatus,
@@ -152,6 +154,12 @@ export function createRemoteService(
     },
     async listExecutions(filter?: ExecutionFilter): Promise<ExecutionPage> {
       return (await call({method: 'listExecutions', filter})) as ExecutionPage;
+    },
+    async listWorkflows(): Promise<WorkflowSummary[]> {
+      return (await call({method: 'listWorkflows'})) as WorkflowSummary[];
+    },
+    async reportWorkflows(report: WorkflowReportRequest): Promise<void> {
+      await call({method: 'reportWorkflows', report});
     },
     async listQueues(): Promise<QueueWorkers[]> {
       return (await call({method: 'listQueues'})) as QueueWorkers[];

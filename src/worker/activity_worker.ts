@@ -37,8 +37,6 @@ import {withActivityContext} from './activity_context';
 import type {ActivityRegistry} from './activity_registry';
 
 export interface ActivityWorker {
-  /** Every activity name registered here — what a poll reports as `serves`. */
-  names(): string[];
   /**
    * Run one attempt. `sendHeartbeat` is how `heartbeat()` inside the activity
    * reaches the server; omit it and heartbeats are silently discarded, which is
@@ -54,9 +52,6 @@ export function createActivityWorker(
   registry: ActivityRegistry,
 ): ActivityWorker {
   return {
-    names(): string[] {
-      return [...registry.keys()];
-    },
     async runTask(
       task: ActivityTask,
       sendHeartbeat: () => void = () => {},

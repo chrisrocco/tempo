@@ -63,6 +63,10 @@ async function dispatch(
       );
     case 'listExecutions':
       return host.listExecutions(request.filter);
+    case 'listWorkflows':
+      return host.listWorkflows();
+    case 'reportWorkflows':
+      return host.reportWorkflows(request.report);
     case 'listQueues':
       return host.listQueues();
     case 'groupExecutions':
@@ -74,7 +78,7 @@ async function dispatch(
         (await host.pollWorkflowTask({
           taskQueue: request.taskQueue,
           identity: request.identity,
-          serves: request.serves,
+          servesHash: request.servesHash,
         })) ?? null
       );
     case 'completeWorkflowTask':
@@ -86,7 +90,7 @@ async function dispatch(
         (await host.pollActivityTask({
           taskQueue: request.taskQueue,
           identity: request.identity,
-          serves: request.serves,
+          servesHash: request.servesHash,
         })) ?? null
       );
     case 'completeActivityTask':
