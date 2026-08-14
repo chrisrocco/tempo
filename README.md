@@ -162,6 +162,14 @@ not be guessed at twice. A UI reading them is reading the same definitions the
 server writes, so a field added to a projection is a compile error in the tool
 rather than `undefined` at runtime. A gap there is a bug here.
 
+`workflow-engine/client` is the other half of that contract: `createRemoteService`
+plus `createRemoteClient`, and nothing else. It exists because those two used to
+be reachable only through the host entrypoint, which meant a dashboard pulled
+`node:fs` and `node:http` into a browser build to get a function that calls
+`fetch`. Both paths are now **checked** to reach no Node builtin and no workflow
+module, transitively — a barrel that would quietly undo it fails `npm run lint`
+rather than a consumer's bundler.
+
 What this library gives a deployment is **two entrypoints, one per artifact** —
 each a file whose whole body is one call:
 
@@ -330,6 +338,8 @@ src/
   index.ts        ★ HOST ENTRYPOINT — startServer, createLocalRuntime, types
   tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
   server_main.ts  ★ SERVER ENTRYPOINT — startServer()
+  remote_client.ts ★ CLIENT ENTRYPOINT — reaching a server from outside it,
+                  from a browser included. Published as `workflow-engine/client`.
   process_flags.ts  how a deployed process reads its own configuration
 bin/              server-main.ts — the reference server binary, one call
 examples/         greeter.ts — the reference worker binary, one call
@@ -339,8 +349,8 @@ spec/             the executable documentation
 The `★` entrypoints are load-bearing: workflow code imports only from
 `workflow.ts`, which is what makes the determinism boundary a structural fact
 rather than a convention. [`tools/boundaries.ts`](tools/boundaries.ts) enforces
-it mechanically — layering, core purity, and the author entrypoint — via `npm
-run lint` and the suite. `activity.ts` is the other side of that line and is
+it mechanically — layering, core purity, the author entrypoint, and browser
+safety — via `npm run lint` and the suite. `activity.ts` is the other side of that line and is
 deliberately _not_ enforced: activities are where I/O belongs, so there is
 nothing to forbid — it exists to say where `heartbeat()` makes sense, and where
 it does not.
