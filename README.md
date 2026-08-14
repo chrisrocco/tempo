@@ -249,6 +249,52 @@ Going distributed does not change the workflow code, only how it is hosted. See
 operational caveats, and [`src/tempo.ts`](src/tempo.ts) for the worker entrypoint
 and its input contract.
 
+### Put your own server in front of a dashboard
+
+The RPC has **no auth and no TLS** — `bin/server-main` binds loopback for that
+reason, and anything that can reach the port can terminate any execution. For
+workers on a trusted network that is a deferred problem. For a UI it is not,
+because a UI has users, sessions, and a browser between them and the port.
+
+So the supported shape puts a server of your own in the middle:
+
+```
+browser ──▶ your dashboard's server ──▶ tempo RPC
+             (auth, sessions, RBAC)     (loopback / trusted network)
+```
+
+Your server holds the session and decides who may call `terminate`; tempo's port
+stays where it already is. The browser gets `workflow-engine/protocol` for the
+types and the shared predicates, which is dependency-free and safe to bundle.
+
+Two things follow from this, and both look like gaps until you see the shape:
+
+- **There is no CORS on the RPC, deliberately.** Adding it would invite exactly
+  the topology above to be skipped, putting an unauthenticated `terminate` one
+  fetch away from any page a user has open.
+- **The engine will not grow a login.** Authorization is about your users and your
+  roles, neither of which this library knows anything about. It is the same
+  argument as the rest of this section.
+
+### What is contract, and what is not
+
+The top of this file says the package makes no stability promises, and that stays
+true: there is no npm release, no semver, and no deprecation window. What can be
+said is narrower and more useful — which surfaces are load-bearing, and what a
+change to one of them counts as.
+
+| Surface                                                    | A change to it                                                       |
+| ---------------------------------------------------------- | -------------------------------------------------------------------- |
+| The paths in the `exports` map                             | A break. Something outside resolves them by name.                    |
+| Types and predicates from `workflow-engine/protocol`       | A break, and a wire-format one — treat it like a schema migration.   |
+| Log event names and their fields                           | A break once anything aggregates them. See `server/ports/logger.ts`. |
+| `LISTENING` / `WORKER_READY` lines, and the flag spellings | A break. A supervisor parses one and emits the other.                |
+| Anything reached by a deep import into `src/`              | Not a break. That is the reason the `exports` map is a short list.   |
+
+"A break" here means it is treated as a bug in this repo rather than as a
+consumer's problem to absorb — the same standing the missing-projection rule
+above has. It does not mean it will not happen.
+
 ## How it works
 
 1.  Workflow code runs and, wherever it would do something durable, emits a
