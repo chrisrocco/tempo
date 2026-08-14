@@ -9,6 +9,7 @@
 
 import {checkDependencies, checkRepoDependencies} from '../tools/dependencies';
 import {
+  BROWSER_SAFE_ENTRYPOINTS,
   checkBoundaries,
   isWorkflowModule,
   readSourceFiles,
@@ -317,6 +318,118 @@ describe('architecture — the author entrypoint', () => {
 
     expect(violations.length).toBe(1);
     expect(violations[0].rule).toBe('author-entrypoint');
+  });
+});
+
+describe('architecture — browser safety', () => {
+  it('lists only entrypoints that exist, so the rule cannot check nothing', () => {
+    const paths = new Set(
+      readSourceFiles(repoRoot, ['src']).map((source) => source.path),
+    );
+
+    for (const entrypoint of BROWSER_SAFE_ENTRYPOINTS) {
+      expect(paths.has(entrypoint)).toBe(true);
+    }
+  });
+
+  it('rejects an entrypoint importing a node builtin directly', () => {
+    const violations = checkBoundaries([
+      file('src/remote_client.ts', `import * as http from 'node:http';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('browser-safety');
+    expect(violations[0].message).toContain('node:http');
+  });
+
+  /**
+   * The failure this rule exists for, and the one no single-file check can see:
+   * every file in the chain is innocent on its own. `remote_client.ts` imports
+   * `services/remote_service` directly for exactly this reason — routing it
+   * through `services/index.ts` would re-export `rpc_server` and put `node:http`
+   * in a dashboard's bundle.
+   */
+  it('follows a barrel to the host module it re-exports', () => {
+    const violations = checkBoundaries([
+      file('src/remote_client.ts', `export * from './services';`),
+      file('src/services/index.ts', `export * from './rpc_server';`),
+      file('src/services/rpc_server.ts', `import * as http from 'node:http';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('browser-safety');
+    expect(violations[0].path).toBe('src/services/rpc_server.ts');
+  });
+
+  it('names the route that reached the builtin, not just the builtin', () => {
+    const violations = checkBoundaries([
+      file('src/remote_client.ts', `export * from './services';`),
+      file('src/services/index.ts', `export * from './rpc_server';`),
+      file('src/services/rpc_server.ts', `import * as http from 'node:http';`),
+    ]);
+
+    expect(violations[0].message).toContain(
+      'src/remote_client.ts -> src/services/index.ts -> src/services/rpc_server.ts',
+    );
+  });
+
+  /**
+   * The exemption that makes the rule usable at all: `client/client.ts` names
+   * `SignalDef` from `core/` and `remote_service.ts` names a dozen protocol types.
+   * An erased import emits no module reference, so no bundler follows it.
+   */
+  it('ignores a type-only import of a module that is not browser-safe', () => {
+    const violations = checkBoundaries([
+      file(
+        'src/remote_client.ts',
+        `import type {Server} from './server_main';`,
+      ),
+      file('src/server_main.ts', `import {readFileSync} from 'node:fs';`),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * The other half of the promise, and the half that fails silently. A builtin
+   * breaks the consumer's build; a workflow module registers its activities into
+   * a process-global registry and breaks nothing you can see. This is what
+   * `src/schedule/index.ts` did for a day — see
+   * `spec/schedule/client_entrypoint.spec.ts`, which asserts the same property
+   * for that entrypoint specifically and in both directions.
+   */
+  it('rejects an entrypoint reaching a workflow module for a value', () => {
+    const violations = checkBoundaries([
+      file('src/schedule/index.ts', `export * from './scheduler.workflow';`),
+      file('src/schedule/scheduler.workflow.ts', `export const x = 1;`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('browser-safety');
+    expect(violations[0].message).toContain('scheduler.workflow');
+  });
+
+  it('lets an entrypoint name a workflow module in a type-only import', () => {
+    const violations = checkBoundaries([
+      file(
+        'src/schedule/index.ts',
+        `import type {Spec} from './scheduler.workflow';`,
+      ),
+      file('src/schedule/scheduler.workflow.ts', `export const x = 1;`),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  it('reports a builtin reached through a cycle exactly once', () => {
+    const violations = checkBoundaries([
+      file('src/remote_client.ts', `export * from './a';`),
+      file('src/a.ts', `export * from './b';`),
+      file('src/b.ts', `export * from './a';\nimport 'node:fs';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('node:fs');
   });
 });
 

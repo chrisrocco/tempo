@@ -5,6 +5,7 @@
   "description": "A minimal-but-correct durable workflow engine (a small Temporal-shaped system).",
   "exports": {
     ".": "./src/index.ts",
+    "./client": "./src/remote_client.ts",
     "./protocol": "./src/protocol/index.ts",
     "./workflow": "./src/workflow.ts",
     "./activity": "./src/activity.ts",
