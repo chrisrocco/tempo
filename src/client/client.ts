@@ -68,6 +68,7 @@ import type {
   RemoteWorkflowService,
   ServerHealth,
   WorkflowService,
+  WorkflowSummary,
 } from '../protocol';
 
 /** One execution: what it did, and the ways to intervene in it. */
@@ -131,6 +132,19 @@ export interface Client {
    * one capped page rather than on the server.
    */
   counts(): Promise<ExecutionGroups>;
+  /**
+   * Every workflow type the fleet has reported it can run, with what it says
+   * about itself.
+   *
+   * The catalogue answers "what can I start", which none of the reads above can:
+   * they describe executions, so a workflow nobody has run yet is invisible to
+   * all of them. Sourced from what workers push rather than from history, which
+   * is also why it is only as complete as the fleet is up.
+   *
+   * A `conflicting` entry is two workers describing one name differently — a
+   * fleet running two versions of a binary, reported rather than resolved.
+   */
+  workflows(): Promise<WorkflowSummary[]>;
   /**
    * Drop every event from `keep` onward and replay from there — the recovery for
    * an execution the deployed code cannot replay, where `terminate` is the
@@ -209,6 +223,7 @@ export function createClient(service: WorkflowService): Client {
     list: (filter) => service.listExecutions(filter),
     queues: () => service.listQueues(),
     counts: () => service.groupExecutions(),
+    workflows: () => service.listWorkflows(),
     reset: (workflowId, keep) => service.reset(workflowId, keep),
   };
 }

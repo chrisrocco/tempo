@@ -75,6 +75,19 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
   worker: ['protocol', 'core'],
   client: ['protocol', 'core'],
   services: ['protocol', 'core', 'server', 'worker'],
+  // `workflow_descriptor` is a top-level module rather than a directory, but
+  // `layerOf` reads the first path segment under `src/` either way, so importing
+  // one from inside a layer has to be declared like a layer. `tempo.ts` reaches
+  // the same module unchecked, being top-level itself — which is the asymmetry
+  // this entry pays for, not a second kind of dependency.
+  testing: [
+    'protocol',
+    'core',
+    'client',
+    'services',
+    'worker',
+    'workflow_descriptor',
+  ],
 };
 
 /** Why a given layer may not reach another — stated so the failure teaches. */
@@ -93,6 +106,8 @@ const LAYER_RATIONALE: Record<string, string> = {
     'client/ turns a WorkflowService into handles; it needs only protocol/ and core/',
   services:
     'services/ composes server/ and worker/ behind the WorkflowService seam',
+  testing:
+    'testing/ composes a server and its workers into named fixture states, so it reaches almost everything — but not server/ directly, because a fixture that reached past the service seam could build a state no deployment can reach, which is the one thing a shared fixture must not do',
 };
 
 /** Constructs that make replay irreproducible, so they cannot appear on the deterministic side. */
