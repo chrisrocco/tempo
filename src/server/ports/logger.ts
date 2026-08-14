@@ -18,6 +18,27 @@
  *
  * Names are `subject.verb` in past tense (`activity.timed_out`), because a log
  * line records something that already happened.
+ *
+ * ## An event name is a public contract, and renaming one is a break
+ *
+ * This is easy to miss, because nothing here fails when it happens. An event name
+ * and its fields are not internal detail the way a private function's name is: the
+ * whole point of "structured, never formatted" is that something downstream reads
+ * them, and the moment anything does — a query counting `execution.settled` by
+ * `name`, an alert on `workflow_task.failed` — renaming a field breaks it exactly
+ * as hard as changing an RPC would, and considerably more quietly. The RPC at
+ * least has a type on both ends.
+ *
+ * So treat an event the way `ROADMAP.md` says to treat a `protocol/` type: adding
+ * a field is cheap, renaming or removing one is a break, and a change in meaning
+ * under an unchanged name is the worst of the three because nothing anywhere can
+ * detect it. `README.md`'s "What is contract, and what is not" lists this beside
+ * the other surfaces that carry the same standing.
+ *
+ * The corollary is that an event should carry the dimensions its own readers need
+ * rather than expecting them to be joined on. An event that cannot be aggregated
+ * without holding earlier events in memory turns a `GROUP BY` into a stateful
+ * stream processor, and pushes that cost onto every consumer separately.
  */
 
 /** Structured detail attached to an event. Values must survive `JSON.stringify`. */
