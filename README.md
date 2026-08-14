@@ -309,8 +309,8 @@ warm executions on the worker is planned but not built.
 
 ## Project layout
 
-Dependencies point strictly down: `protocol <- core <- {patterns, server,
-services, worker, client} <- {local_runtime, entrypoints, bin}`.
+Dependencies point strictly down: `protocol <- core <- {patterns, schedule,
+server, services, worker, client} <- {local_runtime, entrypoints, bin}`.
 
 ```
 src/
@@ -318,6 +318,8 @@ src/
   core/           The deterministic engine: (history) -> (commands).
   patterns/       Authoring helpers built from core's primitives — pollForever,
                   diffing, signal streams. Depends on core; core never on it.
+  schedule/       When a schedule fires — spec arithmetic, the scheduler
+                  workflow, and the schedule client. Needs protocol only.
   server/         Orchestration brain. Stateful, runs NO user code.
     ports/          history_store · task_queue · workflow_task_queue · timer_service
     memory/         in-memory adapters for all four ports
@@ -330,7 +332,10 @@ src/
   index.ts        ★ HOST ENTRYPOINT — startServer, createLocalRuntime, types
   tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
   server_main.ts  ★ SERVER ENTRYPOINT — startServer()
+  local_runtime.ts  createLocalRuntime — the single-node wiring seam
   process_flags.ts  how a deployed process reads its own configuration
+  activity_registry.ts    what proxyActivities recorded, waiting for a worker
+  workflow_descriptor.ts  defineWorkflow — descriptions bound to the function
 bin/              server-main.ts — the reference server binary, one call
 examples/         greeter.ts — the reference worker binary, one call
 spec/             the executable documentation
