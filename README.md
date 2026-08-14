@@ -138,8 +138,8 @@ console.log(await handle.result()); // Hello, world!
 ```
 
 `start`, `describe`, `signal`, `cancel`, `terminate`, `reset`, `list`, `queues`,
-`counts`, and `health` are all there — the whole client-facing surface, so
-nothing needs a raw service.
+`counts`, `workflows`, and `health` are all there — the whole client-facing
+surface, so nothing needs a raw service.
 
 Configuration is flags with defaults, never the environment — see
 [`src/process_flags.ts`](src/process_flags.ts) for why.
@@ -162,13 +162,31 @@ not be guessed at twice. A UI reading them is reading the same definitions the
 server writes, so a field added to a projection is a compile error in the tool
 rather than `undefined` at runtime. A gap there is a bug here.
 
-`workflow-engine/client` is the other half of that contract: `createRemoteService`
+`workflow-engine/client` is how such a tool reaches a server: `createRemoteService`
 plus `createRemoteClient`, and nothing else. It exists because those two used to
 be reachable only through the host entrypoint, which meant a dashboard pulled
 `node:fs` and `node:http` into a browser build to get a function that calls
 `fetch`. Both paths are now **checked** to reach no Node builtin and no workflow
 module, transitively — a barrel that would quietly undo it fails `npm run lint`
 rather than a consumer's bundler.
+
+Reading the surface is one thing; **developing** against it is another.
+`workflow-engine/testing` starts a real server, on a real port, already holding
+the states such a tool has to render:
+
+```ts
+import { startScenario } from 'workflow-engine/testing';
+
+const server = await startScenario(['stuck', 'parked', 'unserved-queue']);
+// point your UI at server.url, build it, then:
+await server.stop();
+```
+
+Getting a server into those states is otherwise the hardest part of building
+anything that reads one, and every tool that does it from guesswork drifts from
+what the engine actually produces — separately, and invisibly. The catalogue is
+closed on purpose: a state it cannot produce is a state no tool should claim to
+render. `src/testing/scenarios.ts` lists them, and the suite runs every one.
 
 What this library gives a deployment is **two entrypoints, one per artifact** —
 each a file whose whole body is one call:
@@ -340,6 +358,8 @@ src/
   server_main.ts  ★ SERVER ENTRYPOINT — startServer()
   remote_client.ts ★ CLIENT ENTRYPOINT — reaching a server from outside it,
                   from a browser included. Published as `workflow-engine/client`.
+  testing/        ★ TESTING ENTRYPOINT — startScenario(), a real server already
+                  in the states a UI has to render
   process_flags.ts  how a deployed process reads its own configuration
 bin/              server-main.ts — the reference server binary, one call
 examples/         greeter.ts — the reference worker binary, one call

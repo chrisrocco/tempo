@@ -13,13 +13,14 @@ the reasoning.
 
 ## What you build and run
 
-| Term               | Meaning                                                                                                                                                    |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **worker binary**  | The built, runnable file whose body is one `Tempo.startWorker({…})` call. Holds the workflow functions and activity functions it can run.                  |
-| **server binary**  | The built, runnable file whose body is one `startServer({…})` call. Owns the history store; runs no workflow code.                                         |
-| **worker process** | A running instance of the worker binary. One binary can be run many times — see **task queue** and **role**, which are chosen per process, not per binary. |
-| **deployment**     | The whole running arrangement: one server process and one or more worker processes, with the flags they were started with.                                 |
-| **consumer**       | The application that uses tempo as a library, and whose author writes the two binaries. Nobody deploys this repo; a consumer deploys their own.            |
+| Term               | Meaning                                                                                                                                                                                                                    |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **worker binary**  | The built, runnable file whose body is one `Tempo.startWorker({…})` call. Holds the workflow functions and activity functions it can run.                                                                                  |
+| **server binary**  | The built, runnable file whose body is one `startServer({…})` call. Owns the history store; runs no workflow code.                                                                                                         |
+| **worker process** | A running instance of the worker binary. One binary can be run many times — see **task queue** and **role**, which are chosen per process, not per binary.                                                                 |
+| **deployment**     | The whole running arrangement: one server process and one or more worker processes, with the flags they were started with.                                                                                                 |
+| **consumer**       | The application that uses tempo as a library, and whose author writes the two binaries. Nobody deploys this repo; a consumer deploys their own.                                                                            |
+| **scenario**       | A named state a deployment can be in — `stuck`, `parked`, `unserved-queue` — that `startScenario` creates on a real server and waits for. A fixture for whoever is building a UI against this. `src/testing/scenarios.ts`. |
 
 `src/server_main.ts` and `src/tempo.ts` own the two-binary reasoning.
 
