@@ -130,7 +130,7 @@ import { createRemoteClient, createRemoteService } from './src';
 
 const client = createRemoteClient(createRemoteService('http://127.0.0.1:7777'));
 
-await client.health(); // {uptimeMs, durable, dataLocation} — is it up, is it durable
+await client.health(); // is it up, is it durable, and where is it bound
 await client.queues(); // who is polling, per queue and role
 
 const handle = client.start<string>('greeter', ['world']);
@@ -241,8 +241,13 @@ Three things are worth knowing before you write that supervisor config:
 - **A redeploy is a restart.** Nothing rereads a `.js` in place.
 - **Readiness is `health()` and `queues()`, not the stdout lines.** Those two
   answer from anywhere, at any time, about a process you did not spawn — which is
-  what a supervisor or a deploy check actually needs. The readiness lines are for
-  a human watching a terminal, and for learning the port after `--port=0`.
+  what a supervisor or a deploy check actually needs. `health()` also says where
+  the server bound — the interface, the resolved port after `--port=0`, and the
+  machine's hostname — which is how you find out that a server nothing can reach
+  is on loopback. `serverUrl(health)` turns that into an address to dial, on the
+  client side, because the server cannot see a proxy in front of itself and will
+  not claim to. The readiness lines are left for a human watching a terminal, and
+  for learning the port when you cannot yet connect at all.
 
 Going distributed does not change the workflow code, only how it is hosted. See
 [`src/server_main.ts`](src/server_main.ts) for the server entrypoint and its

@@ -55,11 +55,17 @@
  */
 
 import {createRemoteClient, type RemoteClient} from '../client';
-import {DEFAULT_TASK_QUEUE, type RemoteWorkflowService} from '../protocol';
+import {
+  DEFAULT_TASK_QUEUE,
+  serverUrl,
+  type RemoteWorkflowService,
+  type ServerEndpoint,
+} from '../protocol';
 import {
   createRemoteService,
   createRpcServer,
   createServerHost,
+  resolveEndpoint,
 } from '../services';
 import * as scenarioActivities from './scenario_activities';
 import * as scenarioWorkflows from './scenarios.workflow';
@@ -148,7 +154,15 @@ export async function startScenario(
   // Silent by default: `createServerHost` defaults its logger to `silentLogger`,
   // and a fixture that writes JSON Lines into a consumer's test output would be
   // the first thing they wrapped to shut up.
-  const host = createServerHost();
+  //
+  // The endpoint is wired the same way `server_main.ts` wires it, and for the
+  // same reason it is worth doing here at all: a dashboard developed against
+  // this fixture reads `health()` for the server's own address, and a fixture
+  // that left those fields empty would send them building the fallback path
+  // instead of the real one — a state no deployment produces, which is the one
+  // thing this harness must not fake.
+  let endpoint: ServerEndpoint | undefined;
+  const host = createServerHost(undefined, {endpoint: () => endpoint});
   const rpc = createRpcServer(host);
   const address = await new Promise<AddressInfo>((resolve, reject) => {
     rpc.once('error', reject);
@@ -156,7 +170,14 @@ export async function startScenario(
       resolve(rpc.address() as AddressInfo),
     );
   });
-  const url = `http://${bindHost}:${address.port}`;
+  endpoint = resolveEndpoint(address);
+  // Derived from the resolved endpoint rather than rebuilt from `bindHost`, so a
+  // caller and the server it just started cannot disagree about where it is. The
+  // two differ exactly where the string the caller passed is not an address to
+  // dial — `host: '0.0.0.0'` — and there `serverUrl` substitutes something that
+  // is. It cannot be `undefined` here: the endpoint was just resolved from a
+  // live listener.
+  const url = serverUrl(endpoint);
   const service: RemoteWorkflowService = createRemoteService(url);
 
   const workflows = Object.entries(scenarioWorkflows).filter(

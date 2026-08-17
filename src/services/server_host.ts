@@ -26,6 +26,7 @@ import type {
   QueueWorkers,
   WorkflowReportRequest,
   WorkflowSummary,
+  ServerEndpoint,
   ServerHealth,
   StartResult,
   StartWorkflowOptions,
@@ -144,6 +145,23 @@ export interface ServerHostOptions {
   activityLeaseMs?: number;
   /** Where lifecycle events go. Defaults to silence; `bin/server-main` supplies a JSON logger. */
   log?: Logger;
+  /**
+   * Where the transport in front of this host is bound, for `health()` to
+   * report. See `ServerEndpoint`.
+   *
+   * **A function, because of an ordering this tier cannot escape.** The host is
+   * built before anything binds — it has to be, since `resume()` re-drives
+   * persisted executions *before* the port opens, so that nothing observes a
+   * server listening and not yet remembering what it was doing. There is no port
+   * to hand it at construction, and a value passed here could only ever be the
+   * one the caller asked for rather than the one it got, which under `--port=0`
+   * is the whole question.
+   *
+   * Returning `undefined` is the honest answer while nothing has bound, and the
+   * permanent one for a host with no transport at all. This host does not listen
+   * on anything itself and will not invent an endpoint for itself.
+   */
+  endpoint?: () => ServerEndpoint | undefined;
 }
 
 export function createServerHost(
@@ -316,6 +334,11 @@ export function createServerHost(
         ...(historyStore.location === undefined
           ? {}
           : {dataLocation: historyStore.location}),
+        // Spreading `undefined` contributes nothing, which is exactly the shape
+        // wanted for a host nothing has bound: absent fields rather than four
+        // keys holding `undefined`, so `Object.keys` on the reply says what the
+        // server actually knows about itself.
+        ...options.endpoint?.(),
       };
     },
     async listWorkflows() {

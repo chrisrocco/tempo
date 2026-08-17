@@ -14,7 +14,7 @@
  * sharing a server is not sharing state between the cases below.
  */
 
-import {isStuck} from '../../src/protocol';
+import {isStuck, serverUrl} from '../../src/protocol';
 import {
   SCENARIO_IDS,
   startScenario,
@@ -52,6 +52,18 @@ describe('the scenario harness', () => {
   it('binds a port and reports where it is', () => {
     expect(server.port).toBeGreaterThan(0);
     expect(server.url).toContain(`:${server.port}`);
+  });
+
+  it('answers health with the same endpoint it handed the caller', async () => {
+    // A dashboard built against this fixture reads the server's address off
+    // `health()`, so a fixture that left those fields empty would send it down
+    // the fallback path — building a state no deployment produces, which is the
+    // one thing a shared fixture must not do.
+    const health = await server.client.health();
+
+    expect(health.port).toBe(server.port);
+    expect(health.host).toBe('127.0.0.1');
+    expect(serverUrl(health)).toBe(server.url);
   });
 
   it('serves a completed execution carrying its result', async () => {

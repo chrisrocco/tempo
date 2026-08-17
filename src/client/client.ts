@@ -185,6 +185,11 @@ export interface RemoteClient extends Client {
    * **`durable: false` is the field to read first.** It means the server is
    * keeping history in memory and will lose every execution on its next restart,
    * while looking entirely healthy until then. Nothing else reports that.
+   *
+   * The reply also carries where the server bound, when something told it — see
+   * `ServerEndpoint`. `protocol/serverUrl` turns that into an address to dial;
+   * read what it says about its own limits before putting the result into a
+   * worker's configuration.
    */
   health(): Promise<ServerHealth>;
 }
