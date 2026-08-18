@@ -12,10 +12,9 @@
  * a catalogue that hides half the fleet is worse than one with gaps. Disagreement must
  * be *reported* rather than resolved: two workers describing one name differently is a
  * fleet running two versions of a worker binary (#65), and picking a winner silently is
- * the thing that hides it. And the catalogue must be **present tense**: reports are kept
- * for the life of the server, so without the currency check (`isReportCurrent`) every
- * queue any worker ever served would stay on its workflows forever — a dev worker's
- * ten-minute session reading, a week later, as a pool that can run work.
+ * the thing that hides it. And the catalogue must be **present tense**: reports outlive
+ * their workers, so without the currency check (`isReportCurrent`) a dev worker's
+ * ten-minute session would keep reading as a pool that can run work.
  */
 
 import type {WorkflowReport} from '../../src/protocol';
@@ -219,7 +218,8 @@ describe('isReportCurrent', () => {
       identity?: string;
       role?: 'workflow' | 'activity';
       lastPolledAt?: number;
-      serves?: string[];
+      /** `null` builds the row with `serves` absent — unresolved, not empty. */
+      serves?: string[] | null;
     } = {},
   ): ObservedQueue => ({
     taskQueue: overrides.taskQueue ?? 'reports',
@@ -233,7 +233,7 @@ describe('isReportCurrent', () => {
         // `serves` present is the digest reconciliation having succeeded — the
         // registry resolves it only while the worker's polls carry the hash its
         // report was pushed under.
-        ...('serves' in overrides && overrides.serves === undefined
+        ...(overrides.serves === null
           ? {}
           : {serves: overrides.serves ?? ['nightly']}),
       },
@@ -250,7 +250,7 @@ describe('isReportCurrent', () => {
 
   /**
    * The ghost this predicate exists for: a worker that served a queue and stopped. Its
-   * poll rows stay in the registry forever — with the matching digest still on them — so
+   * poll rows outlast it — matching digest still on them, eviction minutes away — so
    * recency, not the digest, is what tells a remembered worker from a live one.
    */
   it('is not current once the worker stopped polling', () => {
@@ -276,7 +276,7 @@ describe('isReportCurrent', () => {
    * unknown, and unknown reads as silence rather than as a queue that can run work.
    */
   it('is not current while the worker’s serves is unresolved', () => {
-    const queues = [observed({serves: undefined})];
+    const queues = [observed({serves: null})];
     expect(isReportCurrent(report, queues, none, at)).toBe(false);
   });
 

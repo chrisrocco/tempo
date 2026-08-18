@@ -831,10 +831,10 @@ export interface QueueWorkers {
    * the right answer to "is this pool served at all". This is the breakdown, and
    * the only thing that can say *how many* and *which*.
    *
-   * Quiet workers linger here for minutes and then go: long enough that the one
+   * Quiet workers linger here for minutes, then go: long enough that the one
    * being hunted is still listed with when it went quiet, bounded so restarted
-   * dev workers — a fresh `pid@host` identity per restart — do not pile up for
-   * the life of the server. The aggregate timestamps outlive them.
+   * dev workers — a fresh `pid@host` identity per restart — do not pile up.
+   * The aggregate timestamps outlive them.
    */
   workers: WorkerInfo[];
 }
