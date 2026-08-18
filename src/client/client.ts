@@ -139,7 +139,9 @@ export interface Client {
    * The catalogue answers "what can I start", which none of the reads above can:
    * they describe executions, so a workflow nobody has run yet is invisible to
    * all of them. Sourced from what workers push rather than from history, which
-   * is also why it is only as complete as the fleet is up.
+   * is also why it is exactly as complete as the fleet is up: a worker that
+   * stopped takes its entries — and its queues — with it, so `taskQueues` reads
+   * as where this can run now rather than everywhere it ever ran.
    *
    * A `conflicting` entry is two workers describing one name differently — a
    * fleet running two versions of a binary, reported rather than resolved.

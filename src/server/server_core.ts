@@ -168,7 +168,11 @@ import type {
 } from '../protocol';
 import {ANY_TASK_QUEUE} from '../protocol';
 import {completedSeqs, pendingWork} from './pending_work';
-import {createWorkerRegistry} from './worker_registry';
+import {
+  createWorkerRegistry,
+  isReportCurrent,
+  WORKER_RETENTION_MS,
+} from './worker_registry';
 import type {
   ExecutionParent,
   ExecutionRecord,
@@ -382,7 +386,7 @@ export interface ServerCore {
   listQueues(): QueueWorkers[];
   /** Record what a worker says it has registered. See `WorkflowReportRequest`. */
   reportWorkflows(report: WorkflowReportRequest): void;
-  /** Every workflow any worker has reported, deduped by name. */
+  /** Every workflow the live fleet reports, deduped by name. See `WorkflowService`. */
   listWorkflows(): WorkflowSummary[];
   /**
    * Drop the timers this core is holding, so a host can shut down.
@@ -1496,7 +1500,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    * identity-on-poll change exists to make. See `WorkerInfo.busy`.
    */
   /**
-   * Fold every worker's report into one catalogue, keyed by workflow name.
+   * Fold every *current* report into one catalogue, keyed by workflow name.
+   *
+   * Current is `isReportCurrent`: the reporting worker still polls the queue with the
+   * report's own digest, or is mid-task on it. A report outlives its worker, so
+   * without this filter the catalogue would list every queue any worker recently
+   * served — and the question here is "what can I start", present tense. Only
+   * workflow leases count as busy, because only the workflow role reports.
    *
    * First report wins on a disagreement, and the disagreement is *reported* rather than
    * resolved: two workers describing one name differently is a fleet running two versions
@@ -1516,7 +1526,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // function has already added resolved fields to.
     const firstSeen = new Map<string, string>();
 
-    for (const report of workerRegistry.reports())
+    const now = Date.now();
+    const busy = sweepQuietWorkers().workflow;
+    const observed = workerRegistry.queues();
+    for (const report of workerRegistry.reports()) {
+      if (!isReportCurrent(report, observed, busy, now)) continue;
       for (const workflow of report.workflows) {
         const described = JSON.stringify(workflow);
         const existing = byName.get(workflow.name);
@@ -1534,6 +1548,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         if (firstSeen.get(workflow.name) !== described)
           existing.conflicting = true;
       }
+    }
 
     return [...byName.values()];
   }
@@ -1542,11 +1557,26 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     workerRegistry.recordReport(report);
   }
 
-  function listQueues(): QueueWorkers[] {
+  /**
+   * Evict workers quiet past retention before a fleet read — the moment the
+   * pile would be visible — sparing every lease holder, which only this tier
+   * can name (see `evictQuietWorkers`). Returns the holders, because the read
+   * needs them anyway to mark workers `busy`.
+   */
+  function sweepQuietWorkers(): {workflow: Set<string>; activity: Set<string>} {
     const holders = {
       workflow: workflowTaskQueue.leaseHolders(),
       activity: activityTaskQueue.leaseHolders(),
     };
+    workerRegistry.evictQuietWorkers(
+      Date.now() - WORKER_RETENTION_MS,
+      new Set([...holders.workflow, ...holders.activity]),
+    );
+    return holders;
+  }
+
+  function listQueues(): QueueWorkers[] {
+    const holders = sweepQuietWorkers();
     const backlog = {
       workflow: workflowTaskQueue.backlog(),
       activity: activityTaskQueue.backlog(),

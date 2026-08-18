@@ -109,7 +109,13 @@ export interface WorkflowReport extends WorkflowDescriptor {
  */
 export interface WorkflowSummary extends WorkflowReport {
   title: string;
-  /** The queues some worker serves it on, in the order first seen. */
+  /**
+   * The queues live workers currently serve it on, in the order first seen.
+   *
+   * Currently: a queue appears only while a worker there still vouches for its
+   * report by polling with the report's digest, so a pool whose workers are gone
+   * drops off rather than reading forever as a place this workflow can run.
+   */
   taskQueues: string[];
   /**
    * True when workers disagree about what this workflow is.

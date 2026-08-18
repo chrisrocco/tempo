@@ -85,6 +85,119 @@ describe('worker registry — recording polls', () => {
   });
 });
 
+/**
+ * The pile this bounds is real and cheap to make: identities default to
+ * `${pid}@${hostname}`, so a dev worker restarted by a watcher on every save
+ * leaves a row per save. The properties worth pinning are the two ways eviction
+ * could report the wrong thing: dropping a worker that is quiet because it is
+ * *working* (the `sparing` set exists for that), and erasing the aggregate
+ * record along with the rows (a queue with its workers gone must keep saying
+ * when it was last asked).
+ */
+describe('worker registry — evicting quiet workers', () => {
+  const none: ReadonlySet<string> = new Set();
+
+  it('evicts a worker quiet since before the cutoff', () => {
+    const registry = createWorkerRegistry(() => 1_000);
+    registry.recordPoll('workflow', 'email', 'w1@host');
+
+    registry.evictQuietWorkers(2_000, none);
+
+    expect(registry.queues()[0]!.workers).toEqual([]);
+  });
+
+  it('keeps a worker that has polled since the cutoff', () => {
+    const registry = createWorkerRegistry(() => 5_000);
+    registry.recordPoll('workflow', 'email', 'w1@host');
+
+    registry.evictQuietWorkers(2_000, none);
+
+    expect(registry.queues()[0]!.workers.map((w) => w.identity)).toEqual([
+      'w1@host',
+    ]);
+  });
+
+  // Quiet because it is working: the activity loop stops polling for the whole
+  // of every task it runs, and evicting it would turn a busy fleet into an
+  // absent-looking one — the misreading `WorkerInfo.busy` exists to prevent.
+  it('spares a worker named as holding a lease', () => {
+    const registry = createWorkerRegistry(() => 1_000);
+    registry.recordPoll('activity', 'email', 'busy@host');
+
+    registry.evictQuietWorkers(2_000, new Set(['busy@host']));
+
+    expect(registry.queues()[0]!.workers.map((w) => w.identity)).toEqual([
+      'busy@host',
+    ]);
+  });
+
+  it('keeps the queue and its aggregate timestamps after its last worker goes', () => {
+    const registry = createWorkerRegistry(() => 1_000);
+    registry.recordPoll('workflow', 'email', 'w1@host');
+
+    registry.evictQuietWorkers(2_000, none);
+
+    // The durable record: this pool was asked, and when — even with every row
+    // that could say who evicted.
+    expect(registry.queues()).toEqual([
+      {taskQueue: 'email', workflowPolledAt: 1_000, workers: []},
+    ]);
+  });
+
+  it('drops the evicted worker’s report with it', () => {
+    const registry = createWorkerRegistry(() => 1_000);
+    registry.recordPoll('workflow', 'email', 'w1@host', 'h1');
+    registry.recordReport({
+      identity: 'w1@host',
+      taskQueue: 'email',
+      hash: 'h1',
+      workflows: [{name: 'nightly'}],
+    });
+
+    registry.evictQuietWorkers(2_000, none);
+
+    expect(registry.reports()).toEqual([]);
+  });
+
+  // The report is a workflow-role artifact: only that loop pushes one, so only
+  // that row's eviction takes it. The same process's activity row going quiet
+  // first — mid-drain, say — must not.
+  it('keeps the report while the workflow-role row remains', () => {
+    let now = 1_000;
+    const registry = createWorkerRegistry(() => now);
+    registry.recordPoll('activity', 'email', 'w1@host');
+    now = 5_000;
+    registry.recordPoll('workflow', 'email', 'w1@host', 'h1');
+    registry.recordReport({
+      identity: 'w1@host',
+      taskQueue: 'email',
+      hash: 'h1',
+      workflows: [{name: 'nightly'}],
+    });
+
+    registry.evictQuietWorkers(2_000, none);
+
+    expect(registry.queues()[0]!.workers.map((w) => w.role)).toEqual([
+      'workflow',
+    ]);
+    expect(registry.reports().length).toBe(1);
+  });
+
+  it('lets an evicted worker reappear on its next poll', () => {
+    let now = 1_000;
+    const registry = createWorkerRegistry(() => now);
+    registry.recordPoll('workflow', 'email', 'w1@host');
+    registry.evictQuietWorkers(2_000, none);
+
+    now = 3_000;
+    registry.recordPoll('workflow', 'email', 'w1@host');
+
+    expect(registry.queues()[0]!.workers.map((w) => w.lastPolledAt)).toEqual([
+      3_000,
+    ]);
+  });
+});
+
 describe('worker registry — reading liveness', () => {
   const at = (ms: number): QueueLiveness[] => [
     {
