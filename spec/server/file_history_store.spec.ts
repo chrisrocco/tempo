@@ -72,6 +72,43 @@ describe('FileHistoryStore', () => {
    * counter that reset there would make a poison task immortal — its backoff
    * would return to zero every time.
    */
+  it('deletes an execution durably, remembering its id suffix', async () => {
+    const dir = await tmpDir();
+    try {
+      const store1 = await FileHistoryStore.open(dir);
+      await store1.create('greeter-4', 'greeter', []);
+      await store1.delete('greeter-4');
+      expect(await store1.get('greeter-4')).toBeUndefined();
+      await store1.close();
+
+      // Gone from disk, not merely from the cache — and the suffix floor is
+      // the one thing the deletion leaves behind, for the id seeding that can
+      // no longer read the id itself. See `HistoryStore.delete`.
+      const store2 = await FileHistoryStore.open(dir);
+      expect(await store2.get('greeter-4')).toBeUndefined();
+      expect(store2.highestDeletedSuffix).toBe(4);
+      await store2.close();
+    } finally {
+      await fs.rm(dir, {recursive: true, force: true});
+    }
+  });
+
+  it('persists closedAt with the terminal status', async () => {
+    const dir = await tmpDir();
+    try {
+      const store1 = await FileHistoryStore.open(dir);
+      await store1.create('wf-done', 'wf', []);
+      await store1.setStatus('wf-done', 'completed', {result: 1});
+      await store1.close();
+
+      const store2 = await FileHistoryStore.open(dir);
+      expect((await store2.get('wf-done'))?.closedAt).toBeDefined();
+      await store2.close();
+    } finally {
+      await fs.rm(dir, {recursive: true, force: true});
+    }
+  });
+
   it('carries the workflow-task failure count across a restart', async () => {
     const dir = await tmpDir();
     try {

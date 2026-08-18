@@ -17,6 +17,8 @@
  *   --data-dir=PATH        persist history here and `resume()` on boot; unset is
  *                          in-memory and loses everything on restart
  *   --activity-lease-ms=N  activity-task lease timeout
+ *   --retain-closed-for-ms=N  delete executions closed longer than this; unset
+ *                          keeps them forever (see ServerHostOptions)
  *
  * ## Why this is a function and not only a script
  *
@@ -137,6 +139,15 @@ export interface StartServerOptions {
    * never gets to decide.
    */
   activityLeaseMs?: number;
+  /**
+   * Delete executions closed longer than this (ms). `--retain-closed-for-ms`
+   * overrides. **Unset keeps every execution forever**, today's behavior.
+   *
+   * The contract this changes — results claimable only within the window, a
+   * closed `workflowId` reclaimable after it — is documented where the option
+   * lands: `ServerHostOptions.retainClosedForMs`.
+   */
+  retainClosedForMs?: number;
 }
 
 /** A running server, and the two things a caller needs from one. */
@@ -180,6 +191,9 @@ export async function startServer(
   const activityLeaseMs =
     numericFlagValue(argv, SERVER_FLAG.activityLeaseMs) ??
     options.activityLeaseMs;
+  const retainClosedForMs =
+    numericFlagValue(argv, SERVER_FLAG.retainClosedForMs) ??
+    options.retainClosedForMs;
 
   // Durable when a data dir was resolved (a single-writer lockfile guards it);
   // otherwise in-memory. `undefined` lets createServerHost default the store.
@@ -192,6 +206,7 @@ export async function startServer(
   let endpoint: ServerEndpoint | undefined;
   const host = createServerHost(store, {
     activityLeaseMs,
+    retainClosedForMs,
     log: createJsonLogger(),
     endpoint: () => endpoint,
   });
