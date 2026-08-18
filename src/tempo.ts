@@ -14,6 +14,7 @@
  *   --server=URL   overrides `serverUrl` (else 127.0.0.1:7777)
  *   --queue=NAME   overrides `taskQueue` (else `default`)
  *   --role=ROLE    overrides `role` — unset runs every role it can
+ *   --activity-concurrency=N  how many activities run at once (default 1)
  *   --local=NAME   run that workflow once with no server, print, exit
  *   --args=JSON    its arguments, as a JSON array (with `--local` only)
  *
@@ -212,6 +213,28 @@ export interface StartWorkerOptions {
    */
   role?: WorkerRole;
   /**
+   * How many activities this process runs at once.
+   * `--activity-concurrency` overrides. Default 1 — the sequential loop.
+   *
+   * The knob exists because an activity is the consumer's own I/O, and a
+   * sequential worker is idle for the whole of every call it makes: one model
+   * request that thinks for thirty seconds occupies a process that could have
+   * been running dozens. Raising this is the cheapest throughput there is for
+   * an I/O-bound fleet, and it changes nothing about correctness — each task is
+   * still leased, heartbeated and completed exactly as before.
+   *
+   * What it does *not* do is make a CPU-bound activity faster. Node runs one
+   * thread; concurrency overlaps waiting, not computing. For work that burns
+   * CPU, more processes remain the answer — which is what `role` is for.
+   *
+   * **Activity loop only, deliberately.** Workflow replay is CPU-bound and gains
+   * little from overlap, and the two roles are scaled separately anyway (see
+   * `role`), so one number covering both would be the wrong number for one of
+   * them. `WorkerLoopOptions.maxConcurrentTasks` is the lower-level knob for
+   * anyone composing loops directly.
+   */
+  activityConcurrency?: number;
+  /**
    * What this worker calls itself on every poll, so `Client.queues()` can count
    * and name the fleet. Defaults to `${pid}@${hostname}`.
    *
@@ -297,6 +320,31 @@ interface RequestedRole {
  * was written — a unit file or a source file are very different things to go and
  * fix.
  */
+/**
+ * How many activities to run at once: `--activity-concurrency`, else the option,
+ * else the sequential default the loop applies for itself.
+ *
+ * The same precedence every other knob here has — the launch site outranks the
+ * artifact, because how much concurrency a host can stand is a fact about the
+ * deployment rather than about the code. Rejects a value that is not a positive
+ * integer instead of clamping it: `--activity-concurrency=abc` is a typo in a
+ * unit file, and a worker that silently ran one at a time would look healthy
+ * while delivering none of the throughput it was redeployed for.
+ */
+export function resolveActivityConcurrency(
+  argv: readonly string[],
+  option: number | undefined,
+): number | undefined {
+  const raw = flagValue(argv, WORKER_FLAG.activityConcurrency);
+  if (raw === undefined) return option;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1)
+    throw new Error(
+      `--${WORKER_FLAG.activityConcurrency} needs a positive integer, got ${raw}`,
+    );
+  return value;
+}
+
 export function requestedRole(
   argv: readonly string[],
   option: WorkerRole | undefined,
@@ -448,6 +496,8 @@ function composeRemote(args: {
   taskQueue: string;
   roles: readonly WorkerRole[];
   loop: WorkerLoopTuning;
+  /** In-flight activity limit; see `StartWorkerOptions.activityConcurrency`. */
+  activityConcurrency: number | undefined;
   workflows: readonly [string, AnyFn][];
   activities: readonly [string, AnyFn][];
 }): {stop(): Promise<void>} {
@@ -509,6 +559,9 @@ function composeRemote(args: {
         ...args.loop,
         onError,
         taskQueue: args.taskQueue,
+        ...(args.activityConcurrency === undefined
+          ? {}
+          : {maxConcurrentTasks: args.activityConcurrency}),
       }),
     );
   }
@@ -598,6 +651,10 @@ export function startWorker(options: StartWorkerOptions): Worker {
       errorBackoffMs: options.errorBackoffMs,
       maxErrorBackoffMs: options.maxErrorBackoffMs,
     },
+    activityConcurrency: resolveActivityConcurrency(
+      argv,
+      options.activityConcurrency,
+    ),
     workflows,
     activities,
   });
