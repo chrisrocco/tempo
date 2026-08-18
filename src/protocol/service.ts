@@ -830,6 +830,11 @@ export interface QueueWorkers {
    * The two timestamps above are the aggregate — "something asked" — and remain
    * the right answer to "is this pool served at all". This is the breakdown, and
    * the only thing that can say *how many* and *which*.
+   *
+   * Quiet workers linger here for minutes and then go: long enough that the one
+   * being hunted is still listed with when it went quiet, bounded so restarted
+   * dev workers — a fresh `pid@host` identity per restart — do not pile up for
+   * the life of the server. The aggregate timestamps outlive them.
    */
   workers: WorkerInfo[];
 }
@@ -936,10 +941,13 @@ export function isNameServed(
  *
  * Beside `isQueueServed` and for the same reason: "a worker on `*` serves
  * `email` too" is a rule, and two clients applying it differently would
- * disagree about how big a fleet is. Returns every worker ever seen, however
- * long ago — staleness is `lastPolledAt`, which the caller can read, and
- * filtering here would hide the worker that went quiet, which is usually the
- * one being looked for.
+ * disagree about how big a fleet is. Returns every worker in the rows it is
+ * given, however long quiet — staleness is `lastPolledAt`, which the caller can
+ * read, and filtering here would hide the worker that went quiet, which is
+ * usually the one being looked for. The server bounds how long that can be:
+ * it retains a quiet worker's row for minutes, not forever, so a recently-dead
+ * worker is listed and an old session's pile is not (`WORKER_RETENTION_MS`,
+ * server-side).
  */
 export function workersServing(
   queues: readonly QueueLiveness[],

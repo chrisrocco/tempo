@@ -34,6 +34,32 @@
  * That is the honest reading — something asked, and it did not say who — and it
  * keeps `createLocalRuntime` and any hand-rolled client working unchanged.
  *
+ * ## Quiet workers are kept for a while, not forever
+ *
+ * A worker row is only ever *added* by a poll, and identities are cheap: the
+ * default is `${pid}@${hostname}`, so a worker restarted on every file save —
+ * which is exactly what a dev loop under a watcher does — mints a new identity
+ * each time and leaves the old row behind. Kept forever, those rows bury the
+ * live fleet under its own history, and the one recently-quiet worker an
+ * operator is hunting is hidden in a pile of workers nobody is hunting.
+ *
+ * So rows are evicted once they have been quiet longer than
+ * `WORKER_RETENTION_MS` — via `evictQuietWorkers`, which `server_core` calls
+ * before each fleet read, because only that tier can name the workers to spare: a
+ * worker holding a lease is quiet *because it is working*, and evicting it
+ * would make a busy fleet read as an absent one, the misreading `WorkerInfo.busy`
+ * exists to prevent. The window is generous against `QUEUE_STALE_MS` — a row
+ * lives long past the last moment it can affect a served/unserved answer — and
+ * what it is protecting is the diagnostic: the worker that went quiet minutes
+ * ago is still on screen when someone comes looking.
+ *
+ * The **aggregate timestamps survive eviction**. A queue row with a frozen
+ * `workflowPolledAt` and no workers is the durable record — "this pool was
+ * served until then, and nothing has asked since" — and it is small and bounded
+ * by the number of queue names, where worker rows are bounded by nothing at all.
+ * An evicted worker's report goes with it, so the catalogue's table does not
+ * keep growing on behalf of rows this one no longer holds.
+ *
  * ## What it still cannot see
  *
  * Whether a worker is *busy* is not knowable from polls, and is not decided
@@ -53,6 +79,21 @@ import {
   type WorkflowReportRequest,
 } from '../protocol';
 
+/**
+ * How long a quiet worker's row is kept before `evictQuietWorkers` may drop it.
+ *
+ * Sixty times `QUEUE_STALE_MS`, so eviction can never change a served/unserved
+ * answer that was still in doubt — by the time a row is eligible, every recency
+ * test failed it long ago. What the margin buys is the diagnostic window: an
+ * operator paged about a dead worker finds its row, with its actionable
+ * `pid@host` identity and the moment it went quiet, rather than a queue that has
+ * already tidied the evidence away. What bounds it is the pile: identities are
+ * minted per process, so a watcher restarting a dev worker on every save grows a
+ * row per save, and a window much longer than this stops describing a fleet and
+ * starts describing a session's history.
+ */
+export const WORKER_RETENTION_MS = 60 * QUEUE_STALE_MS;
+
 export interface WorkerRegistry {
   /**
    * Note that `role` just asked `taskQueue` for work. Called on every poll,
@@ -71,7 +112,8 @@ export interface WorkerRegistry {
   ): void;
   /**
    * Every queue that has ever been polled, in the order first seen, each with
-   * the workers seen on it.
+   * the workers seen on it — the ones still within retention, that is; see
+   * `evictQuietWorkers`.
    *
    * Returns `ObservedQueue`, not `QueueWorkers`: what a table of polls can say
    * is strictly less than what the server reports, and the difference is not
@@ -97,6 +139,21 @@ export interface WorkerRegistry {
    * live worker is `isReportCurrent`'s question, answered against `queues()`.
    */
   reports(): ReportedWorkflows[];
+  /**
+   * Drop every worker row whose last poll is older than `before`, except workers
+   * named in `sparing` — the ones holding a lease, quiet *because they are
+   * working*. An evicted workflow-role row takes its report with it.
+   *
+   * `before` is a cutoff timestamp rather than an age, and `sparing` is handed in
+   * rather than looked up, for the same reason twice over: the clock comparison
+   * belongs to the caller that owns "now", and busyness is the lease tables'
+   * knowledge, which this module must not learn — see "What it still cannot see".
+   * `server_core` computes both and calls this before each fleet read.
+   *
+   * Queue rows and their aggregate timestamps are never evicted; a queue with all
+   * its workers gone keeps saying when it was last asked. See the fileoverview.
+   */
+  evictQuietWorkers(before: number, sparing: ReadonlySet<string>): void;
 }
 
 /** One worker's reported set, with the digest it was reported under. */
@@ -136,12 +193,14 @@ interface Observed {
 /**
  * Is `report` what its worker is running *now*, judged by the polls beside it?
  *
- * A report outlives the worker that pushed it: the registry keeps every report for
- * the life of the server, because a replacement can only arrive from a worker that
- * is still there to send one. Left unchecked, that turns the catalogue into an
- * archive — a queue a worker served last Tuesday stays on every workflow it ever
- * reported, which is precisely the reading `listWorkflows` must not produce, since
- * its question is "what can I start", present tense.
+ * A report outlives the worker that pushed it: a replacement can only arrive from
+ * a worker that is still there to send one, so the registry holds a report until
+ * eviction takes its worker (`evictQuietWorkers`) — minutes after the worker went
+ * quiet, and never for one that merely reported and vanished. Left unchecked, that
+ * would turn the catalogue into an archive — a queue a worker served minutes ago
+ * staying on every workflow it reported, which is precisely the reading
+ * `listWorkflows` must not produce, since its question is "what can I start",
+ * present tense.
  *
  * Current means the reporting worker is still vouching for the report:
  *
@@ -286,6 +345,24 @@ export function createWorkerRegistry(
         ...r,
         workflows: [...r.workflows],
       }));
+    },
+
+    evictQuietWorkers(before, sparing) {
+      for (const [queueKey, onQueue] of workers) {
+        for (const [workerKey, observed] of onQueue) {
+          if (observed.lastPolledAt >= before) continue;
+          if (sparing.has(observed.identity)) continue;
+          onQueue.delete(workerKey);
+          // The report is a workflow-role artifact — only that loop pushes one —
+          // so it leaves with the workflow-role row and survives the activity
+          // row's eviction, whichever order the two go quiet in.
+          if (observed.role === 'workflow')
+            reported.delete(`${observed.identity} ${queueKey}`);
+        }
+        // The queue's entry in `seen` stays either way: the aggregate timestamps
+        // are the durable record eviction must not erase.
+        if (onQueue.size === 0) workers.delete(queueKey);
+      }
     },
 
     queues() {

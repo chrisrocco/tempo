@@ -168,7 +168,11 @@ import type {
 } from '../protocol';
 import {ANY_TASK_QUEUE} from '../protocol';
 import {completedSeqs, pendingWork} from './pending_work';
-import {createWorkerRegistry, isReportCurrent} from './worker_registry';
+import {
+  createWorkerRegistry,
+  isReportCurrent,
+  WORKER_RETENTION_MS,
+} from './worker_registry';
 import type {
   ExecutionParent,
   ExecutionRecord,
@@ -1528,8 +1532,15 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const firstSeen = new Map<string, string>();
 
     const now = Date.now();
-    const observed = workerRegistry.queues();
     const busy = workflowTaskQueue.leaseHolders();
+    // The same sweep `listQueues` runs, so the two fleet reads cannot disagree
+    // about who is still here. Activity lease holders are spared too — eviction
+    // is one policy, not one per read.
+    workerRegistry.evictQuietWorkers(
+      now - WORKER_RETENTION_MS,
+      new Set([...busy, ...activityTaskQueue.leaseHolders()]),
+    );
+    const observed = workerRegistry.queues();
     for (const report of workerRegistry.reports()) {
       if (!isReportCurrent(report, observed, busy, now)) continue;
       for (const workflow of report.workflows) {
@@ -1563,6 +1574,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflow: workflowTaskQueue.leaseHolders(),
       activity: activityTaskQueue.leaseHolders(),
     };
+    // Before the read, sparing every lease holder: a worker quiet because it is
+    // working must not be evicted as one that died — see `evictQuietWorkers`.
+    workerRegistry.evictQuietWorkers(
+      Date.now() - WORKER_RETENTION_MS,
+      new Set([...holders.workflow, ...holders.activity]),
+    );
     const backlog = {
       workflow: workflowTaskQueue.backlog(),
       activity: activityTaskQueue.backlog(),
