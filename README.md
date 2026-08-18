@@ -40,6 +40,11 @@ on npm and makes no stability promises — clone it, read it, run it.
   `workflowId` you choose — claim the same id twice and you get one child, and
   a per-child **parent-close policy** decides whether it is terminated, asked
   to unwind, or left running when its parent finishes
+- **`createWorkflow`** — define a workflow under its wire name and get a typed
+  reference back: invoking it runs it as a blocking child, `.child()` spawns it
+  fire-and-forget, and defining it registers it — so a worker names only its
+  root workflows and everything they invoke rides along on the import graph,
+  the same way `proxyActivities` registers activities
 - **Cancellation**, cascading to children, surfacing as a catchable failure —
   plus `terminate` for when cooperative cancellation cannot land
 - **`continueAsNew`** to bound history on long-lived workflows

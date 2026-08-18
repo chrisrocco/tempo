@@ -15,6 +15,7 @@ import type {WorkflowFn} from './core';
 import type {WorkflowService} from './protocol';
 import type {HistoryStore} from './server';
 import {createLocalService} from './services';
+import {workflowImplOf} from './workflow_registry';
 import {
   createActivityRegistry,
   createActivityWorker,
@@ -80,7 +81,12 @@ export function createLocalRuntime(options: LocalRuntimeOptions = {}): Runtime {
 
   const runtime: Runtime = {
     registerWorkflow(name, fn) {
-      workflowRegistry.set(name, fn);
+      // Unwrapped, so a `WorkflowRef` handed here registers its body rather
+      // than its dispatcher — the engine invoking a reference would be a
+      // workflow forever starting itself as its own child. This runtime stays
+      // explicit otherwise: nothing registers itself here (see
+      // `workflow_registry.ts`), which is what makes it the test seam.
+      workflowRegistry.set(name, workflowImplOf(fn) as WorkflowFn);
       return runtime;
     },
     registerActivity(name, fn) {

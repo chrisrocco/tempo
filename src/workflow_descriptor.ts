@@ -53,7 +53,7 @@ import type {WorkflowDescriptor} from './protocol';
 const DESCRIPTOR = Symbol.for('tempo.workflowDescriptor');
 
 /** Any workflow function. `any[]` rest params are required for assignability — see `core/workflow_api`. */
-type AnyWorkflowFn = (...args: any[]) => Promise<unknown>;
+export type AnyWorkflowFn = (...args: any[]) => Promise<unknown>;
 
 /** A workflow and everything it says about itself, in one object. */
 export interface WorkflowDefinition<
