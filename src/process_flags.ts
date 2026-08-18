@@ -100,6 +100,7 @@ export const WORKER_FLAG = {
   role: 'role',
   local: 'local',
   args: 'args',
+  activityConcurrency: 'activity-concurrency',
 } as const;
 
 /** `--name=value`, the only spelling anything here writes or reads. */
