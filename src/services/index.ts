@@ -9,4 +9,5 @@
 export * from './local_service';
 export * from './remote_service';
 export * from './rpc_server';
+export * from './server_endpoint';
 export * from './server_host';

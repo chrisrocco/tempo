@@ -59,11 +59,18 @@
  * which is the field that distinguishes a healthy server from one that will lose
  * every execution on its next restart. `queues()` is its companion for workers.
  *
+ * It now also reports **where this server is bound** — interface, port, and
+ * machine hostname (see `ServerEndpoint`). That is resolved here, from the
+ * `AddressInfo` the listen callback hands back, and pushed into the host: the
+ * host is the tier that answers probes and this is the tier that knows, so the
+ * knowledge has to cross once, at bind.
+ *
  * The line stays for the two jobs it is genuinely good at: a human watching a
- * terminal, and **learning the port after `--port=0`**, which is how the specs
- * get an arbitrary port without racing for one. In-process callers do not need
- * even that — `Server.port` is the bound port, and `--port=0` resolves in the
- * returned value.
+ * terminal, and **learning the port after `--port=0`** without a connection —
+ * which is how the specs that spawn this as a subprocess get an arbitrary port
+ * without racing for one. Anything that can already connect should ask
+ * `health()` instead. In-process callers need neither: `Server.port` is the
+ * bound port, and `--port=0` resolves in the returned value.
  *
  * ## Operational notes
  *
@@ -100,8 +107,9 @@ import {
   flagValue,
   numericFlagValue,
 } from './process_flags';
+import type {ServerEndpoint} from './protocol';
 import {FileHistoryStore, createJsonLogger} from './server';
-import {createRpcServer, createServerHost} from './services';
+import {createRpcServer, createServerHost, resolveEndpoint} from './services';
 
 /**
  * What a server process is configured with. Every field has a launch-site
@@ -176,9 +184,16 @@ export async function startServer(
   // Durable when a data dir was resolved (a single-writer lockfile guards it);
   // otherwise in-memory. `undefined` lets createServerHost default the store.
   const store = dataDir ? await FileHistoryStore.open(dataDir) : undefined;
+  // Filled in below, once there is something to fill it in with. The host is
+  // built first because `resume()` has to run before the port opens, so at this
+  // point the only truthful answer to "where are you bound" is that nothing is
+  // — and under `--port=0` the requested port is not the answer anyway. See
+  // `ServerHostOptions.endpoint`.
+  let endpoint: ServerEndpoint | undefined;
   const host = createServerHost(store, {
     activityLeaseMs,
     log: createJsonLogger(),
+    endpoint: () => endpoint,
   });
   // Re-arm timers, re-dispatch pending work, re-drive running executions. Before
   // the port opens, so nothing observes a server that is listening and has not
@@ -190,6 +205,7 @@ export async function startServer(
     rpc.once('error', reject);
     rpc.listen(port, bindHost, () => resolve(rpc.address() as AddressInfo));
   });
+  endpoint = resolveEndpoint(address);
 
   // A convenience for humans and for `--port=0`, not the readiness contract —
   // see the fileoverview. The host is appended rather than substituted: existing

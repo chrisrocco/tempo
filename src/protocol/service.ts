@@ -198,6 +198,131 @@ export interface ExecutionFilter {
 }
 
 /**
+ * Where a server is bound, and which machine it is bound on.
+ *
+ * **All three or none.** They are read from a single `listen`, so a server that
+ * knows any of them knows all of them, and a server with no transport in front
+ * of it — which `createServerHost()` on its own is, and which the specs use —
+ * knows none. `ServerHealth` therefore carries this as a `Partial` rather than
+ * as three independently optional fields, which would offer eight combinations
+ * where only two exist.
+ *
+ * A fact about the *process*, not about the store or the executions: none of it
+ * changes after the port is bound, and none of it costs a scan to answer.
+ *
+ * Every field here is something the server observed about itself. Nothing here
+ * is inferred — where to *dial* the server is an inference, and it lives in
+ * `serverUrl` below, on the reader's side of the wire where it can be
+ * corrected.
+ */
+export interface ServerEndpoint {
+  /**
+   * The interface bound, as the transport reports it — `127.0.0.1`, `0.0.0.0`,
+   * `::`.
+   *
+   * This is the field that answers "why can nothing else reach this server". A
+   * server on loopback is unreachable from every other machine, and nothing else
+   * it says distinguishes it from one listening to the world: both are up, both
+   * report their durability, and both answer this probe perfectly well for
+   * whoever can already reach them. It is also the one thing here a caller
+   * cannot work out for itself — it knows the address that happened to work for
+   * *it*, which says nothing about what else the server accepts.
+   */
+  host: string;
+  /**
+   * The port bound — the resolved value after `--port=0`, over the wire.
+   *
+   * `server_main.ts` prints it on stdout as well, and says there why that line
+   * is a convenience rather than the contract: it is observable only by whoever
+   * spawned the process, holding a pipe, at the moment it started. This answers
+   * the same question from anywhere, at any time, about a process nobody here
+   * spawned.
+   */
+  port: number;
+  /**
+   * The machine the process runs on, as it calls itself — `os.hostname()`.
+   *
+   * What turns a fleet of identically-configured servers into distinguishable
+   * ones, and the only field here that is about the box rather than the socket.
+   * The workers already have this: `DEFAULT_IDENTITY` is `${pid}@${hostname}`,
+   * on the reasoning that an identity should be something an operator can act on
+   * — find the process, read its logs. The server was the one tier with no such
+   * identity, which is the gap this closes.
+   *
+   * Read once at bind time, not per probe.
+   */
+  hostname: string;
+}
+
+/**
+ * Bind addresses that mean "every interface" rather than a reachable one.
+ *
+ * Node normalizes to these two: `--host=0.0.0.0` reports `0.0.0.0`, and both
+ * `::` and an omitted host on a dual-stack build report `::`.
+ */
+const WILDCARD_BINDS: ReadonlySet<string> = new Set(['0.0.0.0', '::']);
+
+/**
+ * Where to dial the server a `health()` reply came from — **the reader's
+ * inference, not the server's claim.**
+ *
+ * A function here rather than a `serverUrl` field on `ServerEndpoint`, and the
+ * difference is not cosmetic. The server knows what it bound. It does not know
+ * what sits in front of that — a reverse proxy, a published container port, a
+ * NAT, a Service — and cannot, because nothing tells it. Putting a URL on the
+ * wire would dress that guess as a fact the server had checked, and it would be
+ * *least* accurate exactly where it was most wanted: in the single-VM case the
+ * answer is the address the caller already dialed, and in the containerized and
+ * proxied cases the issue asks about, it is wrong. A plausible wrong value is
+ * worse than an obviously missing one, because a placeholder gets filled in and
+ * a URL gets pasted into a unit file.
+ *
+ * So the inference belongs on the side that can correct it. This is the same
+ * move as `isStuck`, `isQueueServed` and `isNameServed`: derived answers ship as
+ * exported functions over the projection types, so no consumer reimplements one
+ * and gets it subtly wrong, and none of them is mistaken for something the
+ * server asserted. Living in `protocol/` also makes it importable by a browser,
+ * which the transport-side code that produces the endpoint is not.
+ *
+ * Two rules, which are the whole reason this is not a template literal at the
+ * call site:
+ *
+ * - **A wildcard bind is substituted with `hostname`.** `http://0.0.0.0:7777`
+ *   is an address to listen on rather than one to dial. Every interface would
+ *   be an equally correct answer, so the machine's own name is used — the one
+ *   candidate that does not require picking an interface for the reader.
+ * - **An IPv6 literal is bracketed.** Without it `::1` and port 7777 concatenate
+ *   to `http://::1:7777`, which no URL parser accepts — so the failure is not a
+ *   subtly wrong address but a consumer that cannot dial at all.
+ *
+ * `undefined` when the reply carries no endpoint, which is the honest answer for
+ * a server that has not been told where it is bound rather than a URL invented
+ * on its behalf. A *complete* `ServerEndpoint` always yields one, which is what
+ * the first overload says — the tier that just bound a listener should not have
+ * to handle an absence it knows cannot happen.
+ *
+ * **If a deployment needs an authoritative URL**, the server has to be *told*
+ * one — an advertise flag, supplied by whoever knows the topology — and that
+ * would be a real field on this type, because a human asserted it. Nothing has
+ * asked for one; this is the door it would come through.
+ */
+export function serverUrl(endpoint: ServerEndpoint): string;
+export function serverUrl(
+  endpoint: Partial<ServerEndpoint>,
+): string | undefined;
+export function serverUrl(
+  endpoint: Partial<ServerEndpoint>,
+): string | undefined {
+  const {host, port, hostname} = endpoint;
+  if (host === undefined || port === undefined) return undefined;
+  const dialable = WILDCARD_BINDS.has(host) ? hostname : host;
+  if (dialable === undefined) return undefined;
+  // Bracket by the colon rather than by address family: the value may be a
+  // hostname substituted for a wildcard, and hostnames never contain one.
+  return `http://${dialable.includes(':') ? `[${dialable}]` : dialable}:${port}`;
+}
+
+/**
  * What a server says about itself when asked.
  *
  * **There is no `ok` field, deliberately.** Liveness is carried by the response
@@ -210,8 +335,12 @@ export interface ExecutionFilter {
  * health check that walks every execution is a health check that falls over on
  * exactly the server that most needs probing. Execution counts are what
  * `groupExecutions` is for.
+ *
+ * The `ServerEndpoint` half is present when something has told the host where
+ * it is bound, which every deployed server does and a bare `createServerHost()`
+ * does not — see that type for why it arrives whole or not at all.
  */
-export interface ServerHealth {
+export interface ServerHealth extends Partial<ServerEndpoint> {
   /**
    * How long this server has been up, in milliseconds.
    *

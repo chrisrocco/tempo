@@ -21,6 +21,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {createRemoteClient} from '../../src/client';
 import {DEFAULT_PORT} from '../../src/process_flags';
+import {serverUrl} from '../../src/protocol';
 import {startServer, type Server} from '../../src/server_main';
 import {createRemoteService} from '../../src/services';
 
@@ -108,6 +109,25 @@ describe('server entrypoint — the options object is the configuration', () => 
       createRemoteService(`http://127.0.0.1:${server.port}`),
     );
     expect((await client.health()).durable).toBeFalse();
+  });
+
+  it('reports over the wire the interface and port it bound', async () => {
+    const server = await start({port: 0});
+
+    // The same two facts `Server.port` and `Server.host` carry, reachable by
+    // anything that can connect rather than only by whoever called this
+    // function. That is the whole difference: a supervisor, a dashboard, or a
+    // worker's provisioning template has the connection and not the handle, and
+    // under `--port=0` the port is not knowable any other way without reading
+    // this process's stdout.
+    const health = await createRemoteClient(
+      createRemoteService(`http://127.0.0.1:${server.port}`),
+    ).health();
+
+    expect(health.port).toBe(server.port);
+    expect(health.host).toBe(server.host);
+    expect(health.hostname).toBe(os.hostname());
+    expect(serverUrl(health)).toBe(`http://127.0.0.1:${server.port}`);
   });
 
   it('is durable when given a data dir, and reports where state lives', async () => {
