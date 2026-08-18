@@ -550,21 +550,45 @@ export interface ExecutionGroup {
  * precise about why, because the obvious reading of "which activity is failing"
  * is the one this does not answer.
  *
- * History records an activity's *final* outcome: `activityFailed` is written
- * once the retry budget is spent, and the per-attempt state is discarded the
- * moment the activity settles. So an activity that fails four times and
- * succeeds on the fifth leaves a history containing `activityScheduled` and
- * `activityCompleted` — identical to one that succeeded immediately. **Flakiness
- * is not derivable from history at all**, at any cost; counting it over time
- * would need a durable counter that outlives settling, which is the opposite of
- * the rule that keeps `activityAttempts` bounded.
+ * ## History answers it too, now — this once said otherwise
  *
- * Rather than answer a narrower question and let a reader assume the wider one,
- * this reports what the engine genuinely knows: what is burning retries at this
- * moment. That is also the cheap thing — the counts come from state the scan
- * already loads. For failure rates over time, `activity.settled` and
- * `activity.retry_scheduled` carry the activity name into the log stream, which
- * is where an aggregate over history belongs.
+ * This doc claimed that flakiness was **not derivable from history at all**, on
+ * the reasoning that history keeps only an activity's final outcome and the
+ * per-attempt state dies when it settles. That stopped being true when
+ * `activityRetryScheduled` joined the history; see that event for the reversal
+ * and the argument it displaced. Every retry round now leaves an event carrying
+ * the attempt, the ceiling, the backoff deadline and the error, so an activity
+ * that failed four times and succeeded on the fifth is no longer
+ * indistinguishable from one that succeeded first time. Reducing those per
+ * `seq` counts retries after the fact, and a timeline renders them like any
+ * other event. `spec/server/activity_retry_scheduled.spec.ts` pins the
+ * properties that make that reduction sound — one event per retry rather than
+ * per failure, and the per-attempt error nothing else keeps.
+ *
+ * Two things qualify that reading, and neither invents anything that did not
+ * happen. A rollover empties history, so earlier runs' retries are gone. And a
+ * task redelivered because its lease expired — a worker that died mid-attempt —
+ * leaves no `activityRetryScheduled` and burns no budget, because nothing
+ * reported a result for it; the re-run is still visible, since every *pickup*
+ * appends an `activityStarted`. So the two counts answer different questions:
+ * `activityRetryScheduled` per `seq` counts failures the retry policy acted on,
+ * and `activityStarted` per `seq` counts times the work was actually attempted,
+ * crash-redeliveries included. Neither is the wrong one — but a reader who wants
+ * the second and counts the first will undercount, silently.
+ *
+ * ## Why this stays a live view
+ *
+ * Not because history cannot answer it, but because of what asking costs. The
+ * question is about the whole server, and deriving it from history means
+ * fetching every execution and reducing each one — the exact cost the grouped
+ * counts above exist to avoid. These come from state the scan already loads,
+ * and they answer about *now*, which is what is wanted when something is on
+ * fire and what a total over all time blurs.
+ *
+ * For rates over time either source serves: reduce `activityRetryScheduled`
+ * across the executions in question, or read `activity.settled` and
+ * `activity.retry_scheduled` off the log stream, which carry the activity name
+ * for a pipeline already ingesting stderr.
  *
  * Its own type rather than an `ExecutionGroup`, because none of that type's
  * statuses (`running` / `completed` / `terminated` / `stuck`) mean anything for
