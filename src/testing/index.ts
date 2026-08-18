@@ -211,6 +211,11 @@ export async function startScenario(
     }),
   ];
 
+  // What the seeds started and the harness must therefore stop — a scenario can
+  // be a running process (see `split-manifest`), and a consumer holds no handle
+  // to it but this server's `stop`.
+  const seedStops: Array<() => void | Promise<void>> = [];
+
   let stopping: Promise<void> | undefined;
   const server: ScenarioServer = {
     url,
@@ -218,12 +223,16 @@ export async function startScenario(
     taskQueue: SCENARIO_QUEUE,
     client: createRemoteClient(service),
     stop() {
-      // Idempotent, and in this order: the loops must stop polling before the
-      // port closes, or a poll in flight rejects and the loop reports a failure
-      // on the way out that nothing was wrong with.
+      // Idempotent, and in this order: the loops — the harness's own and any a
+      // seed registered — must stop polling before the port closes, or a poll
+      // in flight rejects and the loop reports a failure on the way out that
+      // nothing was wrong with.
       stopping ??= (async () => {
         reporter.stop();
-        await Promise.all(loops.map((loop) => loop.stop()));
+        await Promise.all([
+          ...loops.map((loop) => loop.stop()),
+          ...seedStops.map((stop) => stop()),
+        ]);
         await new Promise<void>((resolve) => rpc.close(() => resolve()));
       })();
       return stopping;
@@ -235,6 +244,9 @@ export async function startScenario(
     queue: SCENARIO_QUEUE,
     unservedQueue: UNSERVED_QUEUE,
     until: (label, predicate) => until(label, predicate, timeoutMs),
+    onStop: (stop) => {
+      seedStops.push(stop);
+    },
   };
 
   try {

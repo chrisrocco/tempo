@@ -30,7 +30,16 @@
  * hold.
  */
 
+import type {WorkflowFn} from '../core';
 import {isStuck, type RemoteWorkflowService} from '../protocol';
+import {
+  createWorkflowRegistry,
+  createWorkflowWorker,
+  runWorkflowWorker,
+  startWorkflowReporter,
+} from '../worker';
+import {workflowDescriptor} from '../workflow_descriptor';
+import * as scenarioWorkflowModule from './scenarios.workflow';
 
 /** Every state the harness can produce. Adding one is adding a case here. */
 export type ScenarioName =
@@ -64,6 +73,13 @@ export interface SeedContext {
    * five-minute diagnosis and an afternoon.
    */
   until(label: string, predicate: () => Promise<boolean>): Promise<void>;
+  /**
+   * Register teardown for something long-lived this seed started — a worker
+   * loop, a reporter. Run by `ScenarioServer.stop()` alongside the harness's
+   * own workers, so a scenario that *is* a running process (see
+   * `split-manifest`) does not leak it past the server it was seeded into.
+   */
+  onStop(stop: () => void | Promise<void>): void;
 }
 
 /** One named state: how to create it, and how to know it is there. */
@@ -232,28 +248,57 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
     summary:
       'Two workers describing one workflow differently — a fleet running two versions of a binary.',
     async seed(context) {
-      // A second report, under a second identity, describing a name the real
-      // worker also describes — and describing it differently. That disagreement
-      // is what `conflicting` exists to surface, and it is invisible in every
-      // other view: both workers are healthy, both are polling, both serve the
-      // queue.
-      await context.service.reportWorkflows({
-        identity: SPLIT_MANIFEST_IDENTITY,
-        taskQueue: context.queue,
-        hash: 'scenario-split-manifest',
-        workflows: [
-          {
-            name: SCENARIO_WORKFLOWS.completes,
-            title: 'Completes immediately (previous release)',
-            description:
-              'The same workflow as the live binary describes, worded differently — which is what makes the fleet disagree.',
-          },
-        ],
+      // A second worker, really running: registered with the same workflow
+      // functions — so a task it wins from the shared queue still replays —
+      // but describing one of them as the previous release worded it. That
+      // disagreement is what `conflicting` exists to surface, and it is
+      // invisible in every other view: both workers are healthy, both are
+      // polling, both serve the queue.
+      //
+      // Really running is not flavor. The catalogue only counts a report while
+      // the worker behind it vouches for it on its polls (`isReportCurrent`),
+      // so a bare `reportWorkflows` under a made-up identity — which is what
+      // this seed used to do — would surface a conflict that evaporated
+      // `QUEUE_STALE_MS` later, mid-way through whatever the dashboard
+      // developer was building against it.
+      const workflows = Object.entries(scenarioWorkflowModule).filter(
+        (entry): entry is [string, WorkflowFn] =>
+          typeof entry[1] === 'function',
+      );
+      const reporter = startWorkflowReporter(
+        context.service,
+        workflows.map(([name, fn]) =>
+          name === SCENARIO_WORKFLOWS.completes
+            ? {
+                name,
+                ...(workflowDescriptor(fn) ?? {}),
+                title: 'Completes immediately (previous release)',
+                description:
+                  'The same workflow as the live binary describes, worded differently — which is what makes the fleet disagree.',
+              }
+            : {name, ...(workflowDescriptor(fn) ?? {})},
+        ),
+        {identity: SPLIT_MANIFEST_IDENTITY, taskQueue: context.queue},
+      );
+      const registry = createWorkflowRegistry();
+      for (const [name, fn] of workflows) registry.set(name, fn);
+      const loop = runWorkflowWorker(
+        context.service,
+        createWorkflowWorker(registry),
+        {
+          taskQueue: context.queue,
+          identity: SPLIT_MANIFEST_IDENTITY,
+          servesHash: reporter.hash,
+        },
+      );
+      context.onStop(async () => {
+        reporter.stop();
+        await loop.stop();
       });
 
       await context.until('the catalogue reports a conflict', async () => {
-        const workflows = await context.service.listWorkflows();
-        return workflows.some((workflow) => workflow.conflicting === true);
+        const listed = await context.service.listWorkflows();
+        return listed.some((workflow) => workflow.conflicting === true);
       });
     },
   },

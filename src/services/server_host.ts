@@ -115,7 +115,7 @@ export interface ServerHost {
   health(): ServerHealth;
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
-  /** Every workflow any worker has reported, deduped by name. */
+  /** Every workflow the live fleet reports, deduped by name. See `WorkflowService`. */
   listWorkflows(): Promise<WorkflowSummary[]>;
   /** Record what a worker says it has registered. */
   reportWorkflows(report: WorkflowReportRequest): Promise<void>;

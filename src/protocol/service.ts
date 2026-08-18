@@ -999,11 +999,16 @@ export interface WorkflowService {
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
   /**
-   * Every workflow any worker has reported, deduped by name.
+   * Every workflow the live fleet reports, deduped by name.
    *
    * The catalogue a dashboard lists. Sourced from what workers push rather than from
    * executions, so a workflow that has never run still appears — which is the point, since
    * the question it answers is "what can I start".
+   *
+   * *Live* fleet, present tense: a report only counts while the worker that pushed it
+   * still polls with a digest matching it (or is mid-task). A worker that stopped takes
+   * its workflows — and the queues it served them on — out of the catalogue with it,
+   * rather than a queue last served a week ago reading as one that can run work today.
    */
   listWorkflows(): Promise<WorkflowSummary[]>;
   /**

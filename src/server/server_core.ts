@@ -168,7 +168,7 @@ import type {
 } from '../protocol';
 import {ANY_TASK_QUEUE} from '../protocol';
 import {completedSeqs, pendingWork} from './pending_work';
-import {createWorkerRegistry} from './worker_registry';
+import {createWorkerRegistry, isReportCurrent} from './worker_registry';
 import type {
   ExecutionParent,
   ExecutionRecord,
@@ -382,7 +382,7 @@ export interface ServerCore {
   listQueues(): QueueWorkers[];
   /** Record what a worker says it has registered. See `WorkflowReportRequest`. */
   reportWorkflows(report: WorkflowReportRequest): void;
-  /** Every workflow any worker has reported, deduped by name. */
+  /** Every workflow the live fleet reports, deduped by name. See `WorkflowService`. */
   listWorkflows(): WorkflowSummary[];
   /**
    * Drop the timers this core is holding, so a host can shut down.
@@ -1496,7 +1496,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    * identity-on-poll change exists to make. See `WorkerInfo.busy`.
    */
   /**
-   * Fold every worker's report into one catalogue, keyed by workflow name.
+   * Fold every *current* report into one catalogue, keyed by workflow name.
+   *
+   * Current is `isReportCurrent`: the reporting worker still polls the queue with the
+   * report's own digest, or is mid-task on it. Reports themselves are kept forever —
+   * a replacement can only come from a worker that is still there to send one — so
+   * without this filter the catalogue would accumulate every queue any worker *ever*
+   * served, and a workflow would keep listing a pool whose last worker stopped a week
+   * ago. The question this answers is "what can I start", present tense; a dead
+   * worker's report is an archive entry, not an answer. The busy set is joined here
+   * rather than in the registry for the same reason `listQueues` joins `busy` here:
+   * the lease tables are the only things that know, and the registry must not learn
+   * lease facts. Only workflow leases are consulted — only the workflow role reports.
    *
    * First report wins on a disagreement, and the disagreement is *reported* rather than
    * resolved: two workers describing one name differently is a fleet running two versions
@@ -1516,7 +1527,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // function has already added resolved fields to.
     const firstSeen = new Map<string, string>();
 
-    for (const report of workerRegistry.reports())
+    const now = Date.now();
+    const observed = workerRegistry.queues();
+    const busy = workflowTaskQueue.leaseHolders();
+    for (const report of workerRegistry.reports()) {
+      if (!isReportCurrent(report, observed, busy, now)) continue;
       for (const workflow of report.workflows) {
         const described = JSON.stringify(workflow);
         const existing = byName.get(workflow.name);
@@ -1534,6 +1549,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         if (firstSeen.get(workflow.name) !== described)
           existing.conflicting = true;
       }
+    }
 
     return [...byName.values()];
   }

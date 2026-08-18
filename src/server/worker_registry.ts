@@ -46,6 +46,7 @@
 
 import {
   ANY_TASK_QUEUE,
+  QUEUE_STALE_MS,
   type WorkerInfo,
   type WorkerRole,
   type WorkflowReport,
@@ -90,7 +91,11 @@ export interface WorkerRegistry {
    * would be the thing that hides it.
    */
   recordReport(report: WorkflowReportRequest): void;
-  /** What each worker last reported, one row per worker that has reported at all. */
+  /**
+   * What each worker last reported, one row per worker that has reported at all
+   * — including workers that have since gone. Whether a row still describes a
+   * live worker is `isReportCurrent`'s question, answered against `queues()`.
+   */
   reports(): ReportedWorkflows[];
 }
 
@@ -126,6 +131,63 @@ interface Observed {
   lastPolledAt: number;
   /** The digest from its most recent poll. Absent when it sent none. */
   servesHash?: string;
+}
+
+/**
+ * Is `report` what its worker is running *now*, judged by the polls beside it?
+ *
+ * A report outlives the worker that pushed it: the registry keeps every report for
+ * the life of the server, because a replacement can only arrive from a worker that
+ * is still there to send one. Left unchecked, that turns the catalogue into an
+ * archive — a queue a worker served last Tuesday stays on every workflow it ever
+ * reported, which is precisely the reading `listWorkflows` must not produce, since
+ * its question is "what can I start", present tense.
+ *
+ * Current means the reporting worker is still vouching for the report:
+ *
+ * - **A workflow-role poll row exists for the report's identity and queue, with
+ *   `serves` resolved.** `serves` is present exactly when the digest on the
+ *   worker's polls matches the report the registry holds for it — the
+ *   reconciliation `servesOf` performs — so reading it is reading the same answer
+ *   `WorkerInfo.serves` gives, rather than a second implementation that could
+ *   drift. A redeployed worker polls with a new digest from its first poll
+ *   onward, so its old report stops counting the moment it is stale rather than
+ *   up to a report interval later; a poll that carries no digest confirms
+ *   nothing, and unknown reads as silence here exactly as it does there.
+ * - **The worker is live**: polled within `QUEUE_STALE_MS`, or in `busyIdentities`
+ *   because it holds a lease — a worker mid-task stops polling without having gone
+ *   anywhere, the distinction `WorkerInfo.busy` exists to make.
+ *
+ * The queue is matched exactly, with no `ANY_TASK_QUEUE` allowance, because a
+ * report names the queue its worker serves — the reporter and the poll loop are
+ * configured from the one value — and the wildcard pollers (`createLocalRuntime`)
+ * report nothing. A report pushed without a queue is filed under the wildcard and
+ * matches a wildcard poller's rows by the same equality.
+ *
+ * A function over the registry's projections rather than a registry method, and
+ * `busyIdentities` is a parameter rather than a lookup: whether a worker is busy is
+ * the lease tables' knowledge, and the registry must not learn it — see "What it
+ * still cannot see" above. `server_core.listWorkflows` is the join point, as it
+ * already is for `listQueues`.
+ */
+export function isReportCurrent(
+  report: Pick<ReportedWorkflows, 'identity' | 'taskQueue'>,
+  queues: readonly ObservedQueue[],
+  busyIdentities: ReadonlySet<string>,
+  now: number,
+): boolean {
+  return queues.some(
+    (queue) =>
+      queue.taskQueue === report.taskQueue &&
+      queue.workers.some(
+        (worker) =>
+          worker.role === 'workflow' &&
+          worker.identity === report.identity &&
+          worker.serves !== undefined &&
+          (now - worker.lastPolledAt <= QUEUE_STALE_MS ||
+            busyIdentities.has(worker.identity)),
+      ),
+  );
 }
 
 export function createWorkerRegistry(
