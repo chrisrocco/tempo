@@ -34,7 +34,7 @@
  *
  * ## It composes rather than calling the entrypoints
  *
- * `startServer` and `Tempo.startWorker` both read `process.argv` — that is the
+ * `startServer` and `startWorker` both read `process.argv` — that is the
  * point of them, and it is wrong here. A harness running inside a consumer's test
  * process, or inside a script launched with flags of its own, would silently pick
  * up their `--port`, `--server` or `--queue` and bind or dial somewhere nobody

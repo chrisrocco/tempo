@@ -268,7 +268,7 @@ max)`. `deprecatePatch(id)` retires a patch, and exists because deleting the `if
   only fixed in this one. The `/usr/bin/node` in `ExecStart=` is the specimen.
   What this library owes a deployment instead is that both artifacts are ordinary
   library calls — [`startServer`](src/server_main.ts) and
-  [`Tempo.startWorker`](src/tempo.ts) — plus the client and the flag vocabulary,
+  [`startWorker`](src/tempo.ts) — plus the client and the flag vocabulary,
   all exported. Installing and supervising them is the consumer's, and README's
   "Running it yourself" is the whole of what this repo says about it. Supersedes
   [#41](https://github.com/chrisrocco/tempo/issues/41).

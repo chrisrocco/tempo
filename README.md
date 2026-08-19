@@ -207,18 +207,18 @@ import { startServer } from 'workflow-engine';
 void startServer({ dataDir: '/var/lib/tempo' });
 
 // workflows/order.workflow.ts — declaring the activities registers them
-import { proxyActivities } from 'workflow-engine/workflow';
+import * as Tempo from 'workflow-engine/workflow';
 import * as payments from '../activities/payments';
-const act = proxyActivities(payments, { retry: { maximumAttempts: 3 } });
+const act = Tempo.proxyActivities(payments, { retry: { maximumAttempts: 3 } });
 
-export async function order(id: string): Promise<void> {
+export const order = Tempo.createWorkflow('order', async (id: string) => {
   await act.charge(id);
-}
+});
 
 // worker.ts — bundle this, run it twice, once per --role
-import { Tempo } from 'workflow-engine';
+import { startWorker } from 'workflow-engine';
 import * as workflows from './workflows';
-Tempo.startWorker({ name: 'orders', workflows });
+startWorker({ name: 'orders', workflows });
 ```
 
 plus the client above, and the **flag vocabulary** both processes read
@@ -415,7 +415,7 @@ src/
   workflow.ts     ★ AUTHOR ENTRYPOINT — deterministic primitives only
   activity.ts     ★ ACTIVITY ENTRYPOINT — heartbeat()
   index.ts        ★ HOST ENTRYPOINT — startServer, createLocalRuntime, types
-  tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
+  tempo.ts        ★ WORKER ENTRYPOINT — startWorker()
   server_main.ts  ★ SERVER ENTRYPOINT — startServer()
   remote_client.ts ★ CLIENT ENTRYPOINT — reaching a server from outside it,
                   from a browser included. Published as `workflow-engine/client`.

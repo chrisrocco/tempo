@@ -200,7 +200,7 @@ async function unservedWarnings(
     warnings.push(
       `no worker on task queue "${schedulerTaskQueue}" runs "${SCHEDULER_WORKFLOW_NAME}", ` +
         `so this schedule will not fire. Register it: ` +
-        `Tempo.startWorker({workflows: {...yours, ...scheduleWorkflows}}).`,
+        `startWorker({workflows: {...yours, ...scheduleWorkflows}}).`,
     );
 
   // The schedule fires correctly and its runs pile up unstarted.

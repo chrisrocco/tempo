@@ -2,7 +2,7 @@
  * @fileoverview
  * ★ WORKER ENTRYPOINT — the single call a deployable worker binary makes.
  *
- * `Tempo.startWorker({name, workflows, activities})` wires a service to the
+ * `startWorker({name, workflows, activities})` wires a service to the
  * registries it builds from imported module namespaces (`import * as activities
  * from './activities'`). The export name is the registered name, so there is no
  * registration boilerplate.
@@ -781,6 +781,3 @@ function startLocalRun(
     stop: () => Promise.resolve(),
   };
 }
-
-/** The namespace a worker entrypoint imports: `Tempo.startWorker({...})`. */
-export const Tempo = {startWorker};

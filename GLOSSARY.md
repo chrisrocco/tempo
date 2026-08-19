@@ -15,7 +15,7 @@ the reasoning.
 
 | Term               | Meaning                                                                                                                                                                                                                    |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **worker binary**  | The built, runnable file whose body is one `Tempo.startWorker({…})` call. Holds the workflow functions and activity functions it can run.                                                                                  |
+| **worker binary**  | The built, runnable file whose body is one `startWorker({…})` call. Holds the workflow functions and activity functions it can run.                                                                                        |
 | **server binary**  | The built, runnable file whose body is one `startServer({…})` call. Owns the history store; runs no workflow code.                                                                                                         |
 | **worker process** | A running instance of the worker binary. One binary can be run many times — see **task queue** and **role**, which are chosen per process, not per binary.                                                                 |
 | **deployment**     | The whole running arrangement: one server process and one or more worker processes, with the flags they were started with.                                                                                                 |

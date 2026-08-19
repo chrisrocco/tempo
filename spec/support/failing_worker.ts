@@ -16,7 +16,7 @@
  * exemplary — the reference worker is examples/greeter.ts.
  */
 
-import {Tempo} from '../../src';
+import {startWorker} from '../../src';
 import {runActivity} from '../../src/workflow';
 
 const activities = {
@@ -30,4 +30,4 @@ const workflows = {
   failer: async (): Promise<unknown> => runActivity('boom'),
 };
 
-Tempo.startWorker({name: 'failing', activities, workflows});
+startWorker({name: 'failing', activities, workflows});

@@ -4,11 +4,11 @@
  *
  * `startServer({dataDir})` opens the store, builds the host, resumes what was
  * running, binds the port, and wires shutdown. The counterpart to
- * `Tempo.startWorker` in `tempo.ts`: a deployment is **two artifacts**, one per
+ * `startWorker` in `tempo.ts`: a deployment is **two artifacts**, one per
  * entrypoint, and each is a file whose whole body is one call into this library.
  *
  *   server.ts   startServer({dataDir: '/var/lib/tempo'})
- *   worker.ts   Tempo.startWorker({name: 'orders', workflows, activities})
+ *   worker.ts   startWorker({name: 'orders', workflows, activities})
  *
  * Flags — see `process_flags.ts` for why these are flags and not environment
  * variables:
