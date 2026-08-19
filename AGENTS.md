@@ -175,7 +175,25 @@ Update the module comment in the **same commit** as the behavior change; a
 fileoverview that describes the old design is worse than none, because it is
 believed. Where a comment and the code disagree, the code is the truth and the
 comment is a bug — fix it rather than working around it. Don't leave a pointer
-to something that no longer exists.
+to something that no longer exists — **checked**, for `see` pointers, by
+[`tools/conventions.ts`](tools/conventions.ts).
+
+Two failures this section did not previously name, both found by making them:
+
+- **A claim that a later change falsified.** `ActivityRetryGroup` said flakiness
+  was "not derivable from history at all" and stayed that way for a week after
+  `activityRetryScheduled` made it false. Accurate when written is not the test;
+  the commit that changes behavior owns every comment that describes it, including
+  the ones in neighbouring modules.
+- **The history of something that was removed.** A decision documents code it
+  _constrains_. A deleted thing constrains nothing, so its story belongs in the
+  commit message, not in a comment that the next reader has to work out is
+  archaeology. Keep the fact that survives — what the code does now, and what is
+  still open — and let the diff hold the rest.
+
+The second has a cheap tell: on a change that removes code, **the comment delta
+should be negative too**. Prose creep is harder to see than code creep, because
+every paragraph looks individually justified.
 
 ### Start here when orienting
 

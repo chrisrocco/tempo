@@ -127,3 +127,52 @@ describe('conventions — namespace imports', () => {
     expect(violations).toEqual([]);
   });
 });
+
+describe('conventions — see pointers resolve', () => {
+  it('accepts a pointer to a file the tree contains', () => {
+    const files = [
+      file('src/a.ts', '/** see `src/b.ts` for the rest. */'),
+      file('src/b.ts', ''),
+    ];
+
+    expect(checkConventions(files)).toEqual([]);
+  });
+
+  it('rejects a pointer to a file the tree does not contain', () => {
+    const files = [file('src/a.ts', '/** see `src/gone.ts` for the rest. */')];
+
+    const [violation] = checkConventions(files);
+    expect(violation?.rule).toBe('dangling-pointer');
+    expect(violation?.line).toBe(1);
+    expect(violation?.message).toContain('src/gone.ts');
+  });
+
+  it('accepts a pointer that omits the .ts this repo omits', () => {
+    const files = [
+      file('src/a.ts', '/** see `bin/server-main` for the invocation. */'),
+      file('bin/server-main.ts', ''),
+    ];
+
+    expect(checkConventions(files)).toEqual([]);
+  });
+
+  it('accepts a pointer to a directory something lives under', () => {
+    const files = [
+      file('src/a.ts', '/** see `src/server/ports/` for the contract. */'),
+      file('src/server/ports/history_store.ts', ''),
+    ];
+
+    expect(checkConventions(files)).toEqual([]);
+  });
+
+  /**
+   * The case that decides how narrow the rule is. `remote_client.ts` heads a
+   * section "Why it is not `src/client.ts`" — a path that must *not* exist, and
+   * the reason the rule cannot be "every backticked path resolves".
+   */
+  it('ignores a path named in prose without being pointed at', () => {
+    const files = [file('src/a.ts', '/** ## Why it is not `src/client.ts` */')];
+
+    expect(checkConventions(files)).toEqual([]);
+  });
+});

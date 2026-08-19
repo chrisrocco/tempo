@@ -22,7 +22,7 @@
  * tree directly (`CHECKED_DIRS`) and stays a pure function of file contents so
  * planted breakage can be tested against it (spec/conventions.spec.ts).
  *
- * One rule, and it used to be four. The other three were the dashboard's — a
+ * Two rules, and there used to be four others. Three were the dashboard's — a
  * harness import its specs needed, bracket notation on DOM sinks, and a bundle
  * format that had to agree with the shell's `<script>` tag — and they went with
  * it. What is left applies to every hand-written file here:
@@ -36,11 +36,19 @@
  *    path` while `tools/boundaries.ts` next door imported the default. A
  *    namespace import names what the module actually exports and reads the same
  *    everywhere.
+ * 2. **A `see` pointer must resolve.** AGENTS.md has always said "don't leave a
+ *    pointer to something that no longer exists", and this is that sentence
+ *    checked rather than trusted. A moved file leaves comments elsewhere
+ *    directing the next reader to where it used to be, and nothing fails — the
+ *    pointer is simply believed. Deliberately narrow: prose legitimately names
+ *    paths that are hypothetical or rejected (`remote_client.ts` has a heading
+ *    "Why it is not `src/client.ts`"), so only a `see` is treated as a promise
+ *    that the target is there. See `checkSeePointers` for why that line is
+ *    where it is.
  *
- * The file keeps its plural shape — a violation type with a `rule` field, a
- * dispatch loop, a formatter — because the reach is what makes it worth having,
- * and the next rule about how the source text is written lands here rather than
- * in a checker that has to be invented first.
+ * The file kept its plural shape for exactly this — a violation type with a
+ * `rule` field, a dispatch loop, a formatter — so the second rule landed here
+ * rather than in a checker that had to be invented first.
  */
 
 import {readSourceFiles, stripCommentsAndStrings} from './boundaries';
@@ -50,7 +58,7 @@ import type {SourceFile} from './boundaries';
 export interface ConventionViolation {
   path: string;
   line: number;
-  rule: 'namespace-import';
+  rule: 'namespace-import' | 'dangling-pointer';
   message: string;
 }
 
@@ -115,11 +123,148 @@ function checkNamespaceImports(
  */
 export function checkConventions(files: SourceFile[]): ConventionViolation[] {
   const violations: ConventionViolation[] = [];
+  // The set the pointer rule resolves against is the file set it was handed,
+  // which is what keeps it pure: "does this pointer resolve" is a question about
+  // a tree, and the tree is the argument rather than the disk.
+  const known = new Set(files.map((file) => file.path));
   for (const file of files) {
     const blanked = blankStringBodies(stripCommentsAndStrings(file.text));
     violations.push(...checkNamespaceImports(file, blanked));
+    violations.push(...checkSeePointers(file, known));
   }
   return violations;
+}
+
+/**
+ * A `see `path`` in prose that points at a file the tree does not contain.
+ *
+ * AGENTS.md has always said "don't leave a pointer to something that no longer
+ * exists"; this is that sentence, checked. The failure it catches is specific
+ * and quiet: a file is renamed or moved, and a comment elsewhere goes on
+ * directing the next reader to where it used to be. Nothing fails, nothing
+ * looks wrong, and the pointer is worse than no pointer because it is believed.
+ *
+ * ## Only `see` pointers, deliberately
+ *
+ * The obvious rule — every backticked repo path must resolve — is wrong, and
+ * `remote_client.ts` is the counter-example: its heading is *"Why it is not
+ * `src/client.ts`"*, a deliberate reference to a path that must **not** exist.
+ * Prose legitimately names paths that are hypothetical, rejected, or historical.
+ *
+ * A `see` is different. It is an instruction to go and look, so it is exactly
+ * the construct that promises the target is there. Narrowing to it is what makes
+ * the rule zero-false-positive on this tree rather than a source of noise
+ * someone would learn to ignore.
+ *
+ * Resolution allows an omitted `.ts` (`bin/server-main` is how this repo writes
+ * it) and accepts a directory prefix, so `see `src/server/ports/`` is fine.
+ */
+export function checkSeePointers(
+  file: SourceFile,
+  known: ReadonlySet<string>,
+): ConventionViolation[] {
+  const violations: ConventionViolation[] = [];
+  // Comments only — the exact inverse of `stripCommentsAndStrings`, and needed
+  // for the same reason it exists. This checker's own spec plants `see` pointers
+  // inside string literals, and a scan of raw text would read those fixtures as
+  // real pointers and fail the repo against its own test data.
+  const lines = commentsOnly(file.text).split('\n');
+  lines.forEach((text, index) => {
+    for (const match of text.matchAll(SEE_POINTER)) {
+      const target = match[1];
+      if (target === undefined || resolvesInTree(target, known)) continue;
+      violations.push({
+        path: file.path,
+        line: index + 1,
+        rule: 'dangling-pointer',
+        message:
+          `\`see ${target}\` points at a file this tree does not contain. ` +
+          `Update the pointer, or drop it — a pointer to something that moved ` +
+          `sends the next reader somewhere it is not.`,
+      });
+    }
+  });
+  return violations;
+}
+
+/** `see `<dir>/...`` where `<dir>` is one this checker reads. */
+const SEE_POINTER = new RegExp(
+  `[Ss]ee\\s+\`((?:${CHECKED_DIRS.join('|')})/[A-Za-z0-9_./-]+)\``,
+  'g',
+);
+
+/**
+ * Blank everything that is not inside a comment, preserving offsets so line
+ * numbers still point where the reader expects.
+ *
+ * The mirror of `stripCommentsAndStrings` in `boundaries.ts`: that one exists so
+ * a scan for code constructs never trips over prose, and this one so a scan for
+ * prose never trips over code — including the string literals a spec plants
+ * breakage in.
+ */
+export function commentsOnly(text: string): string {
+  let out = '';
+  let inBlock = false;
+  let inLine = false;
+  let quote: string | null = null;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i] as string;
+    const next = text[i + 1];
+
+    if (inLine) {
+      if (c === '\n') {
+        inLine = false;
+        out += c;
+      } else out += c;
+      continue;
+    }
+    if (inBlock) {
+      if (c === '*' && next === '/') {
+        inBlock = false;
+        out += '  ';
+        i++;
+      } else out += c === '\n' ? c : c;
+      continue;
+    }
+    if (quote !== null) {
+      if (c === '\\') {
+        out += '  ';
+        i++;
+      } else if (c === quote) {
+        quote = null;
+        out += ' ';
+      } else out += c === '\n' ? c : ' ';
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      inBlock = true;
+      out += '  ';
+      i++;
+      continue;
+    }
+    if (c === '/' && next === '/') {
+      inLine = true;
+      out += '  ';
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      quote = c;
+      out += ' ';
+      continue;
+    }
+    out += c === '\n' ? c : ' ';
+  }
+  return out;
+}
+
+/** A path, the same path with `.ts`, or a directory something lives under. */
+function resolvesInTree(target: string, known: ReadonlySet<string>): boolean {
+  const trimmed = target.replace(/\/$/, '');
+  if (known.has(trimmed) || known.has(`${trimmed}.ts`)) return true;
+  for (const path of known) if (path.startsWith(`${trimmed}/`)) return true;
+  return false;
 }
 
 /** Read every directory the conventions cover. */
