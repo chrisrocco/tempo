@@ -53,7 +53,10 @@ describe('createWorkflow — the reference and the registry', () => {
     // The reference looks like the function it replaced, so the error must
     // answer "why didn't my function run?" — and say where each caller goes.
     expect(() => greet()).toThrowError(/dispatches a child workflow/);
-    expect(() => greet.child([])).toThrowError(/dispatches a child workflow/);
+    expect(() => greet.detached([])).toThrowError(
+      /dispatches a child workflow/,
+    );
+    expect(() => greet.execute([])).toThrowError(/dispatches a child workflow/);
   });
 
   it('records a conflict for a name two implementations claim, tolerating re-evaluation', () => {
@@ -122,7 +125,36 @@ describe('createWorkflow — dispatching children', () => {
     }
   });
 
-  it('spawns a fire-and-forget child under a claimed id via .child()', async () => {
+  /**
+   * `.execute` is the blocking call with its options, and `workflowId` is the
+   * one worth a spec: a taken id awaits the existing execution rather than
+   * starting a second, so two executes under one id are one child — the
+   * second's args discarded, its result the first's. The dedup semantics
+   * `executeChild` documents, reachable through the typed reference.
+   */
+  it('correlates two .execute calls under one claimed id to one child', async () => {
+    const step = createWorkflow('step', async (tag: string) => `ran ${tag}`);
+    const rt = createLocalRuntime()
+      .registerWorkflow(step.workflowName, step)
+      .registerWorkflow('parent', async () => {
+        const first = await step.execute(['a'], {workflowId: 'claimed-step'});
+        const second = await step.execute(['b'], {workflowId: 'claimed-step'});
+        return [first, second];
+      });
+
+    try {
+      await expectAsync(rt.start<string[]>('parent').result()).toBeResolvedTo([
+        'ran a',
+        'ran a',
+      ]);
+      const {executions} = await rt.service.listExecutions();
+      expect(executions.filter((e) => e.name === 'step').length).toBe(1);
+    } finally {
+      rt.shutdown();
+    }
+  });
+
+  it('spawns a detached child under a claimed id via .detached()', async () => {
     const kid = createWorkflow('kid', async () => {
       await condition(() => false);
       return 'unreachable';
@@ -130,7 +162,7 @@ describe('createWorkflow — dispatching children', () => {
     const rt = createLocalRuntime()
       .registerWorkflow(kid.workflowName, kid)
       .registerWorkflow('parent', async () => {
-        kid.child([], {workflowId: 'the-kid', parentClosePolicy: 'abandon'});
+        kid.detached([], {workflowId: 'the-kid', parentClosePolicy: 'abandon'});
         // Dispatched by an earlier task than the one that settles the parent —
         // a start issued in the settling task is dropped (see
         // `parent_close.spec.ts`), and this spec is about the spawn, not that.

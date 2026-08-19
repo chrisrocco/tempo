@@ -25,7 +25,7 @@
  * and a returned-as-is function would instead run the child's body inline in
  * the parent's replay: the child's activities would interleave into the
  * parent's history and it would half-work until it didn't. So the reference
- * wraps `executeChild` (and `startChild`, via `.child()`), the *registry* holds
+ * wraps `executeChild` (and `startChild`, via `.detached()`), the *registry* holds
  * the real function for the engine to invoke, and a unit test that wants the
  * body calls `.impl` — the one deliberate departure from `defineWorkflow`'s
  * "returns `start` itself" contract, and the reason this is a new export rather
@@ -88,16 +88,22 @@ const conflicted = new Set<string>();
 
 /**
  * A registered workflow, as its callers see it: invoke it to run it as a
- * blocking child, `.child()` for fire-and-forget, `.impl` for the body itself.
+ * blocking child, `.execute()` when the blocking call needs options,
+ * `.detached()` for fire-and-forget, `.impl` for the body itself.
  *
- * The typing is the half of this that `startChild('name', options)` could never
- * have: `Parameters` in and the resolved return type out, checked against the
- * implementation rather than asserted at every call site.
+ * The two methods share one shape — the typed args tuple, then the options —
+ * and map one-to-one onto the primitives: call/`.execute` is `executeChild`,
+ * `.detached` is `startChild`, so the table in `core/workflow_api.ts` reads
+ * unchanged through the reference. The typing is the half of this that
+ * `startChild('name', options)` could never have: `Parameters` in and the
+ * resolved return type out, checked against the implementation rather than
+ * asserted at every call site.
  */
 export interface WorkflowRef<F extends AnyWorkflowFn> {
   /**
    * Run the workflow as a **blocking child** of the calling workflow and return
-   * its result — `executeChild`, typed. Only callable inside a workflow; from
+   * its result — sugar for `.execute(args)` with every option defaulted, which
+   * is the overwhelmingly common call. Only callable inside a workflow; from
    * anywhere else it throws an error that says where each caller should go
    * instead.
    */
@@ -110,12 +116,36 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
    */
   readonly impl: F;
   /**
-   * Start the workflow as a **fire-and-forget child**: no result is awaited,
-   * and the handle can cancel it. `options` is where a `workflowId` claim, a
-   * `taskQueue`, or a `parentClosePolicy` goes — the knobs `startChild` has
-   * always taken, minus `args`, which are the typed first parameter here.
+   * The blocking call with its options: a `workflowId` claim (a taken id
+   * **awaits the existing execution** instead of starting a second one —
+   * including one already finished, whose result returns immediately), a
+   * `taskQueue`, a `parentClosePolicy` for the case where the parent closes
+   * mid-await. `executeChild`, typed; the direct call above is this with
+   * defaults. Args are a tuple rather than spread because a trailing options
+   * object after variadic typed args would be indistinguishable from the last
+   * argument.
    */
-  child(args: Parameters<F>, options?: Omit<ChildOptions, 'args'>): ChildHandle;
+  execute(
+    args: Parameters<F>,
+    options?: Omit<ChildOptions, 'args'>,
+  ): Promise<Awaited<ReturnType<F>>>;
+  /**
+   * Start the workflow as a **detached child**: fire-and-forget, no completion
+   * is ever threaded back, and the handle can cancel it — `startChild`, typed.
+   * `options` is where a `workflowId` claim, a `taskQueue`, or a
+   * `parentClosePolicy` goes.
+   *
+   * Detached, after the wire flag it sets, and deliberately not "background":
+   * `background()` on this same surface runs a concurrent branch *inside* the
+   * calling workflow — same execution, same history, result retrievable — and
+   * this is its opposite, a separate execution nothing is ever heard from
+   * again. One word for both would blur the exact line this API exists to
+   * draw.
+   */
+  detached(
+    args: Parameters<F>,
+    options?: Omit<ChildOptions, 'args'>,
+  ): ChildHandle;
 }
 
 /**
@@ -142,18 +172,22 @@ export function createWorkflow<F extends AnyWorkflowFn>(
   if (existing && existing !== impl) conflicted.add(name);
   registered.set(name, impl);
 
-  const call = (...args: Parameters<F>): Promise<Awaited<ReturnType<F>>> => {
+  const execute = (
+    args: Parameters<F>,
+    options: Omit<ChildOptions, 'args'> = {},
+  ): Promise<Awaited<ReturnType<F>>> => {
     try {
-      return executeChild<Awaited<ReturnType<F>>>(name, {args});
+      return executeChild<Awaited<ReturnType<F>>>(name, {...options, args});
     } catch (e) {
       throw asDispatchError(e, name);
     }
   };
 
-  const ref = Object.assign(call, {
+  const ref = Object.assign((...args: Parameters<F>) => execute(args), {
     workflowName: name,
     impl,
-    child(
+    execute,
+    detached(
       args: Parameters<F>,
       options: Omit<ChildOptions, 'args'> = {},
     ): ChildHandle {
