@@ -17,8 +17,8 @@
  *   --data-dir=PATH        persist history here and `resume()` on boot; unset is
  *                          in-memory and loses everything on restart
  *   --activity-lease-ms=N  activity-task lease timeout
- *   --retain-closed-for-ms=N  delete executions closed longer than this; unset
- *                          keeps them forever (see ServerHostOptions)
+ *   --retain-closed-for-days=N  delete executions closed longer than N days
+ *                          (fractions allowed); unset keeps them forever
  *
  * ## Why this is a function and not only a script
  *
@@ -140,15 +140,24 @@ export interface StartServerOptions {
    */
   activityLeaseMs?: number;
   /**
-   * Delete executions closed longer than this (ms). `--retain-closed-for-ms`
-   * overrides. **Unset keeps every execution forever**, today's behavior.
+   * Delete executions closed longer than this many **days**.
+   * `--retain-closed-for-days` overrides. **Unset keeps every execution
+   * forever**, today's behavior.
+   *
+   * Days rather than the `Ms` every other knob here speaks, because this is
+   * the one duration an operator writes in a unit file and reasons about in
+   * deployment time: `7` reads at the launch site where `604800000` has to be
+   * decoded. Fractions are fine — `0.5` is twelve hours. The conversion to the
+   * host's millisecond knob happens exactly once, below.
    *
    * The contract this changes — results claimable only within the window, a
    * closed `workflowId` reclaimable after it — is documented where the option
    * lands: `ServerHostOptions.retainClosedForMs`.
    */
-  retainClosedForMs?: number;
+  retainClosedForDays?: number;
 }
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** A running server, and the two things a caller needs from one. */
 export interface Server {
@@ -191,9 +200,16 @@ export async function startServer(
   const activityLeaseMs =
     numericFlagValue(argv, SERVER_FLAG.activityLeaseMs) ??
     options.activityLeaseMs;
-  const retainClosedForMs =
-    numericFlagValue(argv, SERVER_FLAG.retainClosedForMs) ??
-    options.retainClosedForMs;
+  const retainClosedForDays =
+    numericFlagValue(argv, SERVER_FLAG.retainClosedForDays) ??
+    options.retainClosedForDays;
+  // Rejected rather than clamped, like --activity-concurrency: a negative
+  // window is a typo in a unit file, and a server that quietly swept
+  // everything closed would be the worst possible reading of it.
+  if (retainClosedForDays !== undefined && retainClosedForDays < 0)
+    throw new Error(
+      `--${SERVER_FLAG.retainClosedForDays} needs a non-negative number of days, got ${retainClosedForDays}`,
+    );
 
   // Durable when a data dir was resolved (a single-writer lockfile guards it);
   // otherwise in-memory. `undefined` lets createServerHost default the store.
@@ -206,7 +222,12 @@ export async function startServer(
   let endpoint: ServerEndpoint | undefined;
   const host = createServerHost(store, {
     activityLeaseMs,
-    retainClosedForMs,
+    // The one place days become milliseconds — the host, like every store and
+    // lease below it, speaks ms.
+    retainClosedForMs:
+      retainClosedForDays === undefined
+        ? undefined
+        : retainClosedForDays * MS_PER_DAY,
     log: createJsonLogger(),
     endpoint: () => endpoint,
   });

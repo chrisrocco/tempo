@@ -154,7 +154,8 @@ export interface ServerHostOptions {
    * record, history, and outcome. **Unset means keep forever**, which is the
    * only correct default: how long a result stays claimable is a contract with
    * this deployment's clients, and it should be stated at the launch site
-   * rather than defaulted invisibly. `--retain-closed-for-ms` overrides via
+   * rather than defaulted invisibly. `--retain-closed-for-days` (the operator's
+   * unit; converted once at the entrypoint) overrides via
    * `startServer`.
    *
    * Setting it changes two documented behaviors, both deliberately and both
