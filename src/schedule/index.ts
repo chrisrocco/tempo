@@ -55,9 +55,10 @@ export {
  */
 export {nextFireAfter, scheduleSpecProblems} from './next_fire';
 
+export type {Duration} from '../timespec';
+
 export type {
   CalendarSpec,
-  Duration,
   IntervalSpec,
   ScheduleBounds,
   ScheduleDefinition,

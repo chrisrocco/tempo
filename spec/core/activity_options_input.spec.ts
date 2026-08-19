@@ -5,7 +5,7 @@
  * here is the field mapping and the refuse-a-contradiction rule.
  */
 
-import {normalizeActivityOptions} from '../../src/protocol';
+import {normalizeActivityOptions} from '../../src/core/activity_options_input';
 
 describe('normalizeActivityOptions', () => {
   it('passes wire-shape options through unchanged', () => {

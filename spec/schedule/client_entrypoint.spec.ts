@@ -61,22 +61,20 @@ describe('the schedule client entrypoint', () => {
   /**
    * Transitively, too. `schedule_client.ts` may name the workflow's types — those are
    * erased — but must not import it for a value, and the arithmetic must stay pure.
-   * `calendar.ts` is on the list on both sides: reachable (it is the calendar
-   * arithmetic `next_fire.ts` dispatches to, and `Intl` is a browser global) and
-   * checked (it may reach nothing but protocol itself).
+   * `../timespec` is allowed because the library imports nothing and uses only
+   * browser globals (`Intl`) — properties spec/timespec/seam.spec.ts holds.
    */
-  it('reaches only protocol and pure arithmetic', () => {
+  it('reaches only protocol, timespec, and pure arithmetic', () => {
     const allowed = new Set([
       '../protocol',
+      '../timespec',
       './schedule_client',
       './next_fire',
-      './calendar',
     ]);
     for (const file of [
       'src/schedule/index.ts',
       'src/schedule/schedule_client.ts',
       'src/schedule/next_fire.ts',
-      'src/schedule/calendar.ts',
     ])
       for (const specifier of valueImports(file))
         expect(allowed.has(specifier))

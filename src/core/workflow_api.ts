@@ -19,14 +19,13 @@
 
 import {
   DEFAULT_PARENT_CLOSE_POLICY,
-  durationToMs,
   type ActivityOptions,
   type Command,
   type CommandSpec,
-  type Duration,
   type ExecutionParentView,
   type ParentClosePolicy,
 } from '../protocol';
+import {durationToMs, type Duration} from '../timespec';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
 import type {SignalDef} from './signals';

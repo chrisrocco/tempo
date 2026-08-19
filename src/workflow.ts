@@ -59,8 +59,11 @@
  */
 
 import {registerActivityImpls} from './activity_registry';
+import {
+  normalizeActivityOptions,
+  type ActivityOptionsInput,
+} from './core/activity_options_input';
 import {createActivityProxy, type ActivityProxy} from './core/workflow_api';
-import {normalizeActivityOptions, type ActivityOptionsInput} from './protocol';
 
 export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
 export {condition} from './core/condition';
@@ -111,15 +114,17 @@ export {createWorkflow, type WorkflowRef} from './workflow_registry';
 // author-facing option types (erased at runtime; safe on the deterministic surface)
 export type {
   ActivityOptions,
-  ActivityOptionsInput,
-  Duration,
   ParentClosePolicy,
   RetryPolicy,
-  RetryPolicyInput,
   WorkflowDescriptor,
   WorkflowProp,
   WorkflowPropType,
 } from './protocol';
+export type {
+  ActivityOptionsInput,
+  RetryPolicyInput,
+} from './core/activity_options_input';
+export type {Duration} from './timespec';
 
 export type {ActivityProxy};
 

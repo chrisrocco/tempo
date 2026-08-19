@@ -5,7 +5,7 @@
  * input it lets through becomes a number nobody re-checks.
  */
 
-import {durationToMs} from '../../src/protocol';
+import {durationToMs} from '../../src/timespec';
 
 describe('durationToMs — the string grammar', () => {
   it('parses each unit, short and long form alike', () => {

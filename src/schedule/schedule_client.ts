@@ -38,10 +38,10 @@
  * predictable naming — which is the dedup mechanism — unreachable.
  */
 
-import {DEFAULT_TASK_QUEUE, durationToMs, isNameServed} from '../protocol';
+import {DEFAULT_TASK_QUEUE, isNameServed} from '../protocol';
+import {durationToMs, type Duration} from '../timespec';
 import type {
   CalendarSpec,
-  Duration,
   ExecutionDetail,
   ExecutionPage,
   ExecutionSummary,

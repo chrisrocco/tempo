@@ -407,6 +407,12 @@ src/
   core/           The deterministic engine: (history) -> (commands).
   patterns/       Authoring helpers built from core's primitives — pollForever,
                   diffing, signal streams. Depends on core; core never on it.
+  timespec/       An internally-owned library, held at arm's length: duration
+                  strings and wall-clock rules. Imports nothing, knows nothing
+                  about the engine; its removal surface is a checked list.
+  schedule/       Schedules: the scheduler workflow, its client, and the
+                  when-does-this-fire arithmetic (client and worker halves are
+                  separate entrypoints on purpose — see schedule/index.ts).
   server/         Orchestration brain. Stateful, runs NO user code.
     ports/          history_store · task_queue · workflow_task_queue · timer_service
     memory/         in-memory adapters for all four ports

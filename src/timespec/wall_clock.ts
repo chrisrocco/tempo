@@ -1,7 +1,9 @@
 /**
  * @fileoverview
- * Calendar boundary arithmetic: when does a wall-clock rule fire next, in a
- * timezone. This module owns everything DST touches, and the policy for it.
+ * Wall-clock rules: "9:00 on weekdays, Chicago time" as data, and the arithmetic
+ * for when such a rule next (or last) occurs. This module owns everything DST
+ * touches, and the policy for it. It knows nothing about what its caller does
+ * with an occurrence — see `index.ts` for the library contract.
  *
  * ## The one representation everything here uses
  *
@@ -20,27 +22,44 @@
  * back repeats it). The policy:
  *
  * - **Skipped → the first valid instant**: a 2:30 rule on the night 2:00 jumps
- *   to 3:00 fires at the transition itself (wall 3:00), that day. Firing at the
- *   shifted reading (3:30) would drift the fire by however long the gap was, and
- *   skipping the day entirely would silently miss a boundary — the failure the
- *   scheduler's whole design exists to avoid.
+ *   to 3:00 occurs at the transition itself (wall 3:00), that day. The shifted
+ *   reading (3:30) would drift the occurrence by however long the gap was, and
+ *   skipping the day entirely would silently drop it — the worse failure in any
+ *   use this library is plausibly put to, because a dropped occurrence looks
+ *   like nothing.
  * - **Repeated → the first occurrence**: a 1:30 rule on the night clocks fall
- *   back fires once, at the earlier instant. Twice would be two runs for one
- *   nominal rule; the run's id would dedupe them anyway, so firing twice would
- *   only manufacture a spurious duplicate record.
+ *   back occurs once, at the earlier instant. Twice would be two answers for one
+ *   nominal rule.
  *
  * ## Timezone data comes from the platform
  *
- * `Intl.DateTimeFormat` with an IANA name — no bundled database, in a package
- * whose runtime dependency list is empty and enforced. This is the module the
- * layering map reserved for exactly that trade (`tools/boundaries.ts`: schedule/
- * "runs inside an activity, on the I/O side of the determinism boundary"), and
- * platform-dependence is acceptable for the same reason reading the clock is:
- * the computation runs in the `nextFire` activity, whose answer is recorded in
- * history, so replay reads the decision rather than re-deriving it.
+ * `Intl.DateTimeFormat` with an IANA name — no bundled database, no dependency.
+ * The answers are therefore only as current as the host's ICU data, and **not
+ * replay-safe**: unlike `duration.ts`, this module may not be called from
+ * deterministic code. The layering exempts it from the purity rules by name,
+ * which is the flag to a caller that they own the consequences of where they
+ * call it from.
  */
 
-import type {CalendarSpec} from '../protocol';
+/**
+ * A rule naming wall-clock times: any minute where **all** specified fields
+ * match. Minute granularity. `dayOfMonth` and `dayOfWeek` intersect (both must
+ * hold), unlike cron, which takes their union.
+ */
+export interface WallClockRule {
+  /** Minute(s) of the hour, 0–59. Defaults to 0. */
+  minute?: number | number[];
+  /** Hour(s) of the day, 0–23, on the wall clock of `tz`. Defaults to 0. */
+  hour?: number | number[];
+  /** Day(s) of the month, 1–31. Defaults to every day. */
+  dayOfMonth?: number | number[];
+  /** Month(s), 1–12. Defaults to every month. */
+  month?: number | number[];
+  /** Day(s) of the week, 0–6 with 0 = Sunday. Defaults to every day. */
+  dayOfWeek?: number | number[];
+  /** IANA timezone name (`'America/Chicago'`). Defaults to `'UTC'`. */
+  tz?: string;
+}
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
@@ -49,10 +68,10 @@ const DAY_MS = 86_400_000;
 /**
  * How many wall days a search walks before concluding no boundary exists.
  *
- * Nine years, not "a while": the rarest legitimate spec is `Feb 29`, and
+ * Nine years, not "a while": the rarest legitimate rule is `Feb 29`, and
  * across a skipped century leap year (1900, 2100) consecutive leap years are
  * eight years apart. Anything that matches no day in nine years matches no day
- * ever — `calendarSpecProblems` rejects the statically-detectable cases, and
+ * ever — `wallClockRuleProblems` rejects the statically-detectable cases, and
  * this bound is the backstop that turns the rest into "exhausted" instead of a
  * spin.
  */
@@ -61,8 +80,8 @@ const HORIZON_DAYS = 366 * 9;
 /** The longest plausible distance between a wall time and its instant, padded. */
 const MAX_OFFSET_MS = DAY_MS;
 
-/** A spec's fields, defaulted and normalized: sorted, deduplicated lists. */
-interface CalendarFields {
+/** A rule's fields, defaulted and normalized: sorted, deduplicated lists. */
+interface RuleFields {
   minutes: number[];
   hours: number[];
   /** undefined = every day / every month / every weekday. */
@@ -78,14 +97,14 @@ function listed(field: number | number[] | undefined): number[] | undefined {
   return [...new Set(values)].sort((a, b) => a - b);
 }
 
-function fieldsOf(spec: CalendarSpec): CalendarFields {
+function fieldsOf(rule: WallClockRule): RuleFields {
   return {
-    minutes: listed(spec.minute) ?? [0],
-    hours: listed(spec.hour) ?? [0],
-    days: listed(spec.dayOfMonth),
-    months: listed(spec.month),
-    dows: listed(spec.dayOfWeek),
-    tz: spec.tz ?? 'UTC',
+    minutes: listed(rule.minute) ?? [0],
+    hours: listed(rule.hour) ?? [0],
+    days: listed(rule.dayOfMonth),
+    months: listed(rule.month),
+    dows: listed(rule.dayOfWeek),
+    tz: rule.tz ?? 'UTC',
   };
 }
 
@@ -164,7 +183,7 @@ function instantFromWall(wallMs: number, tz: string): number {
   // Inside a spring-forward gap. The transition is the first instant whose wall
   // clock is at or past the target; within the two-day bracket there is exactly
   // one transition, so the predicate is monotone and binary search is sound.
-  // Minute-aligned, which every modern transition is and every spec here is.
+  // Minute-aligned, which every modern transition is and every rule here is.
   let lo = Math.floor((wallMs - MAX_OFFSET_MS) / MINUTE_MS);
   let hi = Math.ceil((wallMs + MAX_OFFSET_MS) / MINUTE_MS);
   while (lo < hi) {
@@ -176,7 +195,7 @@ function instantFromWall(wallMs: number, tz: string): number {
 }
 
 /** Does this wall day (given as its midnight wall time) satisfy the date fields? */
-function dayMatches(dayStartWallMs: number, fields: CalendarFields): boolean {
+function dayMatches(dayStartWallMs: number, fields: RuleFields): boolean {
   // Plain UTC date math on the wall encoding — leap years and month lengths for
   // free, and no zone in sight because the encoding already is the wall clock.
   const date = new Date(dayStartWallMs);
@@ -193,7 +212,7 @@ function dayMatches(dayStartWallMs: number, fields: CalendarFields): boolean {
 }
 
 /**
- * The first instant strictly after `afterMs` where the spec's fields all match,
+ * The first instant strictly after `afterMs` where the rule's fields all match,
  * or undefined if no wall day within the horizon matches — which, given the
  * horizon's size, means no day ever will.
  *
@@ -204,11 +223,11 @@ function dayMatches(dayStartWallMs: number, fields: CalendarFields): boolean {
  * early because around a fall-back transition a wall time *earlier* than
  * `afterMs`'s own reading can still map to a later instant.
  */
-export function nextCalendarFireAfter(
-  spec: CalendarSpec,
+export function nextOccurrenceAfter(
+  rule: WallClockRule,
   afterMs: number,
 ): number | undefined {
-  const fields = fieldsOf(spec);
+  const fields = fieldsOf(rule);
   let dayStart =
     Math.floor(wallFromInstant(afterMs, fields.tz) / DAY_MS) * DAY_MS - DAY_MS;
   for (let i = 0; i < HORIZON_DAYS; i++, dayStart += DAY_MS) {
@@ -227,16 +246,15 @@ export function nextCalendarFireAfter(
 
 /**
  * The latest matching instant at or before `atMs`, or undefined if none within
- * the horizon. The mirror of `nextCalendarFireAfter`, and it exists for the
- * catch-up clamp: "never look back further than one period" needs a calendar
- * spec's answer to "when was the period before now", which unlike an interval's
- * is not `now - everyMs`.
+ * the horizon. The mirror of `nextOccurrenceAfter`, for callers that need to
+ * look backward — "when should this last have happened" — which a rule, unlike
+ * a fixed period, cannot answer by subtraction.
  */
-export function previousCalendarFireAtOrBefore(
-  spec: CalendarSpec,
+export function previousOccurrenceAtOrBefore(
+  rule: WallClockRule,
   atMs: number,
 ): number | undefined {
-  const fields = fieldsOf(spec);
+  const fields = fieldsOf(rule);
   let dayStart =
     Math.floor(wallFromInstant(atMs, fields.tz) / DAY_MS) * DAY_MS + DAY_MS;
   for (let i = 0; i < HORIZON_DAYS; i++, dayStart -= DAY_MS) {
@@ -267,17 +285,18 @@ const FIELD_RANGES = [
 ] as const;
 
 /**
- * Everything wrong with a calendar spec, as sentences — same contract as
- * `scheduleSpecProblems`, which dispatches here. Range checks per field, the
- * zone name (validated by handing it to `Intl`, the same authority that will
- * interpret it later), and the one cross-field impossibility that is statically
- * decidable: a day of month no listed month is long enough to contain.
+ * Everything wrong with a rule, as plain sentences — a list rather than a
+ * throw, so one round trip can name every problem to whoever typed it. Range
+ * checks per field, the zone name (validated by handing it to `Intl`, the same
+ * authority that will interpret it later), and the one cross-field
+ * impossibility that is statically decidable: a day of month no listed month is
+ * long enough to contain.
  */
-export function calendarSpecProblems(spec: CalendarSpec): string[] {
+export function wallClockRuleProblems(rule: WallClockRule): string[] {
   const problems: string[] = [];
 
   for (const [name, min, max] of FIELD_RANGES) {
-    const raw = spec[name];
+    const raw = rule[name];
     if (raw === undefined) continue;
     const values = Array.isArray(raw) ? raw : [raw];
     if (values.length === 0) {
@@ -293,26 +312,26 @@ export function calendarSpecProblems(spec: CalendarSpec): string[] {
         );
   }
 
-  if (spec.tz !== undefined) {
+  if (rule.tz !== undefined) {
     try {
-      formatterFor(spec.tz);
+      formatterFor(rule.tz);
     } catch {
       problems.push(
-        `tz must be an IANA timezone name (e.g. "America/Chicago"), got "${spec.tz}"`,
+        `tz must be an IANA timezone name (e.g. "America/Chicago"), got "${rule.tz}"`,
       );
     }
   }
 
   if (problems.length === 0) {
-    const days = listed(spec.dayOfMonth);
+    const days = listed(rule.dayOfMonth);
     const months =
-      listed(spec.month) ?? DAYS_IN_MONTH.map((_, i) => i).slice(1);
+      listed(rule.month) ?? DAYS_IN_MONTH.map((_, i) => i).slice(1);
     if (
       days !== undefined &&
       !months.some((month) => days.some((day) => day <= DAYS_IN_MONTH[month]!))
     )
       problems.push(
-        `dayOfMonth [${days.join(', ')}] never occurs in month [${months.join(', ')}] — this spec can never fire`,
+        `dayOfMonth [${days.join(', ')}] never occurs in month [${months.join(', ')}] — this rule matches no date, ever`,
       );
   }
 

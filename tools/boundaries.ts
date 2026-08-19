@@ -68,9 +68,10 @@ export interface Violation {
  */
 const LAYER_IMPORTS: Record<string, readonly string[]> = {
   protocol: [],
-  core: ['protocol'],
+  timespec: [],
+  core: ['protocol', 'timespec'],
   patterns: ['protocol', 'core'],
-  schedule: ['protocol'],
+  schedule: ['protocol', 'timespec'],
   server: ['protocol'],
   worker: ['protocol', 'core'],
   client: ['protocol', 'core'],
@@ -94,11 +95,13 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
 const LAYER_RATIONALE: Record<string, string> = {
   protocol:
     'protocol/ is pure data with no dependencies — it is what lets core and server share types without depending on each other',
-  core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/ — and never patterns/, which is built on top of it',
+  timespec:
+    'timespec/ is an internally-owned library — duration strings and wall-clock rules — treated like a third-party dependency the repo happens to host: it knows nothing about the engine and imports nothing, so it stays removable by deleting the directory and the call sites spec/timespec/seam.spec.ts names',
+  core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/ and timespec/ (whose deterministic half it uses) — and never patterns/, which is built on top of it',
   patterns:
     'patterns/ is workflow-authoring helpers built from the primitives core/ exports; it depends on core/, never the reverse',
   schedule:
-    'schedule/ is when-does-this-fire arithmetic over protocol/ spec types. It must not reach core/: it runs inside an activity, on the I/O side of the determinism boundary, which is the whole reason calendar work lives here — a timezone database may eventually be a dependency here and must never become one of core/',
+    'schedule/ is when-does-this-fire arithmetic over protocol/ spec types, plus the seam to the timespec/ library. It must not reach core/: it runs inside an activity, on the I/O side of the determinism boundary',
   server:
     'server/ runs NO user code — workflow replay happens in the workflow worker, so it must not reach into core/',
   worker: 'worker/ is written against protocol/ and runs core/',
@@ -123,13 +126,22 @@ const NONDETERMINISTIC = [
 ] as const;
 
 /**
- * The single sanctioned piece of host coupling in the core. `drainMicrotasks` needs
- * a macrotask boundary to flush the microtask queue; it reads nothing host-specific,
- * so replay stays reproducible. Keeping the exception here — rather than as a
- * blanket rule — means any second one has to be argued for in a diff.
+ * The sanctioned pieces of host coupling on the checked-for-purity side. Each is
+ * an argument that had to be made in a diff, which is the point of listing files
+ * rather than blanket-exempting a layer:
+ *
+ * - `drainMicrotasks` needs a macrotask boundary to flush the microtask queue;
+ *   it reads nothing host-specific, so replay stays reproducible.
+ * - `timespec/wall_clock.ts` reads the platform's timezone data (`Intl`, plus
+ *   `new Date` for calendar math on its wall encoding) and is **not**
+ *   replay-safe — its own fileoverview says so. It is exempted rather than left
+ *   unchecked so that its sibling `duration.ts`, which the deterministic core
+ *   calls during replay, stays machine-held to purity: a `Date.now()` slipped
+ *   into the parser must fail lint, not diverge a replay.
  */
 const ALLOWED_HOST_COUPLING: Record<string, readonly string[]> = {
   'src/core/microtask_scheduler.ts': ['setImmediate'],
+  'src/timespec/wall_clock.ts': ['new Date()'],
 };
 
 /**
@@ -620,12 +632,16 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
       continue;
     }
     violations.push(...checkLayering(file, stripped));
-    // Both layers run inside a replay, so both are held to determinism. Keying
+    // These layers run inside a replay, so they are held to determinism. Keying
     // this on `core` alone was safe only while `core` was the only thing that
     // ran there: a helper in `patterns/` is called from workflow code just the
-    // same, and a `Date.now()` in one is exactly as fatal.
+    // same, and a `Date.now()` in one is exactly as fatal. `timespec` is on the
+    // list because `core` calls its duration parser during replay — its one
+    // legitimately host-coupled file is exempted by name in
+    // `ALLOWED_HOST_COUPLING`, which is what keeps the rest of the library
+    // checked rather than trusted.
     const layer = layerOf(file.path);
-    if (layer === 'core' || layer === 'patterns') {
+    if (layer === 'core' || layer === 'patterns' || layer === 'timespec') {
       violations.push(...checkPurity(file, stripped, 'core-purity'));
     }
   }

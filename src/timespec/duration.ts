@@ -3,23 +3,23 @@
  * Durations as authors write them: `'30 minutes'`, `'1h 30m'`, or plain
  * milliseconds. `durationToMs` is the one place the string form becomes a number.
  *
- * ## Strings never reach the wire
+ * ## Strings are for call sites, not for storage
  *
- * Every consumer parses at its own edge — `sleep` before the command is issued,
- * `proxyActivities` at declaration, `ScheduleClient.create` before the definition
- * is stored — so commands, history, and stored state carry only the `…Ms` numbers
- * they always have. Old histories replay untouched, and the server never learns
- * this syntax exists. Parsing is a pure function of the string, which is what
- * makes it legal on the deterministic side of the boundary: the same source line
- * yields the same milliseconds on every replay.
+ * The intended use is that a host parses at its own edge — at the line where a
+ * person wrote the string — and everything durable or wire-borne carries only
+ * the resulting number. Parsing is a pure, deterministic function of the string:
+ * no clock, no locale, no environment, so the same source line yields the same
+ * milliseconds forever. That property is load-bearing for this repo (the
+ * deterministic core calls this during replay) and is machine-checked — this
+ * file is held to the same purity rules as `core/`; see `tools/boundaries.ts`.
  *
  * ## No months, no years
  *
  * Rejected by name rather than merely unknown, because they are the units people
  * reach for first and the ones a duration cannot honestly carry: "a month" is
  * calendar arithmetic — 28 to 31 days depending on *which* month — and silently
- * picking 30 would be a schedule the author didn't write. The error says where
- * that need is actually served (a calendar `ScheduleSpec`).
+ * picking 30 would be an answer the caller didn't ask for. The error says where
+ * that need is actually served (a wall-clock rule — see `wall_clock.ts`).
  *
  * A bare number in a string (`'500'`) is rejected too: the caller who means
  * milliseconds already has a type for that — the number 500 — and a unitless
@@ -83,7 +83,7 @@ export function durationToMs(duration: Duration): number {
     const unit = m[2]!.toLowerCase();
     if (CALENDAR_UNITS.has(unit))
       throw new Error(
-        `"${duration}" is not a duration: months and years are calendar arithmetic, not fixed spans — use a calendar ScheduleSpec for wall-clock rules`,
+        `"${duration}" is not a duration: months and years are calendar arithmetic, not fixed spans — say it as a wall-clock rule instead`,
       );
     const unitMs = UNIT_MS[unit];
     if (unitMs === undefined)

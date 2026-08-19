@@ -180,7 +180,7 @@ describe('scheduleSpecProblems', () => {
 
 /**
  * The dispatch seam: nextFireAfter and scheduleSpecProblems answer for calendar
- * specs too, with the arithmetic itself proven in calendar.spec.ts. What is
+ * specs too, with the arithmetic itself proven in spec/timespec/wall_clock.spec.ts. What is
  * proven *here* is that a calendar spec gets the same bounds treatment and the
  * same refuse-on-problems contract as an interval — the properties a third spec
  * type would also have to satisfy.

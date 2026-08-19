@@ -18,8 +18,9 @@
  * ## Two spec types, one seam each
  *
  * This file dispatches on `spec.type` and owns the interval arithmetic itself;
- * everything a calendar needs — wall clocks, timezones, DST policy — is in
- * `calendar.ts`, behind the same three questions every spec type must answer:
+ * everything a calendar needs — wall clocks, timezones, DST policy — is the
+ * `timespec/` library's, reached only through the seam documented at the import
+ * below, behind the same three questions every spec type must answer:
  * the next boundary strictly after an instant, the latest boundary at or before
  * one (`lookbackFloorMs`, the catch-up clamp), and what is wrong with the spec.
  * A third spec type is those three functions and a union member, nothing more.
@@ -33,11 +34,23 @@
  */
 
 import type {IntervalSpec, ScheduleBounds, ScheduleSpec} from '../protocol';
+// The one seam between the engine and the `timespec/` library (see its
+// index.ts): a `CalendarSpec` minus its `type` tag *is* a `WallClockRule`, and
+// the compiler checks that structural claim at every call below — if the
+// library's rule shape ever drifts from the protocol's spec shape, these lines
+// stop compiling rather than quietly reinterpreting a field. Swapping the
+// library out, or deleting calendar support, happens here and in the union
+// member, nowhere else.
+//
+// Calling it from this file is also what makes the library's platform-read
+// timezone data safe: everything here runs inside the `nextFire` activity,
+// whose answer is recorded in history, so replay reads the decision rather
+// than re-deriving it against newer tzdata.
 import {
-  calendarSpecProblems,
-  nextCalendarFireAfter,
-  previousCalendarFireAtOrBefore,
-} from './calendar';
+  nextOccurrenceAfter,
+  previousOccurrenceAtOrBefore,
+  wallClockRuleProblems,
+} from '../timespec';
 
 /** Exhaustiveness backstop for `spec.type` switches — see AGENTS.md. */
 function assertNever(spec: never): never {
@@ -90,7 +103,7 @@ function nextBoundaryAfter(
     case 'interval':
       return nextIntervalBoundaryAfter(spec, afterMs);
     case 'calendar':
-      return nextCalendarFireAfter(spec, afterMs);
+      return nextOccurrenceAfter(spec, afterMs);
     default:
       return assertNever(spec);
   }
@@ -114,7 +127,7 @@ export function lookbackFloorMs(spec: ScheduleSpec, nowMs: number): number {
     case 'interval':
       return nowMs - spec.everyMs;
     case 'calendar': {
-      const previous = previousCalendarFireAtOrBefore(spec, nowMs);
+      const previous = previousOccurrenceAtOrBefore(spec, nowMs);
       // `- 1` for the same reason `notBeforeMs` gets one above: the boundary
       // itself must stay reachable by a strictly-after search.
       return previous === undefined ? nowMs : previous - 1;
@@ -182,7 +195,7 @@ function specProblems(spec: ScheduleSpec): string[] {
     case 'interval':
       return intervalSpecProblems(spec);
     case 'calendar':
-      return calendarSpecProblems(spec);
+      return wallClockRuleProblems(spec);
     default:
       return assertNever(spec);
   }
