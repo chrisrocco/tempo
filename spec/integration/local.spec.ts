@@ -749,15 +749,15 @@ describe('local runtime — continueAsNew', () => {
     // the final run, not fire on the intermediate continue-as-news.
     const rt = createLocalRuntime()
       .registerActivity('tag', (n: number) => `run-${n}`)
-      .registerWorkflow('rollup', async (n = 0) => {
+      .registerWorkflow('rollup', async ({n = 0}: {n?: number} = {}) => {
         const tag = await runActivity<string>('tag', n);
         if (n >= 2) return tag;
-        return continueAsNew(n + 1);
+        return continueAsNew({n: n + 1});
       });
 
-    await expectAsync(rt.start<string>('rollup', 0).result()).toBeResolvedTo(
-      'run-2',
-    );
+    await expectAsync(
+      rt.start<string>('rollup', {n: 0}).result(),
+    ).toBeResolvedTo('run-2');
   });
 
   it('surfaces the server continue-as-new suggestion once history grows', async () => {
