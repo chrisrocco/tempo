@@ -32,7 +32,9 @@ on npm and makes no stability promises — clone it, read it, run it.
   server-decided retry with
   backoff, start-to-close timeouts, and `heartbeat()` for work of unbounded
   duration
-- **Timers** — real wall-clock, durable, re-armed from history on restart
+- **Timers** — real wall-clock, durable, re-armed from history on restart;
+  `sleep('30 minutes')` or milliseconds, and the same duration strings anywhere
+  an option wants a time span
 - **Signals** and **`condition`** — event-driven waiting, no polling; a
   workflow can `signalWorkflow` another one, so a child poller can feed items
   to a waiting parent without leaving the engine

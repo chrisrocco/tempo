@@ -5,6 +5,7 @@
 
 export * from './activity_options';
 export * from './commands';
+export * from './duration';
 export * from './history_events';
 export * from './parent_close_policy';
 export * from './rpc';

@@ -60,7 +60,7 @@
 
 import {registerActivityImpls} from './activity_registry';
 import {createActivityProxy, type ActivityProxy} from './core/workflow_api';
-import type {ActivityOptions} from './protocol';
+import {normalizeActivityOptions, type ActivityOptionsInput} from './protocol';
 
 export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
 export {condition} from './core/condition';
@@ -111,8 +111,11 @@ export {createWorkflow, type WorkflowRef} from './workflow_registry';
 // author-facing option types (erased at runtime; safe on the deterministic surface)
 export type {
   ActivityOptions,
+  ActivityOptionsInput,
+  Duration,
   ParentClosePolicy,
   RetryPolicy,
+  RetryPolicyInput,
   WorkflowDescriptor,
   WorkflowProp,
   WorkflowPropType,
@@ -180,8 +183,11 @@ export type {ActivityProxy};
  */
 export function proxyActivities<A extends object>(
   impls: A,
-  options: ActivityOptions = {},
+  options: ActivityOptionsInput = {},
 ): ActivityProxy<A> {
   registerActivityImpls(impls);
-  return createActivityProxy<A>(options);
+  // Normalized here, once, at declaration: durations become the wire's
+  // milliseconds before the proxy exists, so a bad string fails at module load —
+  // loudly, in the worker that would have run this — never during a replay.
+  return createActivityProxy<A>(normalizeActivityOptions(options));
 }
