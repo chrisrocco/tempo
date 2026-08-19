@@ -101,7 +101,12 @@ export {
   type WorkflowInfo,
 } from './core/workflow_api';
 
-export {defineWorkflow, type WorkflowDefinition} from './workflow_descriptor';
+export {
+  defineWorkflow,
+  type AnyWorkflowFn,
+  type WorkflowDefinition,
+} from './workflow_descriptor';
+export {createWorkflow, type WorkflowRef} from './workflow_registry';
 
 // author-facing option types (erased at runtime; safe on the deterministic surface)
 export type {

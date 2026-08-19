@@ -153,6 +153,11 @@ import {createJsonLogger} from './server';
 import {createRemoteService} from './services';
 import {workflowDescriptor} from './workflow_descriptor';
 import {
+  registeredWorkflowImpls,
+  resolveWorkflowRegistration,
+  workflowNameConflicts,
+} from './workflow_registry';
+import {
   createActivityRegistry,
   createActivityWorker,
   createWorkflowRegistry,
@@ -254,7 +259,16 @@ export interface StartWorkerOptions {
   errorBackoffMs?: number;
   /** Ceiling for that doubling. */
   maxErrorBackoffMs?: number;
-  /** Module namespace of workflow functions, keyed by export name. */
+  /**
+   * Module namespace of workflow functions, keyed by export name — the roots.
+   *
+   * Everything `createWorkflow` registered is included automatically, so
+   * children invoked through their references need no entry here; this names
+   * what the deployment *serves directly*, and it doubles as the escape hatch
+   * when two `createWorkflow` calls claim one name (an entry here wins). A
+   * `WorkflowRef` entry registers its implementation under its own wire name
+   * rather than the export key — the name is intrinsic to the workflow.
+   */
   workflows?: object;
   /** Module namespace of activity functions, keyed by export name. */
   activities?: object;
@@ -577,7 +591,18 @@ function composeRemote(args: {
 }
 
 export function startWorker(options: StartWorkerOptions): Worker {
-  const workflows = callableEntries(options.workflows);
+  // What `createWorkflow` registered first, then what this call was handed, so
+  // an explicit entry wins over a registered one of the same name — the same
+  // precedence, and the same escape hatch, as `activities` below. An entry that
+  // is a `WorkflowRef` registers its implementation under its own wire name:
+  // the reference only dispatches, and the engine invoking it would be a
+  // workflow forever starting itself as its own child.
+  const explicitWorkflows = callableEntries(options.workflows).map(
+    ([exported, fn]) => resolveWorkflowRegistration(exported, fn),
+  );
+  const workflows = [
+    ...new Map([...registeredWorkflowImpls(), ...explicitWorkflows]),
+  ];
   // What the workflows declared via `proxyActivities` first, then what this call
   // was handed, so an explicitly-passed activity wins over a declared one of the
   // same name — a caller that supplies its own set (a spec, a test double) is
@@ -619,6 +644,23 @@ export function startWorker(options: StartWorkerOptions): Worker {
       `worker "${options.name}" has ${unresolved.length} activity name${unresolved.length === 1 ? '' : 's'} claimed by more than one implementation: ${unresolved.join(', ')}. ` +
         `Whichever module loaded last would win, so this worker refuses to start rather than run an implementation nobody chose. ` +
         `Rename one of them, or name the intended implementation in startWorker({activities}), which overrides anything declared.`,
+    );
+
+  // The same refusal for workflow names, for the same reason: two
+  // `createWorkflow` calls claiming one name leaves the registry holding
+  // whichever module loaded last, and a worker that started anyway would replay
+  // the wrong body — silently, forever, and looking healthy.
+  const explicitWorkflowNames = new Set(
+    explicitWorkflows.map(([name]) => name),
+  );
+  const unresolvedWorkflows = workflowNameConflicts().filter(
+    (name) => !explicitWorkflowNames.has(name),
+  );
+  if (unresolvedWorkflows.length > 0)
+    throw new Error(
+      `worker "${options.name}" has ${unresolvedWorkflows.length} workflow name${unresolvedWorkflows.length === 1 ? '' : 's'} claimed by more than one createWorkflow call: ${unresolvedWorkflows.join(', ')}. ` +
+        `Whichever module loaded last would win, so this worker refuses to start rather than replay a body nobody chose. ` +
+        `Rename one of them, or name the intended workflow in startWorker({workflows}), which overrides anything registered.`,
     );
 
   // Read once, from the process's own arguments past the interpreter and script.
