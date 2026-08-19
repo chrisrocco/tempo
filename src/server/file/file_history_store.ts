@@ -6,6 +6,7 @@
  *
  * Layout under <dir>:
  *   lock                       — single-writer guard (this process's pid)
+ *   deleted.json               — {highestDeletedSuffix}; see `HistoryStore.delete`
  *   executions/<enc-id>/
  *     meta.json                — {workflowId, runId, name, args, status, result, failure}
  *     events.jsonl             — the history, one JSON event per line (append-only)
@@ -34,7 +35,7 @@ import type {
   ExecutionRecord,
   HistoryStore,
 } from '../ports/history_store';
-import {VersionConflictError} from '../ports/history_store';
+import {VersionConflictError, trailingIdSuffix} from '../ports/history_store';
 
 interface PersistedMeta {
   workflowId: string;
@@ -46,6 +47,8 @@ interface PersistedMeta {
   status: ExecutionStatus;
   /** Absent in data dirs written before creation time was recorded. */
   createdAt?: number;
+  /** Absent in data dirs written before close time was recorded, and while running. */
+  closedAt?: number;
   result?: unknown;
   failureMessage?: string;
   /** Absent in data dirs written before stacks were carried; reads as undefined. */
@@ -126,6 +129,9 @@ export class FileHistoryStore implements HistoryStore {
   private readonly writeChains = new Map<string, Promise<void>>();
   private closed = false;
 
+  /** Loaded from `deleted.json` by `open`, rewritten by `delete` when it grows. */
+  highestDeletedSuffix = 0;
+
   private constructor(private readonly dir: string) {}
 
   /** The data dir this store holds the single-writer lock on. */
@@ -188,6 +194,20 @@ export class FileHistoryStore implements HistoryStore {
 
   async list(): Promise<ExecutionRecord[]> {
     return [...this.cache.values()];
+  }
+
+  async delete(workflowId: string): Promise<void> {
+    if (!this.cache.delete(workflowId)) return;
+    const suffix = trailingIdSuffix(workflowId);
+    const grewFloor = suffix > this.highestDeletedSuffix;
+    this.highestDeletedSuffix = Math.max(this.highestDeletedSuffix, suffix);
+    await this.enqueue(workflowId, async () => {
+      // The floor is written before the directory goes: a crash between the two
+      // deletes nothing but a directory `load` will read back in — recoverable —
+      // where the other order could reissue an id after a restart.
+      if (grewFloor) await this.writeDeletedFloor();
+      await fs.rm(this.execDir(workflowId), {recursive: true, force: true});
+    });
   }
 
   async append(workflowId: string, events: HistoryEvent[]): Promise<void> {
@@ -311,6 +331,10 @@ export class FileHistoryStore implements HistoryStore {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.status = status;
+    // Present exactly while terminal: stamped here, cleared when a reset
+    // revives the execution — see `ExecutionRecord.closedAt`.
+    if (status === 'running') delete rec.closedAt;
+    else rec.closedAt = Date.now();
     if (outcome && 'result' in outcome) rec.result = outcome.result;
     if (outcome && 'failure' in outcome) rec.failure = outcome.failure;
     if (outcome && 'failureStack' in outcome)
@@ -392,6 +416,7 @@ export class FileHistoryStore implements HistoryStore {
       taskQueue: rec.taskQueue,
       status: rec.status,
       createdAt: rec.createdAt,
+      closedAt: rec.closedAt,
       result: rec.result,
       failureMessage:
         rec.failure !== undefined ? errorMessage(rec.failure) : undefined,
@@ -413,7 +438,26 @@ export class FileHistoryStore implements HistoryStore {
     }
   }
 
+  /** Same temp+rename as the meta, and the same reason: half a floor is a floor of 0. */
+  private async writeDeletedFloor(): Promise<void> {
+    const floorPath = path.join(this.dir, 'deleted.json');
+    const tmp = `${floorPath}.tmp`;
+    await fs.writeFile(
+      tmp,
+      JSON.stringify({highestDeletedSuffix: this.highestDeletedSuffix}),
+    );
+    await fs.rename(tmp, floorPath);
+  }
+
   private async load(): Promise<void> {
+    const floorRaw = await fs
+      .readFile(path.join(this.dir, 'deleted.json'), 'utf8')
+      .catch(() => null);
+    if (floorRaw !== null)
+      this.highestDeletedSuffix =
+        (JSON.parse(floorRaw) as {highestDeletedSuffix?: number})
+          .highestDeletedSuffix ?? 0;
+
     const execRoot = path.join(this.dir, 'executions');
     let entries: string[];
     try {
@@ -444,6 +488,10 @@ export class FileHistoryStore implements HistoryStore {
         // make every old execution look brand new on the first boot after an
         // upgrade, and shuffle the listing on every boot after that.
         createdAt: meta.createdAt ?? history.find((e) => e.ts)?.ts ?? 0,
+        // No fallback, unlike `createdAt`: retention derives one at read time
+        // (`expiredExecutions`), and a guess stored here would be
+        // indistinguishable from a stamp.
+        ...(meta.closedAt === undefined ? {} : {closedAt: meta.closedAt}),
         history,
         version: history.length,
         status: meta.status,

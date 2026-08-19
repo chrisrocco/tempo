@@ -18,6 +18,7 @@ export * from './ports/logger';
 export * from './ports/task_queue';
 export * from './ports/timer_service';
 export * from './ports/workflow_task_queue';
+export * from './retention';
 export * from './retry_policy';
 export * from './server_core';
 export * from './worker_registry';

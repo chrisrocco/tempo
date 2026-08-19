@@ -41,6 +41,18 @@ export interface ExecutionRecord {
    * directory read returns is one.
    */
   createdAt: number;
+  /**
+   * When the execution reached its terminal status, epoch ms. Stamped by
+   * `setStatus` alongside the terminal transition and cleared when a reset
+   * revives the execution, so it is present exactly while `status` is terminal.
+   *
+   * This is what retention is measured from — from *close*, never from
+   * creation, or a workflow that legitimately runs for weeks would be eligible
+   * for sweeping the moment it finished. Absent on records written before the
+   * field existed; `expiredExecutions` falls back to the last event's
+   * timestamp, then to `createdAt`.
+   */
+  closedAt?: number;
   history: HistoryEvent[];
   version: number;
   status: ExecutionStatus;
@@ -171,6 +183,20 @@ export class VersionConflictError extends Error {
   }
 }
 
+/**
+ * The trailing `-<n>` of a workflow id, 0 when it has none.
+ *
+ * The suffix the host's id generator appends, parsed in one place so the two
+ * sides that must agree on it cannot drift: the host seeds its counter past the
+ * suffixes still in the store, and `delete` records the suffix of what it
+ * removes (`highestDeletedSuffix`) so that seeding survives the ids themselves
+ * being gone.
+ */
+export function trailingIdSuffix(workflowId: string): number {
+  const match = /-(\d+)$/.exec(workflowId);
+  return match ? Number(match[1]) : 0;
+}
+
 export interface HistoryStore {
   /**
    * Does state written here survive the process?
@@ -191,6 +217,19 @@ export interface HistoryStore {
    * so it is for a human to read and never for a caller to parse.
    */
   readonly location?: string;
+  /**
+   * The largest `trailingIdSuffix` among ids ever deleted from this store, 0
+   * when none has been. Durable where the store is.
+   *
+   * Exists because deletion breaks the premise the host's id seeding rests on
+   * — that "the ids in the store are the actual constraint" (see
+   * `highestGeneratedSuffix` in `server_host.ts`). Once a swept `greeter-9` is
+   * gone from `list()`, a restarted server would mint a second `greeter-9`
+   * that every log line and bookmark conflates with the first. This floor is
+   * the part of the constraint that must outlive the records, kept by the
+   * store because the store is the tier that owns surviving a restart.
+   */
+  readonly highestDeletedSuffix: number;
   /** Register a fresh execution. Rejects if the id already exists. */
   create(
     workflowId: string,
@@ -203,6 +242,18 @@ export interface HistoryStore {
   get(workflowId: string): Promise<ExecutionRecord | undefined>;
   /** Every execution — used by the resume driver on boot to re-drive running ones. */
   list(): Promise<ExecutionRecord[]>;
+  /**
+   * Forget an execution entirely: record, history, and (durably) its files.
+   * A no-op for an unknown id, so a sweep raced by another delete stays clean.
+   *
+   * **Destructive, and it releases the id.** A later `create` under the same
+   * `workflowId` succeeds and starts a *new* execution — the claim semantics of
+   * `StartWorkflowOptions.workflowId` hold only while the record exists. The
+   * deleted id's `trailingIdSuffix` is folded into `highestDeletedSuffix`
+   * before the record goes, which is what keeps generated ids from being
+   * reissued after a restart.
+   */
+  delete(workflowId: string): Promise<void>;
   /** Append events atomically and bump the version. Rejects if the id is unknown. */
   append(workflowId: string, events: HistoryEvent[]): Promise<void>;
   /**
@@ -296,7 +347,11 @@ export interface HistoryStore {
   ): Promise<void>;
   /** Replace the execution carryover with what the last workflow task reported. */
   setCarryover(workflowId: string, carryover: Carryover): Promise<void>;
-  /** Record the terminal outcome once a workflow task settles the execution. */
+  /**
+   * Record the terminal outcome once a workflow task settles the execution.
+   * A terminal status stamps `closedAt`; `'running'` (a reset reviving the
+   * execution) clears it.
+   */
   setStatus(
     workflowId: string,
     status: ExecutionStatus,

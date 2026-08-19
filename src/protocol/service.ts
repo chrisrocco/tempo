@@ -48,6 +48,12 @@ export interface StartWorkflowOptions {
    * the caller, and the engine will not arbitrate it — it records the reuse and
    * flags whether the request matched, so the bug is greppable rather than
    * invisible.
+   *
+   * **The claim lasts as long as the record.** A server configured with a
+   * retention window deletes closed executions after it, and a start under a
+   * deleted id creates a fresh execution — "one workflow per order" holds for
+   * the window, not forever. A server without retention (the default) keeps
+   * every claim for its store's lifetime.
    */
   workflowId?: string;
   /**
