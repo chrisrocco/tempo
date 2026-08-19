@@ -1,6 +1,6 @@
 /**
  * @fileoverview
- * The `timespec/` library's arm's-length contract, held mechanically.
+ * The `walltime/` library's arm's-length contract, held mechanically.
  *
  * The library is internally owned but deliberately treated like a third-party
  * dependency: it knows nothing about the engine, and the engine touches it only
@@ -8,11 +8,11 @@
  * and this file checks both against the actual tree:
  *
  * 1. **The library imports nothing.** Not engine layers, not Node builtins, not
- *    packages — a `timespec/` file may import only its own siblings. The moment
+ *    packages — a `walltime/` file may import only its own siblings. The moment
  *    an engine type leaks in, the library stops being removable.
  * 2. **The removal surface is a closed list.** Every `src/` file that imports
  *    the library is named below. Deleting the feature is: delete
- *    `src/timespec/`, revert these files to their numbers-only forms, delete
+ *    `src/walltime/`, revert these files to their numbers-only forms, delete
  *    the `calendar` member of `ScheduleSpec`. A new import site is allowed —
  *    but only by editing this list, which is the moment to ask whether the
  *    coupling is worth it.
@@ -50,15 +50,15 @@ function resolves(fromFile: string, specifier: string): string | undefined {
 
 const sources = readSourceFiles(REPO_ROOT, ['src']);
 
-describe('the timespec library seam', () => {
+describe('the walltime library seam', () => {
   it('imports nothing from outside its own directory', () => {
     for (const file of sources) {
-      if (!file.path.startsWith('src/timespec/')) continue;
+      if (!file.path.startsWith('src/walltime/')) continue;
       for (const specifier of importSpecifiers(file.text)) {
         const resolved = resolves(file.path, specifier);
-        expect(resolved !== undefined && resolved.startsWith('src/timespec/'))
+        expect(resolved !== undefined && resolved.startsWith('src/walltime/'))
           .withContext(
-            `${file.path} imports '${specifier}' — timespec/ is a library the engine ` +
+            `${file.path} imports '${specifier}' — walltime/ is a library the engine ` +
               `treats as third-party, and a library that knows the engine cannot be removed`,
           )
           .toBe(true);
@@ -76,14 +76,14 @@ describe('the timespec library seam', () => {
       'src/workflow.ts', // re-exports the Duration type
     ]);
     for (const file of sources) {
-      if (file.path.startsWith('src/timespec/')) continue;
+      if (file.path.startsWith('src/walltime/')) continue;
       const touches = importSpecifiers(file.text).some((specifier) =>
-        resolves(file.path, specifier)?.startsWith('src/timespec'),
+        resolves(file.path, specifier)?.startsWith('src/walltime'),
       );
       if (!touches) continue;
       expect(removalSurface.has(file.path))
         .withContext(
-          `${file.path} imports timespec/ but is not on the removal surface — ` +
+          `${file.path} imports walltime/ but is not on the removal surface — ` +
             `either the coupling is unintended, or add it here deliberately`,
         )
         .toBe(true);
@@ -109,11 +109,11 @@ describe('the timespec library seam', () => {
         .toBeDefined();
       expect(
         importSpecifiers(file!.text).some((specifier) =>
-          resolves(filePath, specifier)?.startsWith('src/timespec'),
+          resolves(filePath, specifier)?.startsWith('src/walltime'),
         ),
       )
         .withContext(
-          `${filePath} no longer imports timespec/ — shrink the surface`,
+          `${filePath} no longer imports walltime/ — shrink the surface`,
         )
         .toBe(true);
     }

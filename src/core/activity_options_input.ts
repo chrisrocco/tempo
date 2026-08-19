@@ -9,7 +9,7 @@
  *
  * ## Why this is not beside `ActivityOptions` in `protocol/`
  *
- * It was, briefly. But the `Duration` type is `timespec/`'s — an internally-owned
+ * It was, briefly. But the `Duration` type is `walltime/`'s — an internally-owned
  * library the engine deliberately treats as a third-party dependency — and
  * `protocol/` imports nothing, which is worth more than the adjacency: protocol
  * is the vocabulary other repos read, and a library we might remove has no
@@ -20,7 +20,7 @@
  */
 
 import type {ActivityOptions} from '../protocol';
-import {durationToMs, type Duration} from '../timespec';
+import {durationToMs, type Duration} from '../walltime';
 
 /** `RetryPolicy` as an author writes it — see `ActivityOptionsInput`. */
 export interface RetryPolicyInput {

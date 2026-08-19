@@ -25,7 +25,7 @@ import {
   type ExecutionParentView,
   type ParentClosePolicy,
 } from '../protocol';
-import {durationToMs, type Duration} from '../timespec';
+import {durationToMs, type Duration} from '../walltime';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
 import type {SignalDef} from './signals';

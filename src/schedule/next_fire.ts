@@ -19,7 +19,7 @@
  *
  * This file dispatches on `spec.type` and owns the interval arithmetic itself;
  * everything a calendar needs — wall clocks, timezones, DST policy — is the
- * `timespec/` library's, reached only through the seam documented at the import
+ * `walltime/` library's, reached only through the seam documented at the import
  * below, behind the same three questions every spec type must answer:
  * the next boundary strictly after an instant, the latest boundary at or before
  * one (`lookbackFloorMs`, the catch-up clamp), and what is wrong with the spec.
@@ -34,7 +34,7 @@
  */
 
 import type {IntervalSpec, ScheduleBounds, ScheduleSpec} from '../protocol';
-// The one seam between the engine and the `timespec/` library (see its
+// The one seam between the engine and the `walltime/` library (see its
 // index.ts): a `CalendarSpec` minus its `type` tag *is* a `WallClockRule`, and
 // the compiler checks that structural claim at every call below — if the
 // library's rule shape ever drifts from the protocol's spec shape, these lines
@@ -50,7 +50,7 @@ import {
   nextOccurrenceAfter,
   previousOccurrenceAtOrBefore,
   wallClockRuleProblems,
-} from '../timespec';
+} from '../walltime';
 
 /** Exhaustiveness backstop for `spec.type` switches — see AGENTS.md. */
 function assertNever(spec: never): never {

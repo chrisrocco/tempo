@@ -24,7 +24,7 @@
  *
  * So this is a *vocabulary* over the existing seam rather than an extension of it,
  * which is what lets the whole slice live in one directory importing only
- * `protocol/`. It works against a local runtime and a remote server without knowing
+ * `protocol/` and the `walltime/` library. It works against a local runtime and a remote server without knowing
  * which it has, because `WorkflowService` is the seam both implement.
  *
  * The one thing an RPC layer would have bought — rejecting a bad spec before it becomes
@@ -39,7 +39,7 @@
  */
 
 import {DEFAULT_TASK_QUEUE, isNameServed} from '../protocol';
-import {durationToMs, type Duration} from '../timespec';
+import {durationToMs, type Duration} from '../walltime';
 import type {
   CalendarSpec,
   ExecutionDetail,

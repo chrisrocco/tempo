@@ -26,7 +26,7 @@
  * Interval specs carry no timezone, deliberately: absolute milliseconds are not a
  * wall-clock rule and do not need a calendar. Wall-clock rules are `CalendarSpec`,
  * whose `tz` names an IANA zone — and everything hard about that (DST, where a
- * nominal time can be skipped, repeated, or ambiguous) lives in the `timespec/`
+ * nominal time can be skipped, repeated, or ambiguous) lives in the `walltime/`
  * library, reached only through the seam in `schedule/next_fire.ts`, along with
  * the policy for it. This file holds only the vocabulary.
  */
@@ -61,13 +61,13 @@ export interface IntervalSpec {
  * calls wrong at seconds-scale, so a seconds field would be an invitation to
  * misuse it.
  *
- * This type deliberately mirrors `timespec/`'s `WallClockRule`, plus the union
+ * This type deliberately mirrors `walltime/`'s `WallClockRule`, plus the union
  * tag — declared twice on purpose. The protocol owns its wire vocabulary and may
  * not import a library the repo treats as removable; the compiler holds the two
  * shapes together at the seam in `schedule/next_fire.ts`, where a `CalendarSpec`
  * is passed as a rule. The arithmetic — including what happens when DST skips or
  * repeats a wall time — is the library's, along with the policy and its
- * rationale (`timespec/wall_clock.ts`).
+ * rationale (`walltime/wall_clock.ts`).
  */
 export interface CalendarSpec {
   type: 'calendar';

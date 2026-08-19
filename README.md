@@ -407,7 +407,7 @@ src/
   core/           The deterministic engine: (history) -> (commands).
   patterns/       Authoring helpers built from core's primitives — pollForever,
                   diffing, signal streams. Depends on core; core never on it.
-  timespec/       An internally-owned library, held at arm's length: duration
+  walltime/       An internally-owned library, held at arm's length: duration
                   strings and wall-clock rules. Imports nothing, knows nothing
                   about the engine; its removal surface is a checked list.
   schedule/       Schedules: the scheduler workflow, its client, and the

@@ -18,7 +18,7 @@ import {
   previousOccurrenceAtOrBefore,
   wallClockRuleProblems,
   type WallClockRule,
-} from '../../src/timespec';
+} from '../../src/walltime';
 
 /** Identity, for the type annotation at each call site. */
 function rule(fields: WallClockRule): WallClockRule {
