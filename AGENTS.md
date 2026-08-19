@@ -177,6 +177,19 @@ believed. Where a comment and the code disagree, the code is the truth and the
 comment is a bug — fix it rather than working around it. Don't leave a pointer
 to something that no longer exists.
 
+Two ways prose goes stale without ever being wrong when written:
+
+- **A claim a later change falsified.** `ActivityRetryGroup` called flakiness
+  underivable from history for a week after `activityRetryScheduled` made it
+  derivable. A change owns every comment describing it, including in neighbouring
+  modules.
+- **The history of something removed.** A decision documents code it
+  _constrains_; a deleted thing constrains nothing, so its story belongs in the
+  commit message. Keep what the code does now and what is still open.
+
+The tell for the second: on a change that removes code, the comment delta should
+be negative too.
+
 ### Start here when orienting
 
 | Read                                      | For                                                                   |

@@ -16,7 +16,7 @@
  * does not bind anything, so what is being proved is that the tier that *did*
  * bind told it, and that the answer survived the wire. They bind a real port and
  * assert against what the listener reports rather than what it was asked for —
- * see `spec/services/server_endpoint.spec.ts` for the string rules underneath.
+ * see `spec/protocol/server_url.spec.ts` for the string rules underneath.
  */
 
 import {promises as fs} from 'node:fs';
