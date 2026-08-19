@@ -5,7 +5,7 @@
  * Its whole body is one call into the library, which is the point: a consumer
  * building a server artifact under their own build system writes exactly this,
  * with their own defaults in the options object, and bundles it. The counterpart
- * is `examples/greeter.ts`, which is the same file for a worker.
+ * is `spec/support/greeter_worker.ts`, which is the same file for a worker.
  *
  * Everything about what a server *is* — the flags, the readiness contract, the
  * operational caveats, why the port defaults to 7777 — lives on

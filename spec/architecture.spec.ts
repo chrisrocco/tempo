@@ -27,17 +27,13 @@ function file(filePath: string, text: string): SourceFile {
 }
 
 describe('architecture — the repo obeys its own boundary', () => {
-  it('has no boundary violations anywhere in src or examples', () => {
-    const violations = checkBoundaries(
-      readSourceFiles(repoRoot, ['src', 'examples']),
-    );
+  it('has no boundary violations anywhere in src', () => {
+    const violations = checkBoundaries(readSourceFiles(repoRoot, ['src']));
     expect(violations).toEqual([]);
   });
 
   it('checks a non-trivial number of files, so "clean" means something', () => {
-    expect(
-      readSourceFiles(repoRoot, ['src', 'examples']).length,
-    ).toBeGreaterThan(40);
+    expect(readSourceFiles(repoRoot, ['src']).length).toBeGreaterThan(40);
   });
 });
 
@@ -271,7 +267,7 @@ describe('architecture — the author entrypoint', () => {
    * `proxyActivities<typeof activities>` needs the activities module's shape inside
    * the workflow module, and `import type * as` is the only way to get it without a
    * runtime edge. This checker used to reject it, so following the advice in
-   * `examples/greeter.ts` failed `npm run lint` and a properly-named workflow module
+   * the reference worker (spec/support/greeter_worker.ts) failed `npm run lint` and a properly-named workflow module
    * could not be typed at all.
    */
   it('allows a type-only import, which is erased and cannot run', () => {

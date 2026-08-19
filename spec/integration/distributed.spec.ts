@@ -2,7 +2,7 @@
  * @fileoverview
  * Against a REAL server process (spawned via `node --import tsx bin/server-main`),
  * over real sockets, driving the real deployable worker entrypoint
- * (`examples/greeter.ts`) exactly as a deployment launches it: one binary,
+ * (`spec/support/greeter_worker.ts`) exactly as a deployment launches it: one binary,
  * its role chosen by --role. Test 2 demonstrates the phase's failure
  * semantics: an activity whose worker "crashed" (ran it but never acked) has its
  * lease expire and is redelivered — so it runs at-least-once.
@@ -27,7 +27,7 @@ import {repoPath} from '../support/repo_root';
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
-const WORKER = repoPath('examples/greeter.ts');
+const WORKER = repoPath('spec/support/greeter_worker.ts');
 
 /**
  * Run a deployable entrypoint the way a systemd unit would: an argv and nothing

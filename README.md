@@ -109,7 +109,7 @@ rt.shutdown(); // stop background timers so the process exits
 Or run one workflow through your worker binary, with no server at all:
 
 ```bash
-tsx examples/greeter.ts --local=greeter --args='["world"]'
+tsx spec/support/greeter_worker.ts --local=greeter --args='["world"]'
 # LOCAL RUN greeter greeter — one workflow, then exit. Not a deployment: …
 # "Hello, world!"
 ```
@@ -129,8 +129,8 @@ Or run the real thing — a server and the two worker tiers, each its own proces
 
 ```bash
 tsx bin/server-main.ts --port=7777 --data-dir=./data &          # LISTENING 7777 127.0.0.1
-tsx examples/greeter.ts --server=http://127.0.0.1:7777 --role=workflow &
-tsx examples/greeter.ts --server=http://127.0.0.1:7777 --role=activity &
+tsx spec/support/greeter_worker.ts --server=http://127.0.0.1:7777 --role=workflow &
+tsx spec/support/greeter_worker.ts --server=http://127.0.0.1:7777 --role=activity &
 ```
 
 Each prints one readiness line — `LISTENING <port> <host>` and `WORKER_READY
@@ -431,8 +431,8 @@ src/
                   in the states a UI has to render
   process_flags.ts  how a deployed process reads its own configuration
 bin/              server-main.ts — the reference server binary, one call
-examples/         greeter.ts — the reference worker binary, one call
-spec/             the executable documentation
+spec/             the executable documentation; spec/support/greeter_worker.ts
+                  is the reference worker binary the process-level specs deploy
 ```
 
 The `★` entrypoints are load-bearing: workflow code imports only from
