@@ -265,7 +265,7 @@ describe('worker identity — a busy worker still serves its queue', () => {
 describe('worker identity — end to end through a server host', () => {
   it('reports a worker holding a task as busy, and as idle once it reports back', async () => {
     const host = createServerHost();
-    await host.start('greeter', [], {taskQueue: 'email'});
+    await host.start('greeter', undefined, {taskQueue: 'email'});
 
     const task = await host.pollWorkflowTask({
       taskQueue: 'email',

@@ -13,7 +13,7 @@ outside world happens in **activities** the engine runs on its behalf.
 import { runActivity } from './src/workflow';
 
 // Deterministic orchestration. Survives a crash at any await.
-export async function greeter(name: string): Promise<string> {
+export async function greeter({ name }: { name: string }): Promise<string> {
   return runActivity<string>('greet', name);
 }
 
@@ -96,11 +96,11 @@ import { runActivity } from './src/workflow';
 
 const rt = createLocalRuntime()
   .registerActivity('greet', (name: string) => `Hello, ${name}!`)
-  .registerWorkflow('greeter', (name: string) =>
+  .registerWorkflow('greeter', ({ name }: { name: string }) =>
     runActivity<string>('greet', name),
   );
 
-console.log(await rt.start<string>('greeter', ['world']).result());
+console.log(await rt.start<string>('greeter', { name: 'world' }).result());
 rt.shutdown(); // stop background timers so the process exits
 ```
 
@@ -143,7 +143,7 @@ const client = createRemoteClient(createRemoteService('http://127.0.0.1:7777'));
 await client.health(); // is it up, is it durable, and where is it bound
 await client.queues(); // who is polling, per queue and role
 
-const handle = client.start<string>('greeter', ['world']);
+const handle = client.start<string>('greeter', 'world');
 console.log(await handle.result()); // Hello, world!
 ```
 

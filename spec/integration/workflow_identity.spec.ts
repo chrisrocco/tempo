@@ -51,7 +51,7 @@ describe('a workflow knows its own id', () => {
       return 'ok';
     });
 
-    await rt.start('reporter', [], {workflowId: 'chosen-id'}).result();
+    await rt.start('reporter', undefined, {workflowId: 'chosen-id'}).result();
 
     expect(seen).toEqual(['chosen-id']);
   });
@@ -82,7 +82,7 @@ describe('a workflow knows its own id', () => {
         return outcome;
       });
 
-    const handle = rt.start('waiter', [], {workflowId: 'waiter-1'});
+    const handle = rt.start('waiter', undefined, {workflowId: 'waiter-1'});
     await wait(150);
 
     expect(callbackId).toBe('waiter-1');
@@ -112,7 +112,7 @@ describe('a workflow knows its own id', () => {
       },
     );
 
-    await rt.start('roller', [0], {workflowId: 'stable-id'}).result();
+    await rt.start('roller', 0, {workflowId: 'stable-id'}).result();
 
     expect(seen.length).toBeGreaterThan(1);
     expect(new Set(seen)).toEqual(new Set(['stable-id']));

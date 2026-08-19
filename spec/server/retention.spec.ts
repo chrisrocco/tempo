@@ -190,14 +190,16 @@ describe('retention — through the server host', () => {
       retentionSweepIntervalMs: 20,
     });
     try {
-      await host.start('wf', [], {workflowId: 'order-1'});
+      await host.start('wf', undefined, {workflowId: 'order-1'});
       await host.terminate('order-1', 'retention spec');
 
       await until(async () => (await store.get('order-1')) === undefined);
 
       // The claim went with the record: the same id now names a NEW execution
       // — the documented consequence of running with retention.
-      const reclaimed = await host.start('wf', [], {workflowId: 'order-1'});
+      const reclaimed = await host.start('wf', undefined, {
+        workflowId: 'order-1',
+      });
       expect(reclaimed.created).toBeTrue();
     } finally {
       host.shutdown();
@@ -210,7 +212,7 @@ describe('retention — through the server host', () => {
       retentionSweepIntervalMs: 20,
     });
     try {
-      await host.start('wf', [], {workflowId: 'still-going'});
+      await host.start('wf', undefined, {workflowId: 'still-going'});
       // Two sweep intervals is plenty for a wrong implementation to show.
       await new Promise<void>((r) => setTimeout(r, 60));
       expect(
@@ -225,7 +227,7 @@ describe('retention — through the server host', () => {
     const store = new MemoryHistoryStore();
     const host = createServerHost(store);
     try {
-      await host.start('wf', [], {workflowId: 'kept'});
+      await host.start('wf', undefined, {workflowId: 'kept'});
       await host.terminate('kept', 'retention spec');
       await new Promise<void>((r) => setTimeout(r, 60));
       expect((await store.get('kept'))?.status).toBe('terminated');
@@ -248,7 +250,7 @@ describe('retention — through the server host', () => {
         retainClosedForMs: 0,
         retentionSweepIntervalMs: 20,
       });
-      const first = await host1.start('greeter', []);
+      const first = await host1.start('greeter');
       await host1.terminate(first.workflowId, 'retention spec');
       await until(
         async () => (await store1.get(first.workflowId)) === undefined,
@@ -260,7 +262,7 @@ describe('retention — through the server host', () => {
       const host2 = createServerHost(store2);
       try {
         await host2.resume(); // seeds the counter — from an empty listing
-        const second = await host2.start('greeter', []);
+        const second = await host2.start('greeter');
         expect(second.workflowId).not.toBe(first.workflowId);
       } finally {
         host2.shutdown();

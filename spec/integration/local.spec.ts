@@ -448,7 +448,7 @@ describe('local runtime — child workflows', () => {
         executeChild<string>('child', {workflowId: 'shared'}),
       );
 
-    await rt.start('child', [], {workflowId: 'shared'}).result();
+    await rt.start('child', undefined, {workflowId: 'shared'}).result();
 
     await expectAsync(rt.start('parent').result()).toBeResolvedTo(
       'earlier result',
@@ -647,7 +647,7 @@ describe('local runtime — cancellation', () => {
         executeChild('ticker', {workflowId: 'kid-1'}),
       );
 
-    const handle = rt.start('parent', [], {workflowId: 'par-1'});
+    const handle = rt.start('parent', undefined, {workflowId: 'par-1'});
     await wait(10); // let the child start and park
     handle.cancel();
     await expectAsync(handle.result()).toBeRejectedWithError(CancelledFailure);
@@ -674,7 +674,7 @@ describe('local runtime — signalling another workflow', () => {
         return 'sent';
       });
 
-    const receiver = rt.start<string>('receiver', [], {
+    const receiver = rt.start<string>('receiver', undefined, {
       workflowId: 'receiver-1',
     });
     rt.start('sender');
@@ -739,7 +739,7 @@ describe('local runtime — continueAsNew', () => {
       },
     );
 
-    await expectAsync(rt.start<string>('counter', [0]).result()).toBeResolvedTo(
+    await expectAsync(rt.start<string>('counter', 0).result()).toBeResolvedTo(
       'done at 3',
     );
   });
@@ -755,7 +755,7 @@ describe('local runtime — continueAsNew', () => {
         return continueAsNew(n + 1);
       });
 
-    await expectAsync(rt.start<string>('rollup', [0]).result()).toBeResolvedTo(
+    await expectAsync(rt.start<string>('rollup', 0).result()).toBeResolvedTo(
       'run-2',
     );
   });

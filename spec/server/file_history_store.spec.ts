@@ -46,7 +46,9 @@ describe('FileHistoryStore', () => {
           runActivity<number>('double', 21),
         );
 
-      await rt.start<number>('doubler', [], {workflowId: 'wf-1'}).result();
+      await rt
+        .start<number>('doubler', undefined, {workflowId: 'wf-1'})
+        .result();
       await store1.close(); // flush + release lock
 
       // A brand-new store rebuilds its cache from disk — nothing in memory carried over.

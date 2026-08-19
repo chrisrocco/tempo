@@ -45,7 +45,7 @@ describe('crash recovery — resume from a durable store', () => {
         'napper',
         napper,
       );
-      rt1.start('napper', [], {workflowId: 'nap-1'});
+      rt1.start('napper', undefined, {workflowId: 'nap-1'});
       await waitFor(async () => {
         const rec = await store1.get('nap-1');
         return rec?.history.some((e) => e.type === 'timerStarted') ?? false;
@@ -79,7 +79,7 @@ describe('crash recovery — resume from a durable store', () => {
       const rt1 = createLocalRuntime({historyStore: store1})
         .registerActivity('work', () => new Promise<string>(() => {})) // never settles: crash mid-activity
         .registerWorkflow('doer', doer);
-      rt1.start('doer', [], {workflowId: 'do-1'});
+      rt1.start('doer', undefined, {workflowId: 'do-1'});
       await waitFor(async () => {
         const rec = await store1.get('do-1');
         return (
@@ -123,7 +123,7 @@ describe('crash recovery — resume from a durable store', () => {
       const rt1 = createLocalRuntime({historyStore: store1})
         .registerWorkflow('child', child)
         .registerWorkflow('parent', parent);
-      rt1.start('parent', [], {workflowId: 'par-1'});
+      rt1.start('parent', undefined, {workflowId: 'par-1'});
       await waitFor(async () => {
         const rec = await store1.get('par-1');
         return rec?.history.some((e) => e.type === 'childStarted') ?? false;

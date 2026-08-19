@@ -155,7 +155,7 @@ describe('listQueues — the pool nobody is serving', () => {
   it('reports a row for a pool with work and no workers', async () => {
     const host = createServerHost();
 
-    await host.start('greeter', [], {taskQueue: 'email'});
+    await host.start('greeter', undefined, {taskQueue: 'email'});
 
     // The row the registry cannot produce: it only knows pools something has
     // polled, so before this a pool with work and no worker was absent from the
@@ -169,8 +169,8 @@ describe('listQueues — the pool nobody is serving', () => {
 
   it('reports the backlog beside the workers once a pool is polled', async () => {
     const host = createServerHost();
-    await host.start('greeter', [], {taskQueue: 'email'});
-    await host.start('greeter', [], {taskQueue: 'email'});
+    await host.start('greeter', undefined, {taskQueue: 'email'});
+    await host.start('greeter', undefined, {taskQueue: 'email'});
 
     await host.pollWorkflowTask({taskQueue: 'email', identity: 'w1@host'});
 
@@ -183,7 +183,7 @@ describe('listQueues — the pool nobody is serving', () => {
 
   it('does not attribute a backlog to the wildcard row', async () => {
     const host = createServerHost();
-    await host.start('greeter', [], {taskQueue: 'email'});
+    await host.start('greeter', undefined, {taskQueue: 'email'});
 
     // A worker polling every pool, which the registry files under `*`.
     await host.pollWorkflowTask({identity: 'w1@host'});
@@ -198,7 +198,7 @@ describe('listQueues — the pool nobody is serving', () => {
 
   it('reports nothing waiting once the work is claimed', async () => {
     const host = createServerHost();
-    await host.start('greeter', [], {taskQueue: 'email'});
+    await host.start('greeter', undefined, {taskQueue: 'email'});
 
     await host.pollWorkflowTask({taskQueue: 'email', identity: 'w1@host'});
 

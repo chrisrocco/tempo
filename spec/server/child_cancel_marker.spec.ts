@@ -43,7 +43,7 @@ describe('cancelling a detached child', () => {
         await wait(30);
         return 'cancelled it';
       })
-      .start('parent', [], {workflowId: 'p-1'});
+      .start('parent', undefined, {workflowId: 'p-1'});
     await wait(200);
 
     const history = (await store.get('p-1'))?.history ?? [];
@@ -73,7 +73,7 @@ describe('cancelling a detached child', () => {
 
     // The signal lands before the first task is polled, so that task carries a
     // history of `[signal]` and the cancel is issued before any of it is applied.
-    const handle = rt.start('parent', [], {workflowId: 'p-2'});
+    const handle = rt.start('parent', undefined, {workflowId: 'p-2'});
     await handle.signal('ping', 'early');
     await wait(200);
 
