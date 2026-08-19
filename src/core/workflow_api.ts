@@ -558,7 +558,7 @@ export function deprecatePatch(id: string): void {
 }
 
 /**
- * Terminal: end this run and start a fresh one carrying `args`. It emits a
+ * Terminal: end this run and start a fresh one carrying `props`. It emits a
  * `continueAsNew` command and returns a promise that never resolves, so no code
  * runs after it — `return continueAsNew(...)` (or `await` it) halts the run.
  *
@@ -636,7 +636,7 @@ export interface WorkflowInfo {
    * The execution that started this one, or absent if a client did.
    *
    * How a child learns its parent's id without being handed it as an argument —
-   * the same reason `args` is here. `signalWorkflow` addresses a target by id, so
+   * the same reason `props` is here. `signalWorkflow` addresses a target by id, so
    * without this the child → parent direction would require every parent to pass
    * its own id down, which it cannot always know either: an id the engine derived
    * from lineage is not visible to the workflow that owns it.
@@ -656,7 +656,7 @@ export function workflowInfo(): WorkflowInfo {
     workflowId: ctx.workflowId,
     continueAsNewSuggested: ctx.continueAsNewSuggested,
     props: ctx.props,
-    // Copied for the same reason `args` is: a caller must not be able to reach
+    // Copied for the same reason `props` is: a caller must not be able to reach
     // back through the returned object and mutate the context.
     parent: ctx.parent && {...ctx.parent},
   };

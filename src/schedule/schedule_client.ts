@@ -18,7 +18,7 @@
  * | --- | --- |
  * | create | `start` the scheduler workflow under a chosen id |
  * | pause / resume / trigger / update | `signal` |
- * | describe | `describeExecution` — args are the definition, carryover the status |
+ * | describe | `describeExecution` — props are the definition, carryover the status |
  * | list | `listExecutions({name})` |
  * | delete | `cancel` |
  *
@@ -177,7 +177,7 @@ export interface ScheduleView {
   scheduleId: string;
   status: ExecutionSummary['status'];
   /**
-   * The definition currently in force — the args of the run in progress, so an
+   * The definition currently in force — the props of the run in progress, so an
    * `update` is reflected here from its next rollover.
    */
   definition: ScheduleDefinition | undefined;

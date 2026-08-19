@@ -144,8 +144,8 @@ export interface ScheduleTarget {
  * A schedule's definition: everything that is a *decision*, as opposed to a record of
  * what has happened.
  *
- * Travels in the workflow's args rather than in carryover, so `describeExecution`
- * reports it as `args` — the definition and the status read as two different things to
+ * Travels in the workflow's props rather than in carryover, so `describeExecution`
+ * reports it as `props` — the definition and the status read as two different things to
  * anything rendering them, which is what a dashboard wants. An update signal replaces
  * it, and the replacement is carried forward by the next rollover.
  */
