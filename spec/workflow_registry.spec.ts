@@ -41,7 +41,11 @@ describe('createWorkflow — the reference and the registry', () => {
   it('accepts the described literal and attaches the descriptor to the body', () => {
     const nightly = createWorkflow('nightly', {
       title: 'Nightly report',
-      props: [{name: 'day', required: true, type: 'string'}],
+      props: {
+        type: 'object',
+        properties: {day: {type: 'string'}},
+        required: ['day'],
+      },
       async start(props: {day: string}) {
         return props.day;
       },

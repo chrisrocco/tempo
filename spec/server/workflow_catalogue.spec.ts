@@ -40,6 +40,13 @@ async function servingWorker(
   await host.pollWorkflowTask({taskQueue, identity, servesHash: hash});
 }
 
+/** The schema both assertions below expect, written once. */
+const dayProps = {
+  type: 'object',
+  properties: {day: {type: 'string'}},
+  required: ['day'],
+} as const;
+
 describe('the workflow catalogue', () => {
   let host: ReturnType<typeof createServerHost>;
 
@@ -61,7 +68,7 @@ describe('the workflow catalogue', () => {
         name: 'nightlyReport',
         title: 'Nightly revenue report',
         description: 'Totals yesterday.',
-        props: [{name: 'day', required: true, type: 'string'}],
+        props: dayProps,
       },
     ]);
 
@@ -70,7 +77,7 @@ describe('the workflow catalogue', () => {
         name: 'nightlyReport',
         title: 'Nightly revenue report',
         description: 'Totals yesterday.',
-        props: [{name: 'day', required: true, type: 'string'}],
+        props: dayProps,
         taskQueues: ['default'],
       },
     ]);
@@ -132,7 +139,11 @@ describe('the workflow catalogue', () => {
       {name: 'charge', title: 'Charge a card'},
     ]);
     await servingWorker(host, 'v2', 'default', [
-      {name: 'charge', title: 'Charge a card', props: [{name: 'amount'}]},
+      {
+        name: 'charge',
+        title: 'Charge a card',
+        props: {type: 'object', properties: {amount: {}}},
+      },
     ]);
 
     const [workflow] = await host.listWorkflows();

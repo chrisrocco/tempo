@@ -114,8 +114,8 @@ export type {
   ParentClosePolicy,
   RetryPolicy,
   WorkflowDescriptor,
-  WorkflowProp,
-  WorkflowPropType,
+  WorkflowPropsSchema,
+  JsonSchema,
 } from './protocol';
 
 export type {ActivityProxy};
