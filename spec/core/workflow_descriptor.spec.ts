@@ -11,7 +11,7 @@
  */
 
 import 'jasmine';
-import type {WorkflowProp} from '../../src/protocol';
+import type {WorkflowPropsSchema} from '../../src/protocol';
 import {createLocalRuntime} from '../../src';
 import {defineWorkflow} from '../../src/workflow';
 import {workflowDescriptor} from '../../src/workflow_descriptor';
@@ -34,10 +34,14 @@ describe('defineWorkflow', () => {
   });
 
   it('reads back everything except the function', () => {
-    const props: WorkflowProp[] = [
-      {name: 'customerId', required: true, type: 'string'},
-      {name: 'locale', description: 'Defaults to the account language.'},
-    ];
+    const props: WorkflowPropsSchema = {
+      type: 'object',
+      properties: {
+        customerId: {type: 'string'},
+        locale: {description: 'Defaults to the account language.'},
+      },
+      required: ['customerId'],
+    };
     const fn = defineWorkflow({
       title: 'Greet a customer',
       description: 'Sends the welcome email.',
@@ -153,7 +157,11 @@ describe('a described workflow on a runtime', () => {
   it('registers and runs exactly as an undescribed one does', async () => {
     const greeter = defineWorkflow({
       title: 'Greet a customer',
-      props: [{name: 'name', required: true, type: 'string'}],
+      props: {
+        type: 'object',
+        properties: {name: {type: 'string'}},
+        required: ['name'],
+      },
       async start(props: {name: string}) {
         return `hello ${props.name}`;
       },
@@ -184,11 +192,11 @@ describe('a described workflow on a runtime', () => {
       Object.entries(workflows).map(([name, fn]) => ({
         name,
         title: workflowDescriptor(fn)?.title ?? name,
-        props: workflowDescriptor(fn)?.props ?? [],
+        props: workflowDescriptor(fn)?.props,
       })),
     ).toEqual([
-      {name: 'described', title: 'Described', props: []},
-      {name: 'plain', title: 'plain', props: []},
+      {name: 'described', title: 'Described', props: undefined},
+      {name: 'plain', title: 'plain', props: undefined},
     ]);
   });
 });
