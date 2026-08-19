@@ -122,7 +122,7 @@ export interface ChildOptions {
    *
    * Set `'abandon'` for a child deliberately started to outlive its parent — a
    * follow-up job, a handoff. Leave it alone for anything started to serve this
-   * workflow, which is the case that used to leak: an infinite poller feeding a
+   * workflow, which is the case that leaks otherwise: an infinite poller feeding a
    * parent goes on polling forever once the parent is gone, and nothing reports
    * that it has.
    *
