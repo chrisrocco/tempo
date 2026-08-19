@@ -182,6 +182,17 @@ be reachable only through the host entrypoint, which meant a dashboard pulled
 module, transitively — a barrel that would quietly undo it fails `npm run lint`
 rather than a consumer's bundler.
 
+One deployment note the engine cannot handle for you: **failure stacks are
+formatted in the process that threw** and travel as strings, so a bundled worker
+binary owns the legibility of its own frames. Emit _inline_ source maps (a
+binary moved to a stable location silently breaks a relative
+`sourceMappingURL`), run workers with `node --enable-source-maps`, and keep
+identifier names through the bundle (`--keep-names`, no identifier minification)
+— otherwise the stack the engine faithfully carries from an activity to your
+terminal names positions in a bundle nobody can open. Each process fixes its
+own half: activity frames in the activity worker, the awaited-at frames in the
+workflow worker.
+
 Reading the surface is one thing; **developing** against it is another.
 `workflow-engine/testing` starts a real server, on a real port, already holding
 the states such a tool has to render:

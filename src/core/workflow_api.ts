@@ -26,6 +26,7 @@ import {
   type ParentClosePolicy,
 } from '../protocol';
 import {durationToMs, type Duration} from '../walltime';
+import {captureSite} from './call_site';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
 import type {SignalDef} from './signals';
@@ -63,8 +64,13 @@ function scheduleCommand(spec: CommandSpec): Promise<unknown> {
   if (ctx.cancelled) return Promise.reject(new CancelledFailure()); // no new work after cancel
   const seq = ctx.seq++;
   issue(ctx, {...spec, seq} as Command);
+  // The await site, captured per command and formatted only if this command
+  // fails — the cost argument is `call_site.ts`'s. It is what lets a failure
+  // recorded in another process name the workflow line that awaited it; the
+  // stitching happens where the failure completion rejects (`apply_event`).
+  const site = captureSite(scheduleCommand);
   return new Promise<unknown>((resolve, reject) =>
-    ctx.completions.set(seq, {resolve, reject}),
+    ctx.completions.set(seq, {resolve, reject, ...(site ? {site} : {})}),
   );
 }
 

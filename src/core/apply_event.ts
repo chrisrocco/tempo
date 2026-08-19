@@ -92,6 +92,7 @@
  */
 
 import type {Command, CompletionEvent, HistoryEvent} from '../protocol';
+import {siteFrames} from './call_site';
 import type {WorkflowContext} from './context';
 import {CancelledFailure, NondeterminismError} from './errors';
 
@@ -271,28 +272,52 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
     });
   ctx.completions.delete(ev.seq);
   if (ev.type === 'activityFailed' || ev.type === 'childFailed')
-    waiter.reject(failureError(ev));
+    waiter.reject(failureError(ev, waiter.site));
   else if (ev.type === 'timerFired') waiter.resolve(undefined);
   else waiter.resolve(ev.result);
 }
 
+/** The seam between a failure's recorded origin and the workflow site that awaited it. */
+const AWAIT_SEAM = '    --- awaited by workflow at ---';
+
 /**
- * Rebuild the error a failed activity or child hands back to workflow code.
+ * Rebuild the error a failed activity or child hands back to workflow code:
+ * the recorded origin frames, then the workflow's own await site.
  *
- * The recorded stack is assigned unconditionally — **including when there is
- * none**. The stack this Error is born with describes *replay*: frames inside
- * apply_event, in a different process from the failure, re-derived on every
- * re-run. That is worse than no stack at all, because it looks like one while
- * pointing at the engine rather than at the line that threw, and it would be
- * stored and printed as though it were the origin. So an origin without a stack
- * (a thrown non-Error) yields an error without one, which is the honest answer.
+ * Two halves from two processes, and neither can stand in for the other. The
+ * origin stack was recorded where the throw happened and travels as a string;
+ * the await site was captured in *this* process when the command was issued
+ * (`Waiter.site`), because V8 does not stamp a resuming await onto a rejected
+ * promise — without the stitch, no frame anywhere names the workflow line. The
+ * stack this Error is born with is discarded either way: it describes *replay*,
+ * frames inside apply_event re-derived on every re-run, which is worse than no
+ * stack at all because it looks like one while pointing at the engine.
  *
- * Determinism is unaffected: the value comes out of history, so every replay
- * reconstructs the same error.
+ * An origin without a stack (a thrown non-Error, pre-field history) keeps the
+ * honest answer of not inventing origin frames — but still gets the await site,
+ * clearly labelled as such, because then it is the only pointer the reader has.
+ *
+ * Determinism is unaffected: the stitched text never enters commands or any
+ * decision replay makes, so frames differing across binary versions cannot
+ * diverge a run. Workflow code branching on `.stack` would be the same
+ * pathology as branching on `.message` — no new hazard.
  */
-function failureError(ev: {error: string; stack?: string}): Error {
+function failureError(
+  ev: {error: string; stack?: string},
+  site?: Error,
+): Error {
   const error = new Error(ev.error);
-  error.stack = ev.stack;
+  const awaited = siteFrames(site);
+  if (awaited === undefined || awaited.length === 0) {
+    error.stack = ev.stack;
+    return error;
+  }
+  const origin = ev.stack ?? `Error: ${ev.error}`;
+  error.stack = [
+    origin,
+    AWAIT_SEAM,
+    ...awaited.map((frame) => `    ${frame}`),
+  ].join('\n');
   return error;
 }
 
