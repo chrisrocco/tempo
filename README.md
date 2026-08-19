@@ -49,6 +49,10 @@ on npm and makes no stability promises — clone it, read it, run it.
   reached the call site takes the new one. `deprecatePatch` retires the branch
   afterwards
 - **Crash recovery** — kill the server mid-workflow, restart, and it continues
+- **Retention**, opt-in — `--retain-closed-for-days=N` deletes executions that
+  have been closed longer than the window, so a long-lived server's history
+  does not grow forever; results and `workflowId` claims last only as long as
+  the record, which is the trade the flag's docs spell out
 - **Inspection** — an execution's status, history, and what it is currently
   waiting on, derived from history rather than stored and reachable through
   [`src/client/`](src/client/client.ts)

@@ -82,6 +82,7 @@ export const SERVER_FLAG = {
   port: 'port',
   dataDir: 'data-dir',
   activityLeaseMs: 'activity-lease-ms',
+  retainClosedForDays: 'retain-closed-for-days',
 } as const;
 
 /**

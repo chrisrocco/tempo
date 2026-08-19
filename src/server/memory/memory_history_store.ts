@@ -19,13 +19,17 @@ import type {
   ExecutionRecord,
   HistoryStore,
 } from '../ports/history_store';
-import {VersionConflictError} from '../ports/history_store';
+import {VersionConflictError, trailingIdSuffix} from '../ports/history_store';
 
 export class MemoryHistoryStore implements HistoryStore {
   /** Everything here dies with the process; `location` stays absent. */
   readonly durable = false;
 
   private readonly records = new Map<string, ExecutionRecord>();
+
+  /** Dies with the process like everything else here — which is consistent:
+   * the records it guards against reissue die with it too. */
+  highestDeletedSuffix = 0;
 
   async create(
     workflowId: string,
@@ -59,6 +63,14 @@ export class MemoryHistoryStore implements HistoryStore {
 
   async list(): Promise<ExecutionRecord[]> {
     return [...this.records.values()];
+  }
+
+  async delete(workflowId: string): Promise<void> {
+    if (!this.records.delete(workflowId)) return;
+    this.highestDeletedSuffix = Math.max(
+      this.highestDeletedSuffix,
+      trailingIdSuffix(workflowId),
+    );
   }
 
   async append(workflowId: string, events: HistoryEvent[]): Promise<void> {
@@ -161,6 +173,10 @@ export class MemoryHistoryStore implements HistoryStore {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.status = status;
+    // Present exactly while terminal: stamped here, cleared when a reset
+    // revives the execution — see `ExecutionRecord.closedAt`.
+    if (status === 'running') delete rec.closedAt;
+    else rec.closedAt = Date.now();
     if (outcome && 'result' in outcome) rec.result = outcome.result;
     if (outcome && 'failure' in outcome) rec.failure = outcome.failure;
     if (outcome && 'failureStack' in outcome)
