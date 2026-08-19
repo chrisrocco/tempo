@@ -10,9 +10,11 @@ modules, or there is nowhere for the explanation to live. Structure first, then
 document.
 
 **Organize by responsibility, not by technical kind.** The top-level split is
-`protocol/`, `core/`, `patterns/`, `schedule/`, `server/`, `services/`,
-`worker/`, `client/` — each a job the system does, and each declaring what it may
-import in [`tools/boundaries.ts`](tools/boundaries.ts). A new area of behaviour
+`protocol/`, `walltime/`, `core/`, `patterns/`, `schedule/`, `server/`,
+`services/`, `worker/`, `client/` — each a job the system does, and each
+declaring what it may import in [`tools/boundaries.ts`](tools/boundaries.ts).
+(`walltime/` is the odd one out: an internally-owned library the engine treats
+like a third-party dependency — see `src/walltime/index.ts` for its contract.) A new area of behaviour
 gets its own layer there rather than a folder inside a neighbour: absence from
 that map means _unrestricted_, so skipping the declaration exempts the new code
 rather than leaving it safely unchecked. Resist `types/`, `utils/`, `helpers/`, `handlers/`: those group

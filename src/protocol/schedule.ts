@@ -21,14 +21,14 @@
  * failure this design exists to prevent, since it compounds — a 30-second job on a
  * five-minute relative interval loses roughly ten percent of its fires a day.
  *
- * ## UTC only, deliberately, for now
+ * ## Where the wall clock lives
  *
- * There is no timezone field, and adding one is not a small change: Temporal rewrote
- * its next-time computation three times over DST, where a nominal time can be
- * skipped, repeated, or ambiguous. An interval in absolute milliseconds has no such
- * problem — it is not a wall-clock rule and does not need a calendar. Calendar specs
- * with timezones come later (issue #69), and they belong in `schedule/` where a
- * timezone database is an allowed dependency.
+ * Interval specs carry no timezone, deliberately: absolute milliseconds are not a
+ * wall-clock rule and do not need a calendar. Wall-clock rules are `CalendarSpec`,
+ * whose `tz` names an IANA zone — and everything hard about that (DST, where a
+ * nominal time can be skipped, repeated, or ambiguous) lives in the `walltime/`
+ * library, reached only through the seam in `schedule/next_fire.ts`, along with
+ * the policy for it. This file holds only the vocabulary.
  */
 
 /**
@@ -52,13 +52,50 @@ export interface IntervalSpec {
 }
 
 /**
- * When a schedule fires.
+ * Fire at wall-clock times: "every weekday at 9am, Chicago time".
  *
- * A union of one, which is not an accident: the next member is a calendar spec, and
- * `type` is already the discriminant that makes adding it non-breaking for anything
- * that switches on it.
+ * A boundary is any minute where **all** specified fields match — Temporal's
+ * semantics, not cron's: a spec with both `dayOfMonth` and `dayOfWeek` fires only
+ * on days satisfying *both*, where cron would take the union. Minute granularity,
+ * deliberately: the scheduler rolls over once per fire, which its own comment
+ * calls wrong at seconds-scale, so a seconds field would be an invitation to
+ * misuse it.
+ *
+ * This type deliberately mirrors `walltime/`'s `WallClockRule`, plus the union
+ * tag — declared twice on purpose. The protocol owns its wire vocabulary and may
+ * not import a library the repo treats as removable; the compiler holds the two
+ * shapes together at the seam in `schedule/next_fire.ts`, where a `CalendarSpec`
+ * is passed as a rule. The arithmetic — including what happens when DST skips or
+ * repeats a wall time — is the library's, along with the policy and its
+ * rationale (`walltime/wall_clock.ts`).
  */
-export type ScheduleSpec = IntervalSpec;
+export interface CalendarSpec {
+  type: 'calendar';
+  /** Minute(s) of the hour, 0–59. Defaults to 0. */
+  minute?: number | number[];
+  /**
+   * Hour(s) of the day, 0–23, on the wall clock of `tz`. Defaults to 0 — so a
+   * bare `{type: 'calendar'}` is "daily at midnight UTC".
+   */
+  hour?: number | number[];
+  /** Day(s) of the month, 1–31. Defaults to every day. */
+  dayOfMonth?: number | number[];
+  /** Month(s), 1–12. Defaults to every month. */
+  month?: number | number[];
+  /** Day(s) of the week, 0–6 with 0 = Sunday. Defaults to every day. */
+  dayOfWeek?: number | number[];
+  /**
+   * IANA timezone name (`'America/Chicago'`). Defaults to `'UTC'`. Validated at
+   * creation; resolved against the platform's timezone data each time a boundary
+   * is computed, which is the right side of the determinism boundary because the
+   * computation happens in an activity and its answer is recorded — see the seam
+   * comment in `schedule/next_fire.ts`.
+   */
+  tz?: string;
+}
+
+/** When a schedule fires. `type` is the discriminant every consumer switches on. */
+export type ScheduleSpec = IntervalSpec | CalendarSpec;
 
 /**
  * Absolute bounds on a spec's lifetime, in epoch milliseconds.

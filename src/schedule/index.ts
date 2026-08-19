@@ -38,9 +38,12 @@
 export {
   createScheduleClient,
   SCHEDULER_WORKFLOW_NAME,
+  type IntervalSpecInput,
   type ScheduleClient,
   type ScheduleClientOptions,
   type ScheduleCreation,
+  type ScheduleDefinitionInput,
+  type ScheduleSpecInput,
   type ScheduleSummary,
   type ScheduleView,
 } from './schedule_client';
@@ -52,7 +55,10 @@ export {
  */
 export {nextFireAfter, scheduleSpecProblems} from './next_fire';
 
+export type {Duration} from '../walltime';
+
 export type {
+  CalendarSpec,
   IntervalSpec,
   ScheduleBounds,
   ScheduleDefinition,

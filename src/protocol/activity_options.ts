@@ -6,6 +6,13 @@
  * turned into activity work (retry decisions, later timeouts/task-queue routing).
  * Declared in one layer and enforced in another, each touching it only as much as
  * the determinism boundary allows.
+ *
+ * This is the wire truth, in milliseconds with `…Ms` names. The author-facing
+ * spelling of the same options — `Duration` fields like `'5 minutes'` — is
+ * `ActivityOptionsInput` in `core/activity_options_input.ts`, kept out of here
+ * so `protocol/` stays free of the `walltime/` library it would otherwise have
+ * to import. A field added here must be added there; its fileoverview says why
+ * the pairing is split.
  */
 
 export interface RetryPolicy {

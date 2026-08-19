@@ -13,6 +13,7 @@
  */
 
 import {
+  lookbackFloorMs,
   nextFireAfter,
   scheduleSpecProblems,
 } from '../../src/schedule/next_fire';
@@ -173,6 +174,67 @@ describe('scheduleSpecProblems', () => {
   it('is the same list nextFireAfter refuses on', () => {
     expect(() => nextFireAfter(every(0), 0)).toThrowError(
       /invalid schedule spec.*positive integer/,
+    );
+  });
+});
+
+/**
+ * The dispatch seam: nextFireAfter and scheduleSpecProblems answer for calendar
+ * specs too, with the arithmetic itself proven in spec/walltime/wall_clock.spec.ts. What is
+ * proven *here* is that a calendar spec gets the same bounds treatment and the
+ * same refuse-on-problems contract as an interval — the properties a third spec
+ * type would also have to satisfy.
+ */
+describe('nextFireAfter — calendar specs through the same seam', () => {
+  const nineUtc = {type: 'calendar', hour: 9} as const;
+
+  it('dispatches a calendar spec to the calendar arithmetic', () => {
+    expect(nextFireAfter(nineUtc, Date.UTC(2026, 5, 15, 8))).toBe(
+      Date.UTC(2026, 5, 15, 9),
+    );
+  });
+
+  it('applies notBeforeMs inclusively, same as an interval', () => {
+    expect(
+      nextFireAfter(nineUtc, 0, {notBeforeMs: Date.UTC(2026, 5, 15, 9)}),
+    ).toBe(Date.UTC(2026, 5, 15, 9));
+  });
+
+  it('exhausts on notAfterMs, same as an interval', () => {
+    expect(
+      nextFireAfter(nineUtc, Date.UTC(2026, 5, 15, 10), {
+        notAfterMs: Date.UTC(2026, 5, 16, 9),
+      }),
+    ).toBeUndefined();
+  });
+
+  it('refuses a bad calendar spec with the same throw contract', () => {
+    expect(() => nextFireAfter({type: 'calendar', hour: 25}, 0)).toThrowError(
+      /invalid schedule spec.*hour/,
+    );
+  });
+});
+
+describe('lookbackFloorMs — the catch-up clamp, per spec type', () => {
+  it('is one period back for an interval', () => {
+    expect(lookbackFloorMs(every(1000), 5500)).toBe(4500);
+  });
+
+  /**
+   * The property the activity relies on: nextFireAfter asked from the floor
+   * yields the most recent boundary at or before now — so an outage's backlog
+   * collapses to one fire — for both spec types alike.
+   */
+  it('makes the most recent missed boundary reachable, for both spec types', () => {
+    const now = 5500;
+    expect(nextFireAfter(every(1000), lookbackFloorMs(every(1000), now))).toBe(
+      5000,
+    );
+
+    const nineUtc = {type: 'calendar', hour: 9} as const;
+    const afterOutage = Date.UTC(2026, 5, 15, 12);
+    expect(nextFireAfter(nineUtc, lookbackFloorMs(nineUtc, afterOutage))).toBe(
+      Date.UTC(2026, 5, 15, 9),
     );
   });
 });
