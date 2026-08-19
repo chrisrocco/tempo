@@ -113,7 +113,7 @@ export function describeExecution(
         };
   return {
     ...summarizeExecution(rec),
-    args: rec.args,
+    props: rec.props,
     ...(rec.parent === undefined ? {} : {parent: rec.parent}),
     history: rec.history.slice(offset, offset + limit),
     historyOffset: offset,

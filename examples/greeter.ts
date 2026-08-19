@@ -7,7 +7,7 @@
  * `--role=ROLE` picks a single poll loop (see src/tempo.ts for the full input
  * surface). Or run one workflow through it with no server at all:
  *
- *   tsx examples/greeter.ts --local=greeter --args='["world"]'
+ *   tsx examples/greeter.ts --local=greeter --props='{"name":"world"}'
  *
  * This is the binary spec/integration/distributed.spec.ts and
  * spec/integration/local_run.spec.ts actually run, so it stays honest.
@@ -38,7 +38,7 @@ const act = proxyActivities(activities, {
   retry: {maximumAttempts: 3},
 });
 
-export async function greeter(name: string): Promise<string> {
+export async function greeter({name}: {name: string}): Promise<string> {
   return act.greet(name);
 }
 

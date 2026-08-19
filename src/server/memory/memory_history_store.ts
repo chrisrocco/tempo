@@ -34,7 +34,7 @@ export class MemoryHistoryStore implements HistoryStore {
   async create(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string = DEFAULT_TASK_QUEUE,
     parent?: ExecutionParent,
   ): Promise<void> {
@@ -45,7 +45,7 @@ export class MemoryHistoryStore implements HistoryStore {
       workflowId,
       runId: 0,
       name,
-      args,
+      props,
       taskQueue,
       createdAt: Date.now(),
       history: [],
@@ -192,12 +192,12 @@ export class MemoryHistoryStore implements HistoryStore {
 
   async resetForContinueAsNew(
     workflowId: string,
-    args: unknown[],
+    props: unknown,
   ): Promise<void> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.history = [];
-    rec.args = args;
+    rec.props = props;
     rec.version = 0;
     rec.runId += 1;
     // status stays 'running'; result/failure remain unset — this is not a close.

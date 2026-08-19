@@ -100,10 +100,14 @@ export interface WorkflowDefinition<
  * export const greeter = defineWorkflow({
  *   title: 'Greet a customer',
  *   description: 'Sends the welcome email and records the touchpoint.',
- *   props: [
- *     {name: 'customerId', required: true, type: 'string'},
- *     {name: 'locale', description: 'Defaults to the account language.'},
- *   ],
+ *   props: {
+ *     type: 'object',
+ *     properties: {
+ *       customerId: {type: 'string'},
+ *       locale: {type: 'string', description: 'Defaults to the account language.'},
+ *     },
+ *     required: ['customerId'],
+ *   },
  *   async start(props: {customerId: string; locale?: string}) {
  *     return act.greet(props.customerId);
  *   },

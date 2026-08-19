@@ -41,7 +41,11 @@ describe('createWorkflow — the reference and the registry', () => {
   it('accepts the described literal and attaches the descriptor to the body', () => {
     const nightly = createWorkflow('nightly', {
       title: 'Nightly report',
-      props: [{name: 'day', required: true, type: 'string'}],
+      props: {
+        type: 'object',
+        properties: {day: {type: 'string'}},
+        required: ['day'],
+      },
       async start(props: {day: string}) {
         return props.day;
       },
@@ -56,10 +60,8 @@ describe('createWorkflow — the reference and the registry', () => {
     // The reference looks like the function it replaced, so the error must
     // answer "why didn't my function run?" — and say where each caller goes.
     expect(() => greet()).toThrowError(/dispatches a child workflow/);
-    expect(() => greet.detached([])).toThrowError(
-      /dispatches a child workflow/,
-    );
-    expect(() => greet.execute([])).toThrowError(/dispatches a child workflow/);
+    expect(() => greet.detached()).toThrowError(/dispatches a child workflow/);
+    expect(() => greet.execute()).toThrowError(/dispatches a child workflow/);
   });
 
   it('records a conflict for a name two implementations claim, tolerating re-evaluation', () => {
@@ -146,12 +148,14 @@ describe('createWorkflow — dispatching children', () => {
     const rt = createLocalRuntime()
       .registerWorkflow(step.workflowName, step)
       .registerWorkflow('parent', async () => {
-        const first = await step.execute([{tag: 'a'}], {
-          workflowId: 'claimed-step',
-        });
-        const second = await step.execute([{tag: 'b'}], {
-          workflowId: 'claimed-step',
-        });
+        const first = await step.execute(
+          {tag: 'a'},
+          {workflowId: 'claimed-step'},
+        );
+        const second = await step.execute(
+          {tag: 'b'},
+          {workflowId: 'claimed-step'},
+        );
         return [first, second];
       });
 
@@ -175,7 +179,10 @@ describe('createWorkflow — dispatching children', () => {
     const rt = createLocalRuntime()
       .registerWorkflow(kid.workflowName, kid)
       .registerWorkflow('parent', async () => {
-        kid.detached([], {workflowId: 'the-kid', parentClosePolicy: 'abandon'});
+        kid.detached(undefined, {
+          workflowId: 'the-kid',
+          parentClosePolicy: 'abandon',
+        });
         // Dispatched by an earlier task than the one that settles the parent —
         // a start issued in the settling task is dropped (see
         // `parent_close.spec.ts`), and this spec is about the spawn, not that.

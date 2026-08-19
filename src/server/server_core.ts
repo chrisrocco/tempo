@@ -270,7 +270,7 @@ export interface ServerCoreDeps {
   launch(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string,
     parent: ExecutionParent | undefined,
   ): void;
@@ -748,7 +748,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         launch(
           childId,
           cmd.childName,
-          cmd.childArgs,
+          cmd.childProps,
           cmd.taskQueue ?? taskQueue,
           {workflowId, seq: cmd.seq},
         );
@@ -797,7 +797,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         launch(
           cmd.targetId,
           cmd.name,
-          cmd.args,
+          cmd.props,
           cmd.taskQueue ?? taskQueue,
           undefined,
         );
@@ -900,7 +900,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       token: workflowId,
       workflowId,
       name: rec.name,
-      args: rec.args,
+      props: rec.props,
       history: rec.history.slice(),
       continueAsNewSuggested:
         rec.history.length >= continueAsNewSuggestThreshold,
@@ -1023,7 +1023,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // this is the one moment where changing the seed cannot split a run.
       if (result.carryover !== undefined)
         await historyStore.setCarryover(workflowId, result.carryover);
-      await historyStore.resetForContinueAsNew(workflowId, caN.args);
+      await historyStore.resetForContinueAsNew(workflowId, caN.props);
       wake(workflowId); // drive the fresh run
       return;
     }
@@ -1651,7 +1651,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         token: leased.token,
         workflowId: leased.workflowId,
         name: rec.name,
-        args: rec.args,
+        props: rec.props,
         history: rec.history.slice(),
         carryover: {...rec.carryover},
         continueAsNewSuggested:

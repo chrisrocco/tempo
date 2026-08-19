@@ -98,8 +98,15 @@ export function sleep(duration: Duration): Promise<void> {
 
 /** How a child is started. Both child primitives take the same shape. */
 export interface ChildOptions {
-  /** Arguments for the child workflow function. */
-  args?: unknown[];
+  /**
+   * The one props object the child is started with.
+   *
+   * Wrapped into the command's positional `childArgs` beneath, which is what the
+   * wire and history have always carried — see `Client.start`, which does the
+   * same. A child started with nothing gets an empty list rather than
+   * `[undefined]`.
+   */
+  props?: unknown;
   /**
    * The child's execution id. Omit and the engine derives one from lineage,
    * which is unique per call site and per run.
@@ -160,7 +167,7 @@ export function executeChild<T = unknown>(
   return scheduleCommand({
     type: 'startChild',
     childName: name,
-    childArgs: options.args ?? [],
+    childProps: options.props,
     detached: false,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
@@ -197,7 +204,7 @@ export function startChild(
   issue(ctx, {
     type: 'startChild',
     childName: name,
-    childArgs: options.args ?? [],
+    childProps: options.props,
     detached: true,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
@@ -279,7 +286,8 @@ export function signalWorkflow(
 
 /** What `startWorkflow` needs to know beyond the id and the name. */
 export interface StartWorkflowExternalOptions {
-  args?: unknown[];
+  /** The one props object it is started with; see `ChildOptions.props`. */
+  props?: unknown;
   /** Which pool runs it. Defaults to this execution's queue, as `startChild` does. */
   taskQueue?: string;
 }
@@ -317,7 +325,7 @@ export interface StartWorkflowExternalOptions {
  * domain:
  *
  * ```ts
- * startWorkflow(`${scheduleId}-${nominalTime}`, 'nightlyReport', {args: [day]});
+ * startWorkflow(`${scheduleId}-${nominalTime}`, 'nightlyReport', {props: {day}});
  * ```
  *
  * A schedule that fires the same nominal time twice — a retried task, a rollover
@@ -343,7 +351,7 @@ export function startWorkflow(
     type: 'startWorkflow',
     targetId: workflowId,
     name,
-    args: options.args ?? [],
+    props: options.props,
     taskQueue: options.taskQueue,
     seq: ctx.seq++,
   });
@@ -550,7 +558,7 @@ export function deprecatePatch(id: string): void {
 }
 
 /**
- * Terminal: end this run and start a fresh one carrying `args`. It emits a
+ * Terminal: end this run and start a fresh one carrying `props`. It emits a
  * `continueAsNew` command and returns a promise that never resolves, so no code
  * runs after it — `return continueAsNew(...)` (or `await` it) halts the run.
  *
@@ -567,8 +575,11 @@ export function deprecatePatch(id: string): void {
  * smuggling run-spanning state into an engine that should know about exactly one
  * run at a time.
  */
-export function continueAsNew(...args: unknown[]): Promise<never> {
-  return scheduleCommand({type: 'continueAsNew', args}) as Promise<never>;
+export function continueAsNew(props?: unknown): Promise<never> {
+  return scheduleCommand({
+    type: 'continueAsNew',
+    props,
+  }) as Promise<never>;
 }
 
 export interface WorkflowInfo {
@@ -620,12 +631,12 @@ export interface WorkflowInfo {
    * life of the run. A copy, so a caller cannot reach back through it into the
    * context.
    */
-  args: unknown[];
+  props: unknown;
   /**
    * The execution that started this one, or absent if a client did.
    *
    * How a child learns its parent's id without being handed it as an argument —
-   * the same reason `args` is here. `signalWorkflow` addresses a target by id, so
+   * the same reason `props` is here. `signalWorkflow` addresses a target by id, so
    * without this the child → parent direction would require every parent to pass
    * its own id down, which it cannot always know either: an id the engine derived
    * from lineage is not visible to the workflow that owns it.
@@ -644,8 +655,8 @@ export function workflowInfo(): WorkflowInfo {
   return {
     workflowId: ctx.workflowId,
     continueAsNewSuggested: ctx.continueAsNewSuggested,
-    args: [...ctx.args],
-    // Copied for the same reason `args` is: a caller must not be able to reach
+    props: ctx.props,
+    // Copied for the same reason `props` is: a caller must not be able to reach
     // back through the returned object and mutate the context.
     parent: ctx.parent && {...ctx.parent},
   };

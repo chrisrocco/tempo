@@ -105,8 +105,8 @@ export function createLocalService(
     timerService,
     // The core supplies the child's id; it is derived from lineage so it stays
     // stable across a restart (see `server_core.childExecutionId`).
-    launch: (workflowId, name, args, taskQueue, parent) => {
-      launch(name, args, {workflowId, taskQueue}, parent);
+    launch: (workflowId, name, props, taskQueue, parent) => {
+      launch(name, props, {workflowId, taskQueue}, parent);
     },
     kickWorkflowWorker,
     kickActivityWorker,
@@ -258,7 +258,7 @@ export function createLocalService(
    */
   function launch(
     name: string,
-    args: unknown[],
+    props: unknown,
     opts: StartWorkflowOptions = {},
     parent?: ExecutionParent,
   ): string {
@@ -270,7 +270,7 @@ export function createLocalService(
     statusMirror.set(workflowId, 'running');
     ensureWaiter(workflowId);
     void historyStore
-      .create(workflowId, name, args, taskQueue, parent)
+      .create(workflowId, name, props, taskQueue, parent)
       .then(() => {
         workflowTaskQueue.enqueue(workflowId, taskQueue);
         kickWorkflowWorker();
@@ -280,8 +280,8 @@ export function createLocalService(
   }
 
   return {
-    start(name, args = [], opts = {}) {
-      return {workflowId: launch(name, args, opts)};
+    start(name, props, opts = {}) {
+      return {workflowId: launch(name, props, opts)};
     },
     signal(workflowId, signalName, payload) {
       if (!statusMirror.has(workflowId))

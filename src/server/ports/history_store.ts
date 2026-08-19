@@ -25,7 +25,7 @@ export interface ExecutionRecord {
    */
   runId: number;
   name: string;
-  args: unknown[];
+  props: unknown;
   /**
    * The pool this execution runs on. Durable because routing has to outlive the
    * process that decided it: every workflow task this execution ever produces
@@ -234,7 +234,7 @@ export interface HistoryStore {
   create(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue?: string,
     parent?: ExecutionParent,
   ): Promise<void>;
@@ -380,5 +380,5 @@ export interface HistoryStore {
    * The consequence a caller must know: **`runId` on a summary is a count, not
    * an address.** Seeing `runId: 5` does not mean runs 0–4 can be fetched.
    */
-  resetForContinueAsNew(workflowId: string, args: unknown[]): Promise<void>;
+  resetForContinueAsNew(workflowId: string, props: unknown): Promise<void>;
 }

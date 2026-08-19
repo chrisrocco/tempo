@@ -479,7 +479,7 @@ export interface ExecutionParentView {
 
 /** `Client.describe()`: the summary, plus history and what the execution awaits. */
 export interface ExecutionDetail extends ExecutionSummary {
-  args: unknown[];
+  props: unknown;
   /**
    * Absent on an execution a client started directly.
    *
@@ -970,7 +970,7 @@ export interface WorkflowService {
   // ── client-facing ──
   start(
     name: string,
-    args?: unknown[],
+    props?: unknown,
     opts?: StartWorkflowOptions,
   ): {workflowId: string};
   signal(workflowId: string, signalName: string, payload?: unknown): void;
@@ -1142,7 +1142,7 @@ export interface WorkflowTask {
   token: TaskToken;
   workflowId: string;
   name: string;
-  args: unknown[];
+  props: unknown;
   history: HistoryEvent[];
   continueAsNewSuggested: boolean;
   /** What the previous task (or the previous run) left behind. */

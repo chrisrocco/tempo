@@ -179,3 +179,35 @@ describe('FileHistoryStore', () => {
     }
   });
 });
+
+describe('file store — a data directory from before props', () => {
+  /**
+   * The whole point of the guard. Every field is optional-shaped after
+   * `JSON.parse`, so an old `meta.json` would otherwise load with
+   * `props: undefined` and every execution would resume running against
+   * nothing — a workflow that charged an order silently charging `undefined`.
+   * Refusing the boot is the only honest option, since there is no migration.
+   */
+  it('refuses to open rather than reading every execution as propless', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-oldfmt-'));
+    const exec = path.join(dir, 'executions', 'old');
+    await fs.mkdir(exec, {recursive: true});
+    await fs.writeFile(
+      path.join(exec, 'meta.json'),
+      JSON.stringify({
+        workflowId: 'old',
+        runId: 0,
+        name: 'charge',
+        args: [{amount: 100}], // the shape this release replaced
+        status: 'running',
+      }),
+    );
+    await fs.writeFile(path.join(exec, 'events.jsonl'), '');
+
+    await expectAsync(FileHistoryStore.open(dir)).toBeRejectedWithError(
+      /older format[\s\S]*no migration/,
+    );
+
+    await fs.rm(dir, {recursive: true, force: true});
+  });
+});

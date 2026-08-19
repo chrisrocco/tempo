@@ -84,7 +84,7 @@ export function createRemoteService(
   }
 
   return {
-    start(name, args = [], opts = {}) {
+    start(name, props, opts = {}) {
       // Generate the id client-side so the handle is usable before the round trip lands.
       const workflowId = opts.workflowId ?? `wf-${Date.now()}-${++idCounter}`;
       statusCache.set(workflowId, 'running');
@@ -95,7 +95,7 @@ export function createRemoteService(
       void call({
         method: 'start',
         name,
-        args,
+        props,
         opts: {...opts, workflowId},
       }).catch(() => {});
       return {workflowId};

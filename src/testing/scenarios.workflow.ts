@@ -53,14 +53,16 @@ export const scenarioCompletes = defineWorkflow({
   title: 'Completes immediately',
   description:
     'Runs one activity that returns straight away, then settles as completed.',
-  props: [
-    {
-      name: 'value',
-      type: 'string',
-      required: true,
-      description: 'Echoed back as the execution result.',
+  props: {
+    type: 'object',
+    required: ['value'],
+    properties: {
+      value: {
+        type: 'string',
+        description: 'Echoed back as the execution result.',
+      },
     },
-  ],
+  },
   async start(props: {value: string}): Promise<unknown> {
     return settling.scenario_succeed(props.value);
   },

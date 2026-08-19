@@ -221,14 +221,7 @@ export function createClient(service: WorkflowService): Client {
       props?: unknown,
       opts: {workflowId?: string; taskQueue?: string} = {},
     ): WorkflowHandle<T> {
-      // Wrapped rather than passed through: the wire still carries a positional
-      // `args` array (see `WorkflowService.start`), and a workflow started with
-      // nothing gets an empty one rather than `[undefined]`.
-      const {workflowId} = service.start(
-        name,
-        props === undefined ? [] : [props],
-        opts,
-      );
+      const {workflowId} = service.start(name, props, opts);
       return handle<T>(workflowId);
     },
     getHandle<T = unknown>(workflowId: string): WorkflowHandle<T> {

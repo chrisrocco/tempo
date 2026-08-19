@@ -91,7 +91,7 @@ const conflicted = new Set<string>();
  * blocking child, `.execute()` when the blocking call needs options,
  * `.detached()` for fire-and-forget, `.impl` for the body itself.
  *
- * The two methods share one shape — the typed args tuple, then the options —
+ * The two methods share one shape — the typed props, then the options —
  * and map one-to-one onto the primitives: call/`.execute` is `executeChild`,
  * `.detached` is `startChild`, so the table in `core/workflow_api.ts` reads
  * unchanged through the reference. The typing is the half of this that
@@ -126,8 +126,8 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
    * argument.
    */
   execute(
-    args: Parameters<F>,
-    options?: Omit<ChildOptions, 'args'>,
+    props?: Parameters<F>[0],
+    options?: Omit<ChildOptions, 'props'>,
   ): Promise<Awaited<ReturnType<F>>>;
   /**
    * Start the workflow as a **detached child**: fire-and-forget, no completion
@@ -143,8 +143,8 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
    * draw.
    */
   detached(
-    args: Parameters<F>,
-    options?: Omit<ChildOptions, 'args'>,
+    props?: Parameters<F>[0],
+    options?: Omit<ChildOptions, 'props'>,
   ): ChildHandle;
 }
 
@@ -173,26 +173,26 @@ export function createWorkflow<F extends AnyWorkflowFn>(
   registered.set(name, impl);
 
   const execute = (
-    args: Parameters<F>,
-    options: Omit<ChildOptions, 'args'> = {},
+    props?: Parameters<F>[0],
+    options: Omit<ChildOptions, 'props'> = {},
   ): Promise<Awaited<ReturnType<F>>> => {
     try {
-      return executeChild<Awaited<ReturnType<F>>>(name, {...options, args});
+      return executeChild<Awaited<ReturnType<F>>>(name, {...options, props});
     } catch (e) {
       throw asDispatchError(e, name);
     }
   };
 
-  const ref = Object.assign((...args: Parameters<F>) => execute(args), {
+  const ref = Object.assign((...args: Parameters<F>) => execute(args[0]), {
     workflowName: name,
     impl,
     execute,
     detached(
-      args: Parameters<F>,
-      options: Omit<ChildOptions, 'args'> = {},
+      props?: Parameters<F>[0],
+      options: Omit<ChildOptions, 'props'> = {},
     ): ChildHandle {
       try {
-        return startChild(name, {...options, args});
+        return startChild(name, {...options, props});
       } catch (e) {
         throw asDispatchError(e, name);
       }

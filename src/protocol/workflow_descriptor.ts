@@ -51,41 +51,52 @@
  */
 
 /**
- * What kind of value a prop takes.
+ * A JSON Schema, as far as this package needs to know one.
  *
- * A closed union so a renderer can switch exhaustively and the compiler will tell it when
- * this grows. `json` is the escape hatch for anything structured: a free-form value the
- * caller supplies as JSON, rendered as a text area rather than a typed control.
+ * Deliberately structural and open. Nothing here validates, so the fields named
+ * are only the ones a *renderer* reads; the index signature carries everything
+ * else — `$schema`, `enum`, `format`, `allOf` — through untouched, which is what
+ * lets a schema emitted by Zod or Valibot be passed straight in. Inventing a
+ * closed type would mean tracking a spec this package has no reason to
+ * implement, and rejecting valid schemas whenever it fell behind.
  */
-export type WorkflowPropType = 'string' | 'number' | 'boolean' | 'json';
-
-/**
- * One value a workflow must be started with.
- *
- * A named list rather than one schema over a positional array, because the thing reading
- * this is drawing a form: a row per field, with a label and a note under it. A positional
- * schema can express the same set and has to be taken apart again by every reader before
- * it can be rendered, and a caller reading it has to count.
- *
- * The *list* is this package's shape — names, order, whether a value is required. The
- * *type* of each value is a JSON Schema, so nothing here invents a type language.
- */
-export interface WorkflowProp {
-  /** The key on the props object `start` receives. */
-  name: string;
+export interface JsonSchema {
+  type?: string;
   /** What this value is, for the note under the field. */
   description?: string;
-  /** Whether the workflow needs it. Absent means optional. */
-  required?: boolean;
-  /**
-   * What kind of value it takes.
-   *
-   * Absent means "not stated", which a form renders as free text — better than forcing a
-   * type onto every prop and collecting `'string'` written reflexively where the author
-   * had not decided. A reader that needs a default should treat absent as `'string'`
-   * rather than refusing to render the field.
-   */
-  type?: WorkflowPropType;
+  [keyword: string]: unknown;
+}
+
+/**
+ * What a workflow must be started with: a JSON Schema over its one props object.
+ *
+ * ## This replaced an ordered list, and the trade is real
+ *
+ * It was `readonly WorkflowProp[]` — a named list, chosen because *"the thing
+ * reading this is drawing a form: a row per field"*, and because a list fixes
+ * the order those rows appear in. JSON Schema `properties` is a **map**, so that
+ * guarantee is gone: field order is now whatever a renderer's iteration gives
+ * it, which in practice is insertion order for string keys and is not promised
+ * by the format.
+ *
+ * Taken anyway, because the alternative cost more. Every consumer generating
+ * this from Zod, Valibot or ArkType already holds a JSON Schema, and a bespoke
+ * list meant converting into a shape only this package understands — then back
+ * out again in whatever reads it. A renderer that needs a specific order can
+ * carry one; a caller that had to translate had no way to avoid it.
+ *
+ * The other half of the trade is a caveat that dies here: the list could only
+ * describe a workflow that already took one object, so a variadic one *"still
+ * registers and still runs; it simply lists under its name with no props"*.
+ * Every workflow now takes one props object, so every workflow is describable.
+ */
+export interface WorkflowPropsSchema {
+  type?: 'object';
+  /** One entry per key of the props object `start` receives. */
+  properties?: Readonly<Record<string, JsonSchema>>;
+  /** Which of them the workflow needs. */
+  required?: readonly string[];
+  [keyword: string]: unknown;
 }
 
 /**
@@ -141,14 +152,13 @@ export interface WorkflowDescriptor {
   /** A sentence about what it does, for the row underneath the title. */
   description?: string;
   /**
-   * What must be passed to start it, in the order a form should show them.
+   * What must be passed to start it — a JSON Schema over the one object `start`
+   * receives. See `WorkflowPropsSchema`, which records what this shape costs.
    *
-   * These are the keys of the **single object** `start` receives — described workflows
-   * take one props object rather than a positional list, which is the one constraint this
-   * shape adds. It buys a start form that can be rendered and submitted without anyone
-   * having to know an argument order, and it costs the ability to describe a workflow
-   * whose signature is `(a, b)`. Such a workflow still registers and still runs; it simply
-   * lists under its name with no props.
+   * Absent means "not described", which a form renders as nothing rather than as
+   * a workflow taking no arguments. It is metadata, never validated here: the
+   * engine starts what it is asked to start, and a schema that disagrees with the
+   * props is a bug in the caller that this will not arbitrate.
    */
-  props?: readonly WorkflowProp[];
+  props?: WorkflowPropsSchema;
 }

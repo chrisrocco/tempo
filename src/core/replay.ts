@@ -150,7 +150,7 @@ export async function replay(
   ctx: WorkflowContext,
   workflowFn: WorkflowFn,
 ): Promise<WorkflowContext> {
-  const wf = als.run(ctx, () => workflowFn(...ctx.args));
+  const wf = als.run(ctx, () => workflowFn(ctx.props));
   // Voided deliberately: this is the observe-don't-await pattern above. Awaiting
   // it would hang every task that does not finish the workflow, which is most.
   void wf.then(

@@ -18,7 +18,7 @@
  * | --- | --- |
  * | create | `start` the scheduler workflow under a chosen id |
  * | pause / resume / trigger / update | `signal` |
- * | describe | `describeExecution` — args are the definition, carryover the status |
+ * | describe | `describeExecution` — props are the definition, carryover the status |
  * | list | `listExecutions({name})` |
  * | delete | `cancel` |
  *
@@ -177,7 +177,7 @@ export interface ScheduleView {
   scheduleId: string;
   status: ExecutionSummary['status'];
   /**
-   * The definition currently in force — the args of the run in progress, so an
+   * The definition currently in force — the props of the run in progress, so an
    * `update` is reflected here from its next rollover.
    */
   definition: ScheduleDefinition | undefined;
@@ -358,7 +358,7 @@ export function createScheduleClient(
     async create(scheduleId, definition) {
       const normalized = normalizeDefinition(scheduleId, 'create', definition);
 
-      service.start(SCHEDULER_WORKFLOW_NAME, [normalized], {
+      service.start(SCHEDULER_WORKFLOW_NAME, normalized, {
         workflowId: scheduleId,
         // **The scheduler's queue, not the target's.** These were the same value until
         // it became clear they answer different questions: this one asks where the
@@ -410,7 +410,7 @@ export function createScheduleClient(
       return {
         scheduleId,
         status: detail.status,
-        definition: detail.args[0] as ScheduleDefinition | undefined,
+        definition: detail.props as ScheduleDefinition | undefined,
         schedule: detail.carryover?.['schedule'] as ScheduleStatus | undefined,
       };
     },

@@ -117,11 +117,11 @@ describe('commands issued by the task that finishes a workflow', () => {
           type: 'startChild',
           seq: 0,
           childName: 'leaf',
-          childArgs: [],
+          childProps: undefined,
           detached: true,
           parentClosePolicy: 'abandon',
         },
-        {type: 'continueAsNew', seq: 1, args: []},
+        {type: 'continueAsNew', seq: 1, props: undefined},
       ],
     });
 
