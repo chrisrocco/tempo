@@ -55,6 +55,17 @@ export function defineSignal(name: string): SignalDef {
  * the wire as JSON — and the handler's own signature is the assertion about its
  * shape. Making `SignalDef` generic would let this be checked properly and is
  * the right long-term fix.
+ *
+ * ## A second registration silently displaces the first
+ *
+ * One handler exists per name, so this overwrites and the displaced consumer
+ * stops receiving. The symptom is a *hang* rather than an error: a workflow
+ * parked on something that will never arrive, with nothing in history saying
+ * why. `clearHandler` is how a consumer scoped to a block gives the name back.
+ *
+ * Whether this should throw instead is open. It would be consistent with
+ * `clearHandler` existing at all, and a breaking change for anyone relying on
+ * replace-in-place.
  */
 export function setHandler(
   signalDef: SignalDef,
@@ -76,19 +87,4 @@ export function setHandler(
  */
 export function clearHandler(signalDef: SignalDef): void {
   getContext().signalHandlers.delete(signalDef.name);
-}
-
-/**
- * Reserve a signal name for one consumer, failing loudly if it is already taken.
- * Only one handler exists per name, so a second registration would silently
- * replace the first and the original consumer would simply stop receiving —
- * a bug with no symptom at the point it is introduced.
- */
-export function claimSignal(signalDef: SignalDef): void {
-  if (getContext().signalHandlers.has(signalDef.name)) {
-    throw new Error(
-      `signal '${signalDef.name}' already has a consumer — a signal is consumed ` +
-        `by one handler or one stream at a time; close the existing one first`,
-    );
-  }
 }

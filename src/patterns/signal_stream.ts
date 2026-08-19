@@ -39,12 +39,13 @@
  * is a child poller relaying items to a parent parked on `for await`, and the
  * consumer reads identically whether the producer is inside the engine or not.
  *
- * ## One consumer per signal
+ * ## One consumer per signal, and nothing enforces it
  *
  * Only one handler exists per signal name, so two concurrent streams on the same
- * signal cannot both be served — `claimSignal` rejects the second rather than
- * letting it silently displace the first. Fan out inside a single consumer, or
- * consume the signal in one place and share the result through a local variable.
+ * signal cannot both be served: the second silently displaces the first, which
+ * then hangs rather than failing. See `setHandler`. Fan out inside a single
+ * consumer, or consume the signal in one place and share the result through a
+ * local variable.
  *
  * ## Two consumers with different lifetimes
  *
@@ -78,12 +79,7 @@
  */
 
 import {condition} from '../core/condition';
-import {
-  claimSignal,
-  clearHandler,
-  setHandler,
-  type SignalDef,
-} from '../core/signals';
+import {clearHandler, setHandler, type SignalDef} from '../core/signals';
 
 /** How a `signalStream` starts and how it ends. */
 export interface StreamOptions {
@@ -117,8 +113,6 @@ export function signalStream<T = unknown>(
   def: SignalDef,
   opts: StreamOptions = {},
 ): AsyncIterable<T> {
-  claimSignal(def);
-
   const queue: T[] = [];
   let ended = false;
 
@@ -163,8 +157,6 @@ export function signalStream<T = unknown>(
  * — which is the usual shape: build it, then pass it as another stream's `until`.
  */
 export function firstSignal<T = unknown>(def: SignalDef): Promise<T> {
-  claimSignal(def);
-
   let value: T | undefined;
   let received = false;
   setHandler(def, (payload: T) => {
