@@ -48,7 +48,7 @@
  * ## What is deliberately absent
  *
  * No `startServer`, no `FileHistoryStore`, no `createLocalRuntime`, no
- * `Tempo.startWorker`. Those are host concerns and they stay on `workflow-engine`.
+ * `startWorker`. Those are host concerns and they stay on `workflow-engine`.
  * A consumer that needs both — a dashboard's own server process, say — imports
  * both paths; nothing stops it, and the split costs it one extra import line.
  *

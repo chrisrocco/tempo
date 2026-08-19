@@ -80,7 +80,7 @@ function isPromiseLike(type: ts.Type, checker: ts.TypeChecker): boolean {
  * an **assignment**: `stopping ??= work()` stores the promise for someone else to
  * await, and the statement's *value* being a promise is incidental. Missing that
  * case is the checker's most likely false positive, and it fired on real code
- * (`Tempo.startWorker`'s idempotent `stop`) the first time this ran.
+ * (`startWorker`'s idempotent `stop`) the first time this ran.
  */
 function isDischarged(expression: ts.Expression): boolean {
   if (

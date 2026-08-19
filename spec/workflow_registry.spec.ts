@@ -19,7 +19,7 @@ import {
   resolveWorkflowRegistration,
   workflowNameConflicts,
 } from '../src/workflow_registry';
-import {Tempo} from '../src/tempo';
+import {startWorker} from '../src';
 import {isolateWorkflowRegistry} from './support/isolate_workflow_registry';
 
 describe('createWorkflow — the reference and the registry', () => {
@@ -74,7 +74,7 @@ describe('createWorkflow — the reference and the registry', () => {
     createWorkflow('charge', async () => 'a');
     createWorkflow('charge', async () => 'b');
 
-    expect(() => Tempo.startWorker({name: 'conflicted'})).toThrowError(
+    expect(() => startWorker({name: 'conflicted'})).toThrowError(
       /claimed by more than one createWorkflow call: charge/,
     );
   });

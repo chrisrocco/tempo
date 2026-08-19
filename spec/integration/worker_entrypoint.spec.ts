@@ -1,6 +1,6 @@
 /**
  * @fileoverview
- * `Tempo.startWorker` as a caller meets it: what it registers, which server it
+ * `startWorker` as a caller meets it: what it registers, which server it
  * connects to, and what it refuses.
  *
  * These are internals specs (per AGENTS.md's two-kinds split) — the entrypoint
