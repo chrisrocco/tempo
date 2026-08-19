@@ -27,7 +27,7 @@
  * - **`startServer`** — a server artifact. The composition used to exist only as
  *   a script in `bin/`, which left a consumer able to build a worker and with
  *   nothing to point it at.
- * - **`Tempo.startWorker`** — a worker artifact.
+ * - **`startWorker`** — a worker artifact.
  * - **`createRemoteClient` + `createRemoteService`** — a client. The client was
  *   already exported and the service to construct it from was not, so the one
  *   supported way to reach a running server ran through a deep import.
@@ -56,7 +56,6 @@ export type {ExecutionRecord, HistoryStore} from './server';
 export {startServer, type Server, type StartServerOptions} from './server_main';
 export {
   DEFAULT_SERVER_URL,
-  Tempo,
   startWorker,
   type StartWorkerOptions,
   type Worker,

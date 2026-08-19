@@ -4,7 +4,7 @@
  *
  * ```ts
  * import {scheduleWorkflows} from 'workflow-engine/schedule/worker';
- * Tempo.startWorker({name: 'orders', workflows: {...myWorkflows, ...scheduleWorkflows}});
+ * startWorker({name: 'orders', workflows: {...myWorkflows, ...scheduleWorkflows}});
  * ```
  *
  * The activities come along without being named, because `scheduler.workflow.ts` declares

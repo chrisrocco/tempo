@@ -18,7 +18,7 @@
  * Everything is together here for readability.
  */
 
-import {Tempo} from '../src';
+import {startWorker} from '../src';
 import {proxyActivities} from '../src/workflow';
 
 // ── activities — the only place I/O is allowed ─────────────────────────────
@@ -45,7 +45,7 @@ export async function greeter({name}: {name: string}): Promise<string> {
 const workflows = {greeter};
 
 // ── the entrypoint — this file is the build target ─────────────────────────
-Tempo.startWorker({
+startWorker({
   name: 'greeter',
   activities,
   workflows,

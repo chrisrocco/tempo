@@ -30,7 +30,7 @@
  */
 
 import type {ScheduleBounds, ScheduleSpec} from '../protocol';
-import {nextFireAfter} from './next_fire';
+import {lookbackFloorMs, nextFireAfter} from './next_fire';
 
 /** What a scheduler needs in order to sleep until its next fire. */
 export interface NextFire {
@@ -92,9 +92,10 @@ export function nextFire(
   // three nights runs once, now, and is then back on schedule. That is the right
   // default for automation and the wrong one for accounting, which is what backfill
   // over an explicit range is for (#69) — a deliberate request rather than an accident
-  // of downtime.
+  // of downtime. "One period" is `lookbackFloorMs`'s to define, because a calendar
+  // spec has no fixed period the way an interval does — see its comment.
   const from =
-    afterMs === undefined ? now : Math.max(afterMs, now - spec.everyMs);
+    afterMs === undefined ? now : Math.max(afterMs, lookbackFloorMs(spec, now));
 
   const nominalTimeMs = nextFireAfter(spec, from, bounds);
   if (nominalTimeMs === undefined) return {exhausted: true};

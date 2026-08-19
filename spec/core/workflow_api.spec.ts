@@ -84,6 +84,25 @@ describe('core primitives — command payloads', () => {
   });
 
   /**
+   * A duration string is parsed before the command is minted, so the wire and
+   * history carry only the number — a replay of this command is
+   * indistinguishable from a replay of `sleep(1_800_000)`.
+   */
+  it('parses a duration string into the same numeric timer command', () => {
+    const ctx = createContext([], []);
+
+    als.run(ctx, () => {
+      void sleep('30 minutes');
+    });
+
+    expect(ctx.commands[0]).toEqual({
+      type: 'startTimer',
+      ms: 1_800_000,
+      seq: 0,
+    });
+  });
+
+  /**
    * `createActivityProxy` is a typed façade over `runActivity`. At runtime it is a
    * thin forwarder: the property name becomes the activity name, and the options
    * it was built with ride along on every command.

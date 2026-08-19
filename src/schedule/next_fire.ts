@@ -15,27 +15,62 @@
  *   is the only line here on the I/O side of the determinism boundary, and keeping it
  *   to one line is what makes the rest of this file safe to reason about.
  *
+ * ## Two spec types, one seam each
+ *
+ * This file dispatches on `spec.type` and owns the interval arithmetic itself;
+ * everything a calendar needs — wall clocks, timezones, DST policy — is the
+ * `walltime/` library's, reached only through the seam documented at the import
+ * below, behind the same three questions every spec type must answer:
+ * the next boundary strictly after an instant, the latest boundary at or before
+ * one (`lookbackFloorMs`, the catch-up clamp), and what is wrong with the spec.
+ * A third spec type is those three functions and a union member, nothing more.
+ *
  * ## What it does not do yet
  *
- * No calendar specs, no timezones, no jitter, no backfill over a range. Interval only
- * (issue #69). Jitter in particular must be **seeded** when it arrives — Temporal
- * seeds from the schedule id precisely so the value survives a replay — so it will
- * take the seed as an argument like everything else here.
+ * No cron-string sugar, no jitter, no backfill over a range (issue #69). Jitter in
+ * particular must be **seeded** when it arrives — Temporal seeds from the schedule
+ * id precisely so the value survives a replay — so it will take the seed as an
+ * argument like everything else here.
  */
 
-import type {ScheduleBounds, ScheduleSpec} from '../protocol';
+import type {IntervalSpec, ScheduleBounds, ScheduleSpec} from '../protocol';
+// The one seam between the engine and the `walltime/` library (see its
+// index.ts): a `CalendarSpec` minus its `type` tag *is* a `WallClockRule`, and
+// the compiler checks that structural claim at every call below — if the
+// library's rule shape ever drifts from the protocol's spec shape, these lines
+// stop compiling rather than quietly reinterpreting a field. Swapping the
+// library out, or deleting calendar support, happens here and in the union
+// member, nowhere else.
+//
+// Calling it from this file is also what makes the library's platform-read
+// timezone data safe: everything here runs inside the `nextFire` activity,
+// whose answer is recorded in history, so replay reads the decision rather
+// than re-deriving it against newer tzdata.
+import {
+  nextOccurrenceAfter,
+  previousOccurrenceAtOrBefore,
+  wallClockRuleProblems,
+} from '../walltime';
+
+/** Exhaustiveness backstop for `spec.type` switches — see AGENTS.md. */
+function assertNever(spec: never): never {
+  throw new Error(`unknown schedule spec: ${JSON.stringify(spec)}`);
+}
 
 /**
  * The next boundary strictly after `afterMs`, or `undefined` when the schedule is
  * exhausted.
  *
  * **Strictly after**, which is the property the scheduler loop depends on. Having
- * fired at boundary `T`, it asks again with `T` — and must be told `T + everyMs`. An
- * inclusive answer would hand back `T`, and the loop would fire the same nominal time
- * forever without ever advancing.
+ * fired at boundary `T`, it asks again with `T` — and must be told the boundary
+ * after `T`. An inclusive answer would hand back `T`, and the loop would fire the
+ * same nominal time forever without ever advancing.
  *
- * `undefined` means *there is no next fire ever*, not "not yet": it is how a scheduler
- * learns it may complete rather than sleep. Only `notAfterMs` produces it.
+ * `undefined` means *there is no next fire ever*, not "not yet": it is how a
+ * scheduler learns it may complete rather than sleep. `notAfterMs` produces it,
+ * and so does a calendar spec matching no day within its nine-year search
+ * horizon — validation rejects the statically impossible ones, and the horizon
+ * turns whatever slips past into a completed schedule rather than a spin.
  */
 export function nextFireAfter(
   spec: ScheduleSpec,
@@ -53,10 +88,53 @@ export function nextFireAfter(
   // the search stays exclusive.
   const from = Math.max(afterMs, (bounds.notBeforeMs ?? -Infinity) - 1);
 
-  const next = nextIntervalBoundaryAfter(spec, from);
+  const next = nextBoundaryAfter(spec, from);
+  if (next === undefined) return undefined;
   if (bounds.notAfterMs !== undefined && next >= bounds.notAfterMs)
     return undefined;
   return next;
+}
+
+function nextBoundaryAfter(
+  spec: ScheduleSpec,
+  afterMs: number,
+): number | undefined {
+  switch (spec.type) {
+    case 'interval':
+      return nextIntervalBoundaryAfter(spec, afterMs);
+    case 'calendar':
+      return nextOccurrenceAfter(spec, afterMs);
+    default:
+      return assertNever(spec);
+  }
+}
+
+/**
+ * The floor of the catch-up window: how far back a scheduler resuming at `nowMs`
+ * may reach for a missed boundary — the policy `nextFire` (the activity) states
+ * as "never look back further than one period", generalized to spec types that
+ * have no fixed period.
+ *
+ * For both types the meaning is the same: `nextFireAfter` asked from this floor
+ * yields the most recent boundary at or before `nowMs` if there is one, so an
+ * outage's backlog collapses to exactly one fire. An interval names it by
+ * arithmetic; a calendar has to go and find it. A calendar with no boundary in
+ * the whole lookback horizon floors at `nowMs` itself — nothing recent was
+ * missed, so the search may go straight to the future.
+ */
+export function lookbackFloorMs(spec: ScheduleSpec, nowMs: number): number {
+  switch (spec.type) {
+    case 'interval':
+      return nowMs - spec.everyMs;
+    case 'calendar': {
+      const previous = previousOccurrenceAtOrBefore(spec, nowMs);
+      // `- 1` for the same reason `notBeforeMs` gets one above: the boundary
+      // itself must stay reachable by a strictly-after search.
+      return previous === undefined ? nowMs : previous - 1;
+    }
+    default:
+      return assertNever(spec);
+  }
 }
 
 /**
@@ -68,7 +146,7 @@ export function nextFireAfter(
  * the number line into periods the same way on both sides of zero.
  */
 function nextIntervalBoundaryAfter(
-  spec: ScheduleSpec,
+  spec: IntervalSpec,
   afterMs: number,
 ): number {
   const {everyMs} = spec;
@@ -90,20 +168,7 @@ export function scheduleSpecProblems(
   spec: ScheduleSpec,
   bounds: ScheduleBounds = {},
 ): string[] {
-  const problems: string[] = [];
-  const {everyMs} = spec;
-  const offsetMs = spec.offsetMs ?? 0;
-
-  if (!Number.isSafeInteger(everyMs) || everyMs <= 0)
-    problems.push(`everyMs must be a positive integer, got ${everyMs}`);
-  if (!Number.isSafeInteger(offsetMs) || offsetMs < 0)
-    problems.push(`offsetMs must be a non-negative integer, got ${offsetMs}`);
-  // Checked only when the period is itself valid, so a bad `everyMs` reports once
-  // rather than dragging the offset into a complaint that is really about it.
-  else if (Number.isSafeInteger(everyMs) && everyMs > 0 && offsetMs >= everyMs)
-    problems.push(
-      `offsetMs must be less than everyMs (${offsetMs} >= ${everyMs}) — an offset of a whole period or more is a units slip, not a schedule`,
-    );
+  const problems = specProblems(spec);
 
   for (const [name, value] of [
     ['notBeforeMs', bounds.notBeforeMs],
@@ -120,6 +185,36 @@ export function scheduleSpecProblems(
   )
     problems.push(
       `notAfterMs must be after notBeforeMs (${notAfterMs} <= ${notBeforeMs}) — this schedule can never fire`,
+    );
+
+  return problems;
+}
+
+function specProblems(spec: ScheduleSpec): string[] {
+  switch (spec.type) {
+    case 'interval':
+      return intervalSpecProblems(spec);
+    case 'calendar':
+      return wallClockRuleProblems(spec);
+    default:
+      return assertNever(spec);
+  }
+}
+
+function intervalSpecProblems(spec: IntervalSpec): string[] {
+  const problems: string[] = [];
+  const {everyMs} = spec;
+  const offsetMs = spec.offsetMs ?? 0;
+
+  if (!Number.isSafeInteger(everyMs) || everyMs <= 0)
+    problems.push(`everyMs must be a positive integer, got ${everyMs}`);
+  if (!Number.isSafeInteger(offsetMs) || offsetMs < 0)
+    problems.push(`offsetMs must be a non-negative integer, got ${offsetMs}`);
+  // Checked only when the period is itself valid, so a bad `everyMs` reports once
+  // rather than dragging the offset into a complaint that is really about it.
+  else if (Number.isSafeInteger(everyMs) && everyMs > 0 && offsetMs >= everyMs)
+    problems.push(
+      `offsetMs must be less than everyMs (${offsetMs} >= ${everyMs}) — an offset of a whole period or more is a units slip, not a schedule`,
     );
 
   return problems;

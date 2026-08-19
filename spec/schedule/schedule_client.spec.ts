@@ -104,6 +104,97 @@ describe('ScheduleClient', () => {
     expect(await client.list()).toEqual([]);
   });
 
+  it('accepts a duration string for the period and fires on it', async () => {
+    const ran: string[] = [];
+    const {client} = harness(ran);
+
+    await client.create('sc-15', {
+      spec: {type: 'interval', every: '40 ms'},
+      target: {name: 'target'},
+    });
+    await wait(300);
+
+    expect(ran.length).toBeGreaterThan(1);
+  });
+
+  /**
+   * The sugar exists only at the create/update seam: what is stored — and what
+   * describe therefore reports — is the wire form in milliseconds, so nothing
+   * durable ever carries a string two parsers could disagree on.
+   */
+  it('stores duration sugar normalized to milliseconds', async () => {
+    const {client} = harness([]);
+
+    await client.create('sc-16', {
+      spec: {type: 'interval', every: '1 hour', offset: '15 min'},
+      target: {name: 'target'},
+    });
+    await wait(120);
+
+    const view = await client.describe('sc-16');
+    expect(view?.definition?.spec).toEqual({
+      type: 'interval',
+      everyMs: 3_600_000,
+      offsetMs: 900_000,
+    });
+  });
+
+  it('rejects both spellings of the period at once', async () => {
+    const {client} = harness([]);
+
+    await expectAsync(
+      client.create('sc-17', {
+        spec: {type: 'interval', every: '1 hour', everyMs: 60_000},
+        target: {name: 'target'},
+      }),
+    ).toBeRejectedWithError(/cannot create schedule "sc-17".*not both/);
+    expect(await client.list()).toEqual([]);
+  });
+
+  it('rejects a bad calendar spec the same way as a bad interval', async () => {
+    const {client} = harness([]);
+
+    await expectAsync(
+      client.create('sc-18', {
+        spec: {type: 'calendar', hour: 25},
+        target: {name: 'target'},
+      }),
+    ).toBeRejectedWithError(/cannot create schedule "sc-18".*hour/);
+  });
+
+  it('creates a calendar schedule and describes it back', async () => {
+    const {client} = harness([]);
+
+    await client.create('sc-19', {
+      spec: {type: 'calendar', hour: 9, dayOfWeek: [1, 2, 3, 4, 5]},
+      target: {name: 'target'},
+    });
+    await wait(120);
+
+    const view = await client.describe('sc-19');
+    expect(view?.status).toBe('running');
+    expect(view?.definition?.spec).toEqual({
+      type: 'calendar',
+      hour: 9,
+      dayOfWeek: [1, 2, 3, 4, 5],
+    });
+  });
+
+  // The alternative is a signal that reaches the scheduler and rolls over into
+  // arguments its own activity rejects — failing the schedule, not the caller.
+  it('refuses a bad update before anything is sent', async () => {
+    const {client} = harness([]);
+    await client.create('sc-20', hourly);
+    await wait(120);
+
+    expect(() =>
+      client.update('sc-20', {
+        spec: {type: 'interval', everyMs: 0},
+        target: {name: 'target'},
+      }),
+    ).toThrowError(/cannot update schedule "sc-20".*positive integer/);
+  });
+
   it('describes the definition and the status separately', async () => {
     const ran: string[] = [];
     const {client} = harness(ran);

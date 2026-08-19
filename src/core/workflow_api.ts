@@ -25,6 +25,7 @@ import {
   type ExecutionParentView,
   type ParentClosePolicy,
 } from '../protocol';
+import {durationToMs, type Duration} from '../walltime';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
 import type {SignalDef} from './signals';
@@ -82,8 +83,17 @@ export function runActivity<T = unknown>(
   return scheduleActivity(name, {}, args) as Promise<T>;
 }
 
-export function sleep(ms: number): Promise<void> {
-  return scheduleCommand({type: 'startTimer', ms}) as Promise<void>;
+/**
+ * A durable timer: milliseconds, or a duration string — `sleep('30 minutes')`.
+ * Parsed here, before the command is minted, so the wire and history carry only
+ * the number; the parse is a pure function of the source text, which is what
+ * makes the string form replay-safe.
+ */
+export function sleep(duration: Duration): Promise<void> {
+  return scheduleCommand({
+    type: 'startTimer',
+    ms: durationToMs(duration),
+  }) as Promise<void>;
 }
 
 /** How a child is started. Both child primitives take the same shape. */

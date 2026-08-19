@@ -9,6 +9,33 @@
  * enforced rather than merely documented. If you find yourself wanting to add a
  * non-deterministic capability here, it belongs on the runtime/host side instead.
  *
+ * ## `Tempo` is this module, namespace-imported
+ *
+ * Workflow code reads better with one prefix, and this is the module to put it
+ * on:
+ *
+ * ```ts
+ * import * as Tempo from 'workflow-engine/workflow';
+ *
+ * const charge = Tempo.createWorkflow('charge', async (id: string) => {
+ *   await Tempo.sleep(1000);
+ *   return acts.capture(id);
+ * });
+ * ```
+ *
+ * A namespace import rather than an exported `Tempo` object, for two reasons. It
+ * is the only form the boundary checker accepts without being taught a second
+ * path — the rule permits exactly one runtime import in a workflow module, and
+ * it is this one. And an object would restate every export a second time, so the
+ * next author-facing primitive would have to be added twice or silently miss the
+ * namespace.
+ *
+ * **`startWorker` is deliberately not reachable this way.** It reads `argv`,
+ * calls `os.hostname()` and opens sockets, so a workflow module importing it
+ * would drag the worker runtime across the very line this file exists to hold.
+ * It is a plain import in the worker artifact, which is a separate one-line
+ * file: `import {startWorker} from 'workflow-engine'`.
+ *
  * ## The boundary, and why it exists
  *
  * Durability is achieved by **replay**: to recover a workflow whose in-memory
@@ -59,8 +86,11 @@
  */
 
 import {registerActivityImpls} from './activity_registry';
+import {
+  normalizeActivityOptions,
+  type ActivityOptionsInput,
+} from './core/activity_options_input';
 import {createActivityProxy, type ActivityProxy} from './core/workflow_api';
-import type {ActivityOptions} from './protocol';
 
 export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
 export {condition} from './core/condition';
@@ -117,6 +147,11 @@ export type {
   WorkflowPropsSchema,
   JsonSchema,
 } from './protocol';
+export type {
+  ActivityOptionsInput,
+  RetryPolicyInput,
+} from './core/activity_options_input';
+export type {Duration} from './walltime';
 
 export type {ActivityProxy};
 
@@ -180,8 +215,11 @@ export type {ActivityProxy};
  */
 export function proxyActivities<A extends object>(
   impls: A,
-  options: ActivityOptions = {},
+  options: ActivityOptionsInput = {},
 ): ActivityProxy<A> {
   registerActivityImpls(impls);
-  return createActivityProxy<A>(options);
+  // Normalized here, once, at declaration: durations become the wire's
+  // milliseconds before the proxy exists, so a bad string fails at module load —
+  // loudly, in the worker that would have run this — never during a replay.
+  return createActivityProxy<A>(normalizeActivityOptions(options));
 }

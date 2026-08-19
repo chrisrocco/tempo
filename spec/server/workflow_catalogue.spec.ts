@@ -25,7 +25,7 @@ import {reportHash} from '../../src/worker';
 
 /**
  * Report `workflows` and poll as that worker would — the two halves of the
- * protocol, the way `Tempo.startWorker` performs them. The poll is what makes
+ * protocol, the way `startWorker` performs them. The poll is what makes
  * the report *current*: the catalogue only counts a report while the worker
  * behind it vouches for it with the digest on its polls.
  */
