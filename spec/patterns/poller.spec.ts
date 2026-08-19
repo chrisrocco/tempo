@@ -271,7 +271,7 @@ describe('pollForever', () => {
 
     const rec = await store.get('mon');
     expect(rec!.runId).toBeGreaterThan(1); // several rollovers, not just one
-    expect(rec!.args).toEqual([{label: 'hotlist'}]); // still monitoring what it was told to
+    expect(rec!.props).toEqual({label: 'hotlist'}); // still monitoring what it was told to
     rt.shutdown();
   });
 
@@ -297,7 +297,7 @@ describe('pollForever', () => {
 
     const rec = await store.get('mon');
     expect(rec!.runId).toBeGreaterThan(0); // guard: only meaningful after one
-    expect(rec!.args).toEqual([{label: 'hotlist'}]);
+    expect(rec!.props).toEqual({label: 'hotlist'});
     rt.shutdown();
   });
 

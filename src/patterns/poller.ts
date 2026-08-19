@@ -161,7 +161,7 @@ function changed(before: unknown, after: unknown): boolean {
 function carryProps(options: {props?: unknown}): unknown {
   // `workflowInfo().args` is still the positional list the wire carries, and a
   // workflow now takes one props object, so the run's own props is its head.
-  return options.props ?? workflowInfo().args[0];
+  return options.props ?? workflowInfo().props;
 }
 
 /**

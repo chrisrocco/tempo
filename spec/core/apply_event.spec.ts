@@ -221,7 +221,7 @@ describe('core applyEvent — marker validation', () => {
       type: 'startChild',
       seq: 0,
       childName: 'c',
-      childArgs: [],
+      childProps: undefined,
       detached: false,
       parentClosePolicy: 'abandon',
     });
@@ -248,7 +248,7 @@ describe('core applyEvent — marker validation', () => {
       type: 'startChild',
       seq: 0,
       childName: 'planner',
-      childArgs: [],
+      childProps: undefined,
       detached: false,
       parentClosePolicy: 'abandon',
       workflowId: 'plan-for-event-42',
@@ -343,7 +343,7 @@ describe('core applyEvent — marker validation', () => {
       type: 'startChild',
       seq: 0,
       childName: 'planner',
-      childArgs: [],
+      childProps: undefined,
       detached: false,
       parentClosePolicy: 'abandon',
     });

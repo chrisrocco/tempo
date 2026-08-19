@@ -37,11 +37,39 @@ import type {
 } from '../ports/history_store';
 import {VersionConflictError, trailingIdSuffix} from '../ports/history_store';
 
+/**
+ * Refuse a data directory written before workflows took one props object.
+ *
+ * A workflow's arguments used to persist as `args: unknown[]`; they now persist
+ * as `props: unknown`. Nothing translates between the two, and that is the
+ * decision — this was a prototype, and a converter would be a permanent tax for
+ * a format nobody had deployed.
+ *
+ * What is **not** acceptable is reading such a dir anyway. Every field is
+ * optional-shaped after `JSON.parse`, so an old `meta.json` loads happily with
+ * `props: undefined`, and every execution resumes running against nothing: a
+ * workflow that charged an order silently charges `undefined`. Silent is worse
+ * than broken, so a record carrying the old key stops the boot and says what to
+ * do about it.
+ *
+ * Detected by the old key rather than by a version stamp because no stamp was
+ * ever written — the only evidence a dir predates this is the shape of what is
+ * in it. New dirs are written with `props` and never match.
+ */
+function assertReadableFormat(meta: PersistedMeta, dir: string): void {
+  if (!('args' in meta)) return;
+  throw new Error(
+    `${dir} was written by an older format: an execution's arguments are stored ` +
+      `as \`props\` (one object) and this record still has \`args\` (a list). ` +
+      `There is no migration — delete the data directory, or point --data-dir at a new one.`,
+  );
+}
+
 interface PersistedMeta {
   workflowId: string;
   runId: number;
   name: string;
-  args: unknown[];
+  props: unknown;
   /** Absent in data dirs written before routing existed; reads as the default. */
   taskQueue?: string;
   status: ExecutionStatus;
@@ -158,7 +186,7 @@ export class FileHistoryStore implements HistoryStore {
   async create(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string = DEFAULT_TASK_QUEUE,
     parent?: ExecutionParent,
   ): Promise<void> {
@@ -169,7 +197,7 @@ export class FileHistoryStore implements HistoryStore {
       workflowId,
       runId: 0,
       name,
-      args,
+      props,
       taskQueue,
       createdAt: Date.now(),
       history: [],
@@ -363,12 +391,12 @@ export class FileHistoryStore implements HistoryStore {
 
   async resetForContinueAsNew(
     workflowId: string,
-    args: unknown[],
+    props: unknown,
   ): Promise<void> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.history = [];
-    rec.args = args;
+    rec.props = props;
     rec.version = 0;
     rec.runId += 1;
     await this.enqueue(workflowId, async () => {
@@ -412,7 +440,7 @@ export class FileHistoryStore implements HistoryStore {
       workflowId: rec.workflowId,
       runId: rec.runId,
       name: rec.name,
-      args: rec.args,
+      props: rec.props,
       taskQueue: rec.taskQueue,
       status: rec.status,
       createdAt: rec.createdAt,
@@ -472,6 +500,7 @@ export class FileHistoryStore implements HistoryStore {
         .catch(() => null);
       if (metaRaw === null) continue;
       const meta = JSON.parse(metaRaw) as PersistedMeta;
+      assertReadableFormat(meta, d);
       const eventsRaw = await fs
         .readFile(path.join(d, 'events.jsonl'), 'utf8')
         .catch(() => '');
@@ -480,7 +509,7 @@ export class FileHistoryStore implements HistoryStore {
         workflowId: meta.workflowId,
         runId: meta.runId,
         name: meta.name,
-        args: meta.args,
+        props: meta.props,
         taskQueue: meta.taskQueue ?? DEFAULT_TASK_QUEUE,
         // A data dir written before creation time was recorded still has to sort
         // somewhere, and the first event's timestamp is the closest true answer

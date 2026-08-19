@@ -29,7 +29,7 @@ export type RpcRequest =
   | {
       method: 'start';
       name: string;
-      args: unknown[];
+      props: unknown;
       opts: StartWorkflowOptions;
     }
   | {

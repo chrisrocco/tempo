@@ -137,7 +137,7 @@ describe('distributed — real server process over RPC', () => {
       await waitForLine(act, /WORKER_READY greeter activity/);
 
       const service = remote(url);
-      const {workflowId} = service.start('greeter', ['world']);
+      const {workflowId} = service.start('greeter', {name: 'world'});
       await expectAsync(service.getResult(workflowId)).toBeResolvedTo(
         'Hello, world!',
       );
@@ -157,7 +157,7 @@ describe('distributed — real server process over RPC', () => {
       await waitForLine(worker, /WORKER_READY greeter workflow,activity/);
 
       const service = remote(url);
-      const {workflowId} = service.start('greeter', ['world']);
+      const {workflowId} = service.start('greeter', {name: 'world'});
       await expectAsync(service.getResult(workflowId)).toBeResolvedTo(
         'Hello, world!',
       );

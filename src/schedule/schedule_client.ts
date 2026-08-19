@@ -269,7 +269,7 @@ export function createScheduleClient(
         },
       };
 
-      service.start(SCHEDULER_WORKFLOW_NAME, [normalized], {
+      service.start(SCHEDULER_WORKFLOW_NAME, normalized, {
         workflowId: scheduleId,
         // **The scheduler's queue, not the target's.** These were the same value until
         // it became clear they answer different questions: this one asks where the
@@ -321,7 +321,7 @@ export function createScheduleClient(
       return {
         scheduleId,
         status: detail.status,
-        definition: detail.args[0] as ScheduleDefinition | undefined,
+        definition: detail.props as ScheduleDefinition | undefined,
         schedule: detail.carryover?.['schedule'] as ScheduleStatus | undefined,
       };
     },

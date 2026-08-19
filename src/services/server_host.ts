@@ -92,7 +92,7 @@ export interface ServerHost {
    */
   start(
     name: string,
-    args?: unknown[],
+    props?: unknown,
     opts?: StartWorkflowOptions,
   ): Promise<StartResult>;
   signal(
@@ -299,7 +299,7 @@ export function createServerHost(
   async function createAndEnqueue(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string,
     parent?: ExecutionParent,
   ): Promise<boolean> {
@@ -309,7 +309,7 @@ export function createServerHost(
         name,
         sameRequest:
           existing.name === name &&
-          JSON.stringify(existing.args) === JSON.stringify(args),
+          JSON.stringify(existing.props) === JSON.stringify(props),
       });
       return false;
     };
@@ -318,7 +318,7 @@ export function createServerHost(
     if (existing) return claimed(existing);
 
     try {
-      await historyStore.create(workflowId, name, args, taskQueue, parent);
+      await historyStore.create(workflowId, name, props, taskQueue, parent);
     } catch (error: unknown) {
       const raced = await historyStore.get(workflowId);
       if (!raced) throw error;
@@ -356,12 +356,12 @@ export function createServerHost(
   }
 
   return {
-    async start(name, args = [], opts = {}) {
+    async start(name, props, opts = {}) {
       const workflowId = opts.workflowId ?? `${name}-${++counter}`;
       const created = await createAndEnqueue(
         workflowId,
         name,
-        args,
+        props,
         opts.taskQueue ?? DEFAULT_TASK_QUEUE,
       );
       return {workflowId, created};

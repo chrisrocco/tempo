@@ -136,11 +136,15 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
     summary:
       'One completed and one failed execution, so terminal states are on screen.',
     async seed(context) {
-      context.service.start(SCENARIO_WORKFLOWS.completes, [{value: 'hello'}], {
-        workflowId: SCENARIO_IDS.completed,
-        taskQueue: context.queue,
-      });
-      context.service.start(SCENARIO_WORKFLOWS.fails, [], {
+      context.service.start(
+        SCENARIO_WORKFLOWS.completes,
+        {value: 'hello'},
+        {
+          workflowId: SCENARIO_IDS.completed,
+          taskQueue: context.queue,
+        },
+      );
+      context.service.start(SCENARIO_WORKFLOWS.fails, undefined, {
         workflowId: SCENARIO_IDS.failed,
         taskQueue: context.queue,
       });
@@ -164,7 +168,7 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
     summary:
       'An execution parked on a condition, waiting for a `release` signal that never comes.',
     async seed(context) {
-      context.service.start(SCENARIO_WORKFLOWS.parks, [], {
+      context.service.start(SCENARIO_WORKFLOWS.parks, undefined, {
         workflowId: SCENARIO_IDS.parked,
         taskQueue: context.queue,
       });
@@ -186,7 +190,7 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
     summary:
       'An execution between activity attempts, backing off a minute at a time.',
     async seed(context) {
-      context.service.start(SCENARIO_WORKFLOWS.retries, [], {
+      context.service.start(SCENARIO_WORKFLOWS.retries, undefined, {
         workflowId: SCENARIO_IDS.retrying,
         taskQueue: context.queue,
       });
@@ -210,7 +214,7 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
       // worker polls, cannot run it, and fails the task. That is what separates
       // this from `unserved-queue`, where nothing ever picks the task up and
       // `taskFailures` stays at zero.
-      context.service.start(SCENARIO_WORKFLOWS.undeployed, [], {
+      context.service.start(SCENARIO_WORKFLOWS.undeployed, undefined, {
         workflowId: SCENARIO_IDS.stuck,
         taskQueue: context.queue,
       });
@@ -229,10 +233,14 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
     summary:
       'An execution routed to a queue no worker polls — the most common cause of "it is stuck".',
     async seed(context) {
-      context.service.start(SCENARIO_WORKFLOWS.completes, [{value: 'never'}], {
-        workflowId: SCENARIO_IDS.unserved,
-        taskQueue: context.unservedQueue,
-      });
+      context.service.start(
+        SCENARIO_WORKFLOWS.completes,
+        {value: 'never'},
+        {
+          workflowId: SCENARIO_IDS.unserved,
+          taskQueue: context.unservedQueue,
+        },
+      );
 
       // It will never progress, so the only thing to wait for is that the server
       // has recorded it at all. That *is* the fixture: a `running` execution with

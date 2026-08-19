@@ -16,7 +16,7 @@
  *   --role=ROLE    overrides `role` — unset runs every role it can
  *   --activity-concurrency=N  how many activities run at once (default 1)
  *   --local=NAME   run that workflow once with no server, print, exit
- *   --args=JSON    its arguments, as a JSON array (with `--local` only)
+ *   --props=JSON   its props, as a JSON object (with `--local` only)
  *
  * Running the *same* binary twice with a different `--role` is how the two worker
  * tiers are deployed: workflow workers replay workflow code, activity workers run
@@ -43,7 +43,7 @@
  *
  * ## `--local=NAME` runs one workflow and exits
  *
- *   node worker.js --local=greeter --args='["world"]'
+ *   node worker.js --local=greeter --props='{"name":"world"}'
  *
  * No server, no port, no data directory, no poll loops: `createLocalRuntime()`
  * gets the same registries `startWorker` was handed, runs the named workflow to
@@ -403,10 +403,10 @@ function resolveRoles(
   return roles;
 }
 
-/** What `--local` asked for: one workflow, and the arguments to run it with. */
+/** What `--local` asked for: one workflow, and the props to run it with. */
 export interface LocalRun {
   workflow: string;
-  args: readonly unknown[];
+  props: unknown;
 }
 
 /**
@@ -421,10 +421,11 @@ export interface LocalRun {
  * - **`--role` with `--local`** — a local run has one in-process pair serving
  *   every queue, so a role could only narrow it into parking the execution on
  *   work nothing will claim.
- * - **`--args` that is not a JSON array** — the arguments are spread into the
- *   workflow's parameters, so a bare string or an object is a workflow called
- *   with one argument it did not expect, failing somewhere inside rather than
- *   here.
+ * - **`--props` that is not a JSON object** — a workflow takes one props object,
+ *   so an array or a bare string is a workflow called with something it cannot
+ *   destructure, failing somewhere inside rather than here. An array is worth
+ *   naming separately: it is what this flag used to take, so it is the shape a
+ *   command line written against the old spelling still carries.
  *
  * The options object is deliberately not consulted: `--local` says this run is
  * not a deployment, and `serverUrl`/`role` in code are the deployment's defaults.
@@ -442,20 +443,24 @@ export function resolveLocalRun(argv: readonly string[]): LocalRun | undefined {
         `--${contradicted} cannot be combined with --local: a local run has no server and runs every role in one process`,
       );
 
-  const raw = flagValue(argv, WORKER_FLAG.args);
-  if (raw === undefined) return {workflow, args: []};
+  const raw = flagValue(argv, WORKER_FLAG.props);
+  if (raw === undefined) return {workflow, props: undefined};
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error(`--args must be JSON (got ${raw})`);
+    throw new Error(`--props must be JSON (got ${raw})`);
   }
-  if (!Array.isArray(parsed))
+  if (Array.isArray(parsed))
     throw new Error(
-      `--args must be a JSON array of the workflow's arguments, as --args='["world"]' (got ${raw})`,
+      `--props must be a JSON object, not an array: a workflow takes one props object, as --props='{"name":"world"}' (got ${raw})`,
     );
-  return {workflow, args: parsed};
+  if (typeof parsed !== 'object' || parsed === null)
+    throw new Error(
+      `--props must be a JSON object, as --props='{"name":"world"}' (got ${raw})`,
+    );
+  return {workflow, props: parsed};
 }
 
 /**
@@ -484,7 +489,7 @@ export async function runLocally(
   try {
     // `start` throws "no workflow registered as …" for a name the artifact does
     // not have, which is the smoke test this whole flag exists to make possible.
-    return await runtime.start(run.workflow, [...run.args]).result();
+    return await runtime.start(run.workflow, run.props).result();
   } finally {
     runtime.shutdown();
   }

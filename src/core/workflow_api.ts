@@ -157,7 +157,7 @@ export function executeChild<T = unknown>(
   return scheduleCommand({
     type: 'startChild',
     childName: name,
-    childArgs: options.props === undefined ? [] : [options.props],
+    childProps: options.props,
     detached: false,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
@@ -194,7 +194,7 @@ export function startChild(
   issue(ctx, {
     type: 'startChild',
     childName: name,
-    childArgs: options.props === undefined ? [] : [options.props],
+    childProps: options.props,
     detached: true,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
@@ -341,7 +341,7 @@ export function startWorkflow(
     type: 'startWorkflow',
     targetId: workflowId,
     name,
-    args: options.props === undefined ? [] : [options.props],
+    props: options.props,
     taskQueue: options.taskQueue,
     seq: ctx.seq++,
   });
@@ -568,7 +568,7 @@ export function deprecatePatch(id: string): void {
 export function continueAsNew(props?: unknown): Promise<never> {
   return scheduleCommand({
     type: 'continueAsNew',
-    args: props === undefined ? [] : [props],
+    props,
   }) as Promise<never>;
 }
 
@@ -621,7 +621,7 @@ export interface WorkflowInfo {
    * life of the run. A copy, so a caller cannot reach back through it into the
    * context.
    */
-  args: unknown[];
+  props: unknown;
   /**
    * The execution that started this one, or absent if a client did.
    *
@@ -645,7 +645,7 @@ export function workflowInfo(): WorkflowInfo {
   return {
     workflowId: ctx.workflowId,
     continueAsNewSuggested: ctx.continueAsNewSuggested,
-    args: [...ctx.args],
+    props: ctx.props,
     // Copied for the same reason `args` is: a caller must not be able to reach
     // back through the returned object and mutate the context.
     parent: ctx.parent && {...ctx.parent},

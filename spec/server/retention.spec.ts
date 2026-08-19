@@ -30,7 +30,7 @@ function record(
   return {
     runId: 0,
     name: 'wf',
-    args: [],
+    props: undefined,
     taskQueue: 'default',
     createdAt: 500,
     closedAt: 1_000,

@@ -214,10 +214,11 @@ trailing commas). Two rules need local judgement rather than literal
 application:
 
 - **`any` in rest-parameter positions is correct here and must stay.**
-  `WorkflowFn`, `ActivityFn`, and `AnyFn` take `(...args: any[])` because
-  `strictFunctionTypes` makes parameters contravariant: a real `(name: string)
-=> Promise<string>` is _not_ assignable to `(...args: unknown[]) => …`, so a
-  registry typed that way would accept nothing anyone writes. Return types
+  `ActivityFn` and `AnyFn` take `(...args: any[])`, and `WorkflowFn` takes
+  `(props?: any)`, because `strictFunctionTypes` makes parameters
+  contravariant: a real `({name}: {name: string}) => Promise<string>` is _not_
+  assignable to `(props?: unknown) => …`, so a registry typed that way would
+  accept nothing anyone writes. Return types
   carry no such constraint and stay `unknown`. Each such `any` is documented
   at its declaration — Google's rule is to justify it, not to pretend it is
   avoidable.

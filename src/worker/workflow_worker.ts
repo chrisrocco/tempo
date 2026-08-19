@@ -110,7 +110,7 @@ export function createWorkflowWorker(
       // author's behalf — see `server_core.failWorkflowTask`.
       if (!fn) throw new Error(`no workflow registered as ${name}`);
       const ctx = createContext(
-        task.args,
+        task.props,
         task.history,
         task.continueAsNewSuggested,
         task.carryover,

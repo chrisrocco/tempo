@@ -40,7 +40,7 @@ async function dispatch(
 ): Promise<unknown> {
   switch (request.method) {
     case 'start':
-      return host.start(request.name, request.args, request.opts);
+      return host.start(request.name, request.props, request.opts);
     case 'signal':
       return host.signal(
         request.workflowId,

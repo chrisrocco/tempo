@@ -107,7 +107,7 @@ rt.shutdown(); // stop background timers so the process exits
 Or run one workflow through your worker binary, with no server at all:
 
 ```bash
-tsx examples/greeter.ts --local=greeter --args='["world"]'
+tsx examples/greeter.ts --local=greeter --props='{"name":"world"}'
 # LOCAL RUN greeter greeter — one workflow, then exit. Not a deployment: …
 # "Hello, world!"
 ```
@@ -350,7 +350,7 @@ the engine:
     At most one task per execution is in flight; a wake landing mid-task
     coalesces into exactly one more. This is where the two concurrency bugs are
     prevented.
-4.  **A workflow worker polls** and gets `{name, args, history}` plus a lease —
+4.  **A workflow worker polls** and gets `{name, props, history}` plus a lease —
     [`worker/worker_loops.ts`](src/worker/worker_loops.ts). It holds no state
     between tasks, so any worker can serve any execution.
 5.  **Replay** builds a fresh context and re-runs the workflow function against

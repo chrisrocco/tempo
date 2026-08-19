@@ -35,7 +35,7 @@ the reasoning.
 | **replay**               | Re-running a workflow function against its recorded history to rebuild its in-memory state. Happens on every task, not only after a crash.                                                                                                                                                                |
 | **determinism boundary** | The rule that workflow code must produce the same commands given the same history. Enforced structurally: workflow modules may import only `src/workflow.ts`. `tools/boundaries.ts`.                                                                                                                      |
 | **carryover**            | Small state a workflow hands to its own next run, since a rollover destroys history. Written with `setCarryover`, visible in `describe`. Read-per-run: a write lands at the next rollover, not immediately. Capped at `MAX_CARRYOVER_BYTES`. `src/core/carryover.ts`.                                     |
-| **rollover**             | What `continueAsNew` does: same execution, new run, history emptied and reseeded with the carried args. Not a close — children survive it and no parent-close policy fires.                                                                                                                               |
+| **rollover**             | What `continueAsNew` does: same execution, new run, history emptied and reseeded with the carried props. Not a close — children survive it and no parent-close policy fires.                                                                                                                              |
 
 ## History
 
@@ -76,7 +76,7 @@ differences are load-bearing — `src/protocol/history_events.ts` and
 | **spec**                | When a schedule fires — currently interval-only, with boundaries aligned to the epoch.                                                                                                                                           |
 | **boundary**            | An instant the spec says to fire at. Absolute, so it cannot drift.                                                                                                                                                               |
 | **nominal time**        | The boundary a particular firing belongs to, as opposed to when it actually ran. The fired execution's id is built from it, which is what makes a repeated firing claim one execution.                                           |
-| **target**              | What a schedule starts: a workflow name, args, and the task queue its runs go to.                                                                                                                                                |
+| **target**              | What a schedule starts: a workflow name, props, and the task queue its runs go to.                                                                                                                                               |
 | **run** (of a schedule) | An execution the schedule started, named `<scheduleId>-<nominalTime>`. **Not** the same sense as **run** above — that ambiguity is unfortunate and is why this row exists. Prefer "scheduled run" where both senses are in play. |
 | **trigger**             | Firing on demand, ignoring the spec and ignoring pause. Not deduplicated: asking twice runs twice.                                                                                                                               |
 
