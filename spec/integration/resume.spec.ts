@@ -112,12 +112,12 @@ describe('crash recovery — resume from a durable store', () => {
 
   it('resumes a parent blocked on a child, rebuilding the correlation', async () => {
     const dir = await tmpDir();
-    const child = async (n: number) => {
+    const child = async ({n}: {n: number}) => {
       await sleep(30);
       return n;
     };
     const parent = async () =>
-      (await executeChild<number>('child', {args: [5]})) * 2;
+      (await executeChild<number>('child', {props: {n: 5}})) * 2;
     try {
       const store1 = await FileHistoryStore.open(dir);
       const rt1 = createLocalRuntime({historyStore: store1})

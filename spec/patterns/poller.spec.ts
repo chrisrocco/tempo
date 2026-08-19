@@ -204,7 +204,7 @@ describe('pollForever', () => {
           differ: byId((item) => item.id),
           poll: () => runActivity<Item[]>('fetch'),
           onAdded: (item) =>
-            startChild('handle', {workflowId: `c-${item.id}`, args: [item]}),
+            startChild('handle', {workflowId: `c-${item.id}`, props: item}),
         }),
       );
 
@@ -254,24 +254,24 @@ describe('pollForever', () => {
         feed.push({id: `i${n}`, seq: ++n}); // something new every cycle
         return [...feed];
       })
-      .registerWorkflow('monitor', async (label: string) =>
+      .registerWorkflow('monitor', async ({label}: {label: string}) =>
         pollForever<Item, string[], undefined>({
           everyMs: 5,
-          // no `args` — the point of the test
+          // no `props` — the point of the test
           differ: byId((item) => item.id),
           poll: () => runActivity<Item[]>('fetch'),
           onAdded: () => {},
         }),
       );
 
-    const handle = rt.start('monitor', 'hotlist', {workflowId: 'mon'});
+    const handle = rt.start('monitor', {label: 'hotlist'}, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
 
     const rec = await store.get('mon');
     expect(rec!.runId).toBeGreaterThan(1); // several rollovers, not just one
-    expect(rec!.args).toEqual(['hotlist']); // still monitoring what it was told to
+    expect(rec!.args).toEqual([{label: 'hotlist'}]); // still monitoring what it was told to
     rt.shutdown();
   });
 
@@ -280,24 +280,24 @@ describe('pollForever', () => {
     const feed: Item[] = [{id: 'a', seq: 1}];
     const rt = createLocalRuntime({historyStore: store})
       .registerActivity('fetch', () => [...feed])
-      .registerWorkflow('monitor', async (label: string) =>
+      .registerWorkflow('monitor', async ({label}: {label: string}) =>
         pollForever<Item, string[], undefined>({
           everyMs: 5,
-          args: [label],
+          props: {label},
           differ: byId((item) => item.id),
           poll: () => runActivity<Item[]>('fetch'),
           onAdded: () => {},
         }),
       );
 
-    const handle = rt.start('monitor', 'hotlist', {workflowId: 'mon'});
+    const handle = rt.start('monitor', {label: 'hotlist'}, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
 
     const rec = await store.get('mon');
     expect(rec!.runId).toBeGreaterThan(0); // guard: only meaningful after one
-    expect(rec!.args).toEqual(['hotlist']);
+    expect(rec!.args).toEqual([{label: 'hotlist'}]);
     rt.shutdown();
   });
 

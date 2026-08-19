@@ -86,7 +86,8 @@ export interface ScheduleBounds {
 export interface ScheduleTarget {
   /** Workflow type to start. */
   name: string;
-  args?: unknown[];
+  /** The one props object each firing starts it with. */
+  props?: unknown;
   /**
    * Which pool runs the work. Defaults to `DEFAULT_TASK_QUEUE` — the same default a
    * client `start` gets, so a schedule lands where an unqualified execution lands.

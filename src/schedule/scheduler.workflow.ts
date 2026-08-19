@@ -190,7 +190,7 @@ export async function scheduler(
     const ordinal = status.triggerCount + i + 1;
     const targetId = `${scheduleId}-manual-${ordinal}`;
     startWorkflow(targetId, definition.target.name, {
-      args: definition.target.args,
+      props: definition.target.props,
       taskQueue: definition.target.taskQueue,
     });
     fired.push({nominalTimeMs: ordinal, targetId, manual: true});
@@ -204,7 +204,7 @@ export async function scheduler(
     // rollover landing on the same instant — claims one execution rather than running
     // the work twice. That is the dedup, and it is at the server rather than here.
     startWorkflow(targetId, definition.target.name, {
-      args: definition.target.args,
+      props: definition.target.props,
       taskQueue: definition.target.taskQueue,
     });
     fired.push({nominalTimeMs: boundary.nominalTimeMs, targetId});

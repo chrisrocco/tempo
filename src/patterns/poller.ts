@@ -140,7 +140,7 @@ export interface PollForeverOptions<T, S, Q> {
    * workflow keeps running, the poll returns nothing or throws, and the failure
    * appears one rollover after the code that caused it.
    */
-  args?: unknown[];
+  props?: unknown;
 }
 
 /**
@@ -158,8 +158,10 @@ function changed(before: unknown, after: unknown): boolean {
  * rather than captured once, so a run that was itself started by a rollover
  * passes on what it actually received.
  */
-function carryArgs(options: {args?: unknown[]}): unknown[] {
-  return options.args ?? workflowInfo().args;
+function carryProps(options: {props?: unknown}): unknown {
+  // `workflowInfo().args` is still the positional list the wire carries, and a
+  // workflow now takes one props object, so the run's own props is its head.
+  return options.props ?? workflowInfo().args[0];
 }
 
 /**
@@ -222,9 +224,9 @@ export async function pollForever<T, S, Q>(
     // has grown enough from the polling itself to be worth shedding.
     if (changed(state, next)) {
       setCarryover(STATE_KEY, next);
-      await continueAsNew(...carryArgs(options));
+      await continueAsNew(carryProps(options));
     }
     if (workflowInfo().continueAsNewSuggested)
-      await continueAsNew(...carryArgs(options));
+      await continueAsNew(carryProps(options));
   }
 }
