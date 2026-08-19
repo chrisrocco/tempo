@@ -6,10 +6,10 @@
  * A deployable worker (`Tempo.startWorker`) runs these against a RemoteService.
  *
  * Failures are **reported and backed off**, never swallowed. A worker that cannot
- * reach its server is the single most likely deployment fault, and it used to be
- * invisible: the loop caught everything, retried on the 5ms idle interval, and
- * printed nothing — so a misconfigured worker looked healthy to its supervisor
- * while doing no work and hammering a dead endpoint.
+ * reach its server is the single most likely deployment fault, and it is
+ * otherwise invisible: a loop that caught everything, retried on the 5ms idle
+ * interval and printed nothing would leave a misconfigured worker looking
+ * healthy to its supervisor while doing no work and hammering a dead endpoint.
  */
 
 import * as os from 'node:os';

@@ -343,7 +343,7 @@ export interface ServerCore {
   /**
    * Request cancellation, cascading to **every** child this execution started.
    *
-   * Not only the fire-and-forget ones, which is what this used to say: both kinds
+   * Not only the fire-and-forget ones: both kinds
    * go into `childrenByParent`, so a blocking child is cancelled alongside a
    * detached one. That is the intended behaviour — a parent unwinding through a
    * `CancelledFailure` is not going to consume the result it was awaiting — and
@@ -564,10 +564,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    * recomputed on read — an event's time is a fact about when it happened, not
    * about when someone asked.
    *
-   * Everything funnels through here so that stays true. `appendSignal` used to
-   * call the store directly, which would have left externally injected signals
-   * as the one event kind with no time on it — the kind an operator is most
-   * likely to be looking for.
+   * Everything funnels through here so that stays true. A path that called the
+   * store directly would leave externally injected signals as the one event kind
+   * with no time on it — the kind an operator is most likely to be looking for.
    */
   function appendEvent(workflowId: string, event: HistoryEvent): Promise<void> {
     return historyStore.append(workflowId, [{...event, ts: Date.now()}]);
@@ -934,7 +933,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // Dispatch before settling, not instead of it. A task can both issue
     // commands and finish the workflow — `signalWorkflow(parent, done); return
     // result;` is one activation — and the dispositions below all return early,
-    // so a batch reaching them used to be discarded. Nothing raised: the
+    // so a batch reaching them would be discarded. Nothing raises: the
     // execution completed normally, having silently not done what its last line
     // said. Every command has this shape, and the fire-and-forget ones have it
     // worst, since they are the ones with no promise whose absence would be
@@ -1325,7 +1324,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   /**
    * Replay an execution from an earlier point in its own history.
    *
-   * The escape hatch for the case `terminate` was previously the only answer to:
+   * The escape hatch for the case `terminate` is the blunt answer to:
    * a workflow edited while it had live executions, whose replay now throws
    * nondeterminism at some seq. Truncating to before that point and re-driving
    * lets the *new* code produce the commands from there on.

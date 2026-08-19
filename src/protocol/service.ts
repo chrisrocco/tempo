@@ -438,8 +438,7 @@ export interface PendingWorkView {
  * shape. Without them a dispatched activity is a name, and an activity on its
  * fourth backoff is indistinguishable from one running for the first time —
  * both read as "waiting on: charge". That is the case an operator is most often
- * looking at when they open an execution that is not moving, and answering it
- * previously meant reading the server's logs.
+ * looking at when they open an execution that is not moving.
  */
 export interface PendingActivityView {
   seq: number;
@@ -556,31 +555,26 @@ export interface ExecutionGroup {
  * precise about why, because the obvious reading of "which activity is failing"
  * is the one this does not answer.
  *
- * ## History answers it too, now — this once said otherwise
+ * ## History answers it too
  *
- * This doc claimed that flakiness was **not derivable from history at all**, on
- * the reasoning that history keeps only an activity's final outcome and the
- * per-attempt state dies when it settles. That stopped being true when
- * `activityRetryScheduled` joined the history; see that event for the reversal
- * and the argument it displaced. Every retry round now leaves an event carrying
- * the attempt, the ceiling, the backoff deadline and the error, so an activity
- * that failed four times and succeeded on the fifth is no longer
- * indistinguishable from one that succeeded first time. Reducing those per
- * `seq` counts retries after the fact, and a timeline renders them like any
- * other event. `spec/server/activity_retry_scheduled.spec.ts` pins the
- * properties that make that reduction sound — one event per retry rather than
- * per failure, and the per-attempt error nothing else keeps.
+ * Every retry round leaves an `activityRetryScheduled` carrying the attempt, the
+ * ceiling, the backoff deadline and the error, so an activity that failed four
+ * times and succeeded on the fifth is distinguishable from one that succeeded
+ * first time. Reducing those per `seq` counts retries after the fact, and a
+ * timeline renders them like any other event.
+ * `spec/server/activity_retry_scheduled.spec.ts` pins what makes that reduction
+ * sound — one event per retry rather than per failure, and the per-attempt error
+ * nothing else keeps.
  *
- * Two things qualify that reading, and neither invents anything that did not
- * happen. A rollover empties history, so earlier runs' retries are gone. And a
- * task redelivered because its lease expired — a worker that died mid-attempt —
- * leaves no `activityRetryScheduled` and burns no budget, because nothing
- * reported a result for it; the re-run is still visible, since every *pickup*
- * appends an `activityStarted`. So the two counts answer different questions:
- * `activityRetryScheduled` per `seq` counts failures the retry policy acted on,
- * and `activityStarted` per `seq` counts times the work was actually attempted,
- * crash-redeliveries included. Neither is the wrong one — but a reader who wants
- * the second and counts the first will undercount, silently.
+ * Two things qualify it. A rollover empties history, so earlier runs' retries are
+ * gone. And a task redelivered because its lease expired — a worker that died
+ * mid-attempt — leaves no `activityRetryScheduled` and burns no budget, because
+ * nothing reported a result for it; the re-run is still visible, since every
+ * *pickup* appends an `activityStarted`. So the two counts answer different
+ * questions: `activityRetryScheduled` per `seq` counts failures the retry policy
+ * acted on, `activityStarted` per `seq` counts times the work was attempted,
+ * crash-redeliveries included. A reader who wants the second and counts the
+ * first undercounts, silently.
  *
  * ## Why this stays a live view
  *
@@ -869,10 +863,10 @@ export type QueueLiveness = Omit<
  * this repo reading `QueueWorkers` gets the verdict rather than reimplementing
  * it, and reimplementing it is how "served" quietly comes to mean two things.
  *
- * **A busy worker used to look like an absent one.** The activity loop is
- * sequential: it awaits the activity it claimed before polling again, so a
+ * **A busy worker would otherwise look like an absent one.** The activity loop
+ * is sequential: it awaits the activity it claimed before polling again, so a
  * worker running a single 60-second activity stops polling for 60 seconds and
- * its queue goes stale. That is now distinguishable — a worker holding a live
+ * its queue goes stale. That is distinguishable — a worker holding a live
  * lease is reported `busy` (see `WorkerInfo`), and a busy worker serves its
  * queue however long it has been since it last asked for more.
  *
@@ -1169,8 +1163,8 @@ export interface WorkflowTask {
 /**
  * A `condition()` the workflow is still waiting on.
  *
- * The answer to the one diagnostic question the engine could not previously
- * answer: an execution that is `running` with nothing pending is either mid-task
+ * The answer to the one diagnostic question nothing else can settle: an
+ * execution that is `running` with nothing pending is either mid-task
  * or parked, and those are opposite conclusions. Pending work is derived from
  * history; a parked condition leaves no history at all — that is the point of it
  * — so it has to be reported by the worker that replayed it.
