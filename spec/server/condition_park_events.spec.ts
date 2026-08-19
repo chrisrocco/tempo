@@ -46,7 +46,7 @@ describe('a parked condition in history', () => {
         await condition(() => false);
         return 'never';
       })
-      .start('waiter', [], {workflowId: 'cp-1'});
+      .start('waiter', undefined, {workflowId: 'cp-1'});
     await wait(150);
 
     // The state this whole pair exists for: running, nothing pending, nothing
@@ -74,7 +74,7 @@ describe('a parked condition in history', () => {
         return 'went';
       },
     );
-    const handle = rt.start<string>('waiter', [], {workflowId: 'cp-2'});
+    const handle = rt.start<string>('waiter', undefined, {workflowId: 'cp-2'});
     await wait(150);
     handle.signal('go');
     await expectAsync(handle.result()).toBeResolvedTo('went');
@@ -109,7 +109,7 @@ describe('a parked condition in history', () => {
         return `went after ${nudges}`;
       },
     );
-    const handle = rt.start<string>('patient', [], {workflowId: 'cp-3'});
+    const handle = rt.start<string>('patient', undefined, {workflowId: 'cp-3'});
     await wait(120);
     for (let i = 0; i < 5; i++) {
       handle.signal('nudge');
@@ -134,7 +134,7 @@ describe('a parked condition in history', () => {
         await Promise.all([condition(() => false), condition(() => false)]);
         return 'never';
       })
-      .start('two', [], {workflowId: 'cp-4'});
+      .start('two', undefined, {workflowId: 'cp-4'});
     await wait(150);
 
     const events = parkEvents(await store.get('cp-4'));
@@ -153,7 +153,7 @@ describe('a parked condition in history', () => {
       async () => 'done',
     );
     await expectAsync(
-      rt.start<string>('plain', [], {workflowId: 'cp-5'}).result(),
+      rt.start<string>('plain', undefined, {workflowId: 'cp-5'}).result(),
     ).toBeResolvedTo('done');
 
     expect(parkEvents(await store.get('cp-5')).length).toBe(0);
@@ -177,7 +177,7 @@ describe('what the park events must not disturb', () => {
         return 'went';
       },
     );
-    const handle = rt.start<string>('mixed', [], {workflowId: 'cq-1'});
+    const handle = rt.start<string>('mixed', undefined, {workflowId: 'cq-1'});
     await wait(150);
     handle.signal('go');
     await expectAsync(handle.result()).toBeResolvedTo('went');
@@ -209,7 +209,7 @@ describe('what the park events must not disturb', () => {
         return 'both';
       },
     );
-    const handle = rt.start<string>('twice', [], {workflowId: 'cq-2'});
+    const handle = rt.start<string>('twice', undefined, {workflowId: 'cq-2'});
     await wait(120);
     handle.signal('go');
     await wait(80);

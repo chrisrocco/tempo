@@ -33,7 +33,7 @@ describe('a workflow parked on a condition', () => {
         await condition(() => ready);
         return 'went';
       })
-      .start('waiter', [], {workflowId: 'p-1'});
+      .start('waiter', undefined, {workflowId: 'p-1'});
     await wait(150);
 
     const rec = await store.get('p-1');
@@ -49,7 +49,7 @@ describe('a workflow parked on a condition', () => {
         await condition(() => false);
         return 'never';
       })
-      .start('waiter', [], {workflowId: 'p-2'});
+      .start('waiter', undefined, {workflowId: 'p-2'});
     await wait(150);
 
     const site = (await store.get('p-2'))?.parked?.[0]?.site;
@@ -72,7 +72,7 @@ describe('a workflow parked on a condition', () => {
         await waitForIt();
         return 'never';
       })
-      .start('nested', [], {workflowId: 'p-6'});
+      .start('nested', undefined, {workflowId: 'p-6'});
     await wait(150);
 
     const site = (await store.get('p-6'))!.parked![0]!.site!;
@@ -99,7 +99,7 @@ describe('a workflow parked on a condition', () => {
         return 'went';
       },
     );
-    const handle = rt.start<string>('waiter', [], {workflowId: 'p-3'});
+    const handle = rt.start<string>('waiter', undefined, {workflowId: 'p-3'});
     await wait(150);
     expect((await store.get('p-3'))?.parked?.length).toBe(1);
 
@@ -117,7 +117,7 @@ describe('a workflow parked on a condition', () => {
       async () => 'done',
     );
     await expectAsync(
-      rt.start<string>('plain', [], {workflowId: 'p-4'}).result(),
+      rt.start<string>('plain', undefined, {workflowId: 'p-4'}).result(),
     ).toBeResolvedTo('done');
 
     expect((await store.get('p-4'))?.parked ?? []).toEqual([]);
@@ -130,7 +130,7 @@ describe('a workflow parked on a condition', () => {
         await Promise.all([condition(() => false), condition(() => false)]);
         return 'never';
       })
-      .start('two', [], {workflowId: 'p-5'});
+      .start('two', undefined, {workflowId: 'p-5'});
     await wait(150);
 
     const parked = (await store.get('p-5'))?.parked ?? [];
@@ -156,7 +156,7 @@ describe('capturing a park site — what it must not do', () => {
         await condition(() => ready);
         return 'went';
       });
-    const handle = rt.start<string>('mixed', [], {workflowId: 'q-1'});
+    const handle = rt.start<string>('mixed', undefined, {workflowId: 'q-1'});
     await wait(150);
     handle.signal('go');
     await expectAsync(handle.result()).toBeResolvedTo('went');
@@ -186,7 +186,7 @@ describe('capturing a park site — what it must not do', () => {
         await condition(() => false);
         return 'never';
       })
-      .start('waiter', [], {workflowId: 'q-2'});
+      .start('waiter', undefined, {workflowId: 'q-2'});
     await wait(150);
 
     expect(Error.stackTraceLimit).toBe(before);
@@ -204,7 +204,7 @@ describe('capturing a park site — what it must not do', () => {
       },
     );
     await expectAsync(
-      rt.start<string>('immediate', [], {workflowId: 'q-3'}).result(),
+      rt.start<string>('immediate', undefined, {workflowId: 'q-3'}).result(),
     ).toBeResolvedTo('straight through');
 
     expect((await store.get('q-3'))?.parked ?? []).toEqual([]);

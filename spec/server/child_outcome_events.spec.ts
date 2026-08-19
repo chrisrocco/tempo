@@ -39,7 +39,7 @@ async function historyOf(
     .registerWorkflow('child', child)
     .registerWorkflow('parent', parent);
 
-  rt.start('parent', [], {workflowId: 'p-1'});
+  rt.start('parent', undefined, {workflowId: 'p-1'});
   await wait(120);
 
   const rec = await store.get('p-1');

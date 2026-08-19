@@ -161,7 +161,7 @@ describe('a described workflow on a runtime', () => {
     const rt = createLocalRuntime().registerWorkflow('greeter', greeter);
 
     await expectAsync(
-      rt.start<string>('greeter', [{name: 'world'}]).result(),
+      rt.start<string>('greeter', {name: 'world'}).result(),
     ).toBeResolvedTo('hello world');
     rt.shutdown();
   });

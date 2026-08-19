@@ -26,13 +26,16 @@ describe('createWorkflow — the reference and the registry', () => {
   isolateWorkflowRegistry();
 
   it('registers the implementation under the explicit name', async () => {
-    const greet = createWorkflow('greet', async (name: string) => `hi ${name}`);
+    const greet = createWorkflow(
+      'greet',
+      async ({name}: {name: string}) => `hi ${name}`,
+    );
 
     expect(registeredWorkflowImpls()).toEqual([['greet', greet.impl]]);
     expect(greet.workflowName).toBe('greet');
     // `.impl` is the body itself — the unit-test seam, since calling the
     // reference dispatches.
-    await expectAsync(greet.impl('unit')).toBeResolvedTo('hi unit');
+    await expectAsync(greet.impl({name: 'unit'})).toBeResolvedTo('hi unit');
   });
 
   it('accepts the described literal and attaches the descriptor to the body', () => {
@@ -99,12 +102,15 @@ describe('createWorkflow — dispatching children', () => {
   isolateWorkflowRegistry();
 
   it('runs an invoked reference as a blocking child, not inline', async () => {
-    const child = createWorkflow('child', async (name: string) => `hi ${name}`);
+    const child = createWorkflow(
+      'child',
+      async ({name}: {name: string}) => `hi ${name}`,
+    );
     const rt = createLocalRuntime()
       // The reference itself is registered, which must unwrap: an engine
       // invoking the dispatcher would start the child as its own child forever.
       .registerWorkflow(child.workflowName, child)
-      .registerWorkflow('parent', async () => child('world'));
+      .registerWorkflow('parent', async () => child({name: 'world'}));
 
     try {
       await expectAsync(rt.start<string>('parent').result()).toBeResolvedTo(
@@ -133,12 +139,19 @@ describe('createWorkflow — dispatching children', () => {
    * `executeChild` documents, reachable through the typed reference.
    */
   it('correlates two .execute calls under one claimed id to one child', async () => {
-    const step = createWorkflow('step', async (tag: string) => `ran ${tag}`);
+    const step = createWorkflow(
+      'step',
+      async ({tag}: {tag: string}) => `ran ${tag}`,
+    );
     const rt = createLocalRuntime()
       .registerWorkflow(step.workflowName, step)
       .registerWorkflow('parent', async () => {
-        const first = await step.execute(['a'], {workflowId: 'claimed-step'});
-        const second = await step.execute(['b'], {workflowId: 'claimed-step'});
+        const first = await step.execute([{tag: 'a'}], {
+          workflowId: 'claimed-step',
+        });
+        const second = await step.execute([{tag: 'b'}], {
+          workflowId: 'claimed-step',
+        });
         return [first, second];
       });
 

@@ -102,7 +102,7 @@ export interface WorkflowHandle<T = unknown> {
 export interface Client {
   start<T = unknown>(
     name: string,
-    args?: unknown[],
+    props?: unknown,
     opts?: {workflowId?: string; taskQueue?: string},
   ): WorkflowHandle<T>;
   /** A handle to an existing execution (e.g. one picked up by resume). */
@@ -218,10 +218,17 @@ export function createClient(service: WorkflowService): Client {
   return {
     start<T = unknown>(
       name: string,
-      args: unknown[] = [],
+      props?: unknown,
       opts: {workflowId?: string; taskQueue?: string} = {},
     ): WorkflowHandle<T> {
-      const {workflowId} = service.start(name, args, opts);
+      // Wrapped rather than passed through: the wire still carries a positional
+      // `args` array (see `WorkflowService.start`), and a workflow started with
+      // nothing gets an empty one rather than `[undefined]`.
+      const {workflowId} = service.start(
+        name,
+        props === undefined ? [] : [props],
+        opts,
+      );
       return handle<T>(workflowId);
     },
     getHandle<T = unknown>(workflowId: string): WorkflowHandle<T> {

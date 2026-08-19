@@ -52,8 +52,33 @@ import type {WorkflowDescriptor} from './protocol';
  */
 const DESCRIPTOR = Symbol.for('tempo.workflowDescriptor');
 
-/** Any workflow function. `any[]` rest params are required for assignability — see `core/workflow_api`. */
-export type AnyWorkflowFn = (...args: any[]) => Promise<unknown>;
+/**
+ * Any workflow function: **one optional props object, and nothing else.**
+ *
+ * A workflow is started from a form, an API call or a schedule, where the caller
+ * has named fields rather than an argument order — so it takes one object and
+ * `WorkflowDescriptor.props` describes its keys. Variadic workflows made that
+ * describable shape optional, and a start form had to know a positional order
+ * nobody had written down.
+ *
+ * ## What the type does and does not enforce
+ *
+ * The arity is real: a two-parameter function is not assignable here, so it is a
+ * compile error at `createWorkflow` and `registerWorkflow`. Object-ness is
+ * **convention**, not a constraint — `props?: object` would reject every real
+ * workflow, because `strictFunctionTypes` makes parameters contravariant and
+ * `object` is not assignable to `{name: string}`. That is the same reason
+ * `ActivityFn` keeps `any`, argued in AGENTS.md.
+ *
+ * So `(name: string)` still compiles. It is wrong by the rule and right by the
+ * compiler, and the honest thing is to say so rather than reach for a
+ * conditional type that would fail obscurely at every call site.
+ *
+ * **Activities are deliberately not subject to this.** `acts.charge(id, amount)`
+ * is an ordinary function call at a site that knows the order, not a form
+ * somebody fills in.
+ */
+export type AnyWorkflowFn = (props?: any) => Promise<unknown>;
 
 /** A workflow and everything it says about itself, in one object. */
 export interface WorkflowDefinition<

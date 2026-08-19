@@ -82,7 +82,7 @@ describe('a workflow signalling another workflow', () => {
         return got;
       });
 
-    const handle = rt.start<string>('consumer', [], {workflowId: 'c-1'});
+    const handle = rt.start<string>('consumer', undefined, {workflowId: 'c-1'});
     await expectAsync(handle.result()).toBeResolvedTo('from-child');
 
     // The receiving end: an ordinary signal, seq-less like any other, with the
@@ -199,7 +199,7 @@ describe('a workflow signalling another workflow', () => {
         await wait(30);
         return 'shouted';
       })
-      .start('shouter', [], {workflowId: 's-1'});
+      .start('shouter', undefined, {workflowId: 's-1'});
     await wait(200);
 
     expect((await store.get('s-1'))?.history).toContain(

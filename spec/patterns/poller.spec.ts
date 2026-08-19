@@ -61,7 +61,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
@@ -89,7 +89,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(120);
     feed.push({id: 'b', seq: 2});
     await wait(200);
@@ -127,7 +127,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(120);
     feed = feed.filter((item) => item.id !== 'b'); // b is resolved, drops out
     await wait(200);
@@ -170,7 +170,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
@@ -208,7 +208,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
@@ -264,7 +264,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', ['hotlist'], {workflowId: 'mon'});
+    const handle = rt.start('monitor', 'hotlist', {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
@@ -290,7 +290,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', ['hotlist'], {workflowId: 'mon'});
+    const handle = rt.start('monitor', 'hotlist', {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
@@ -330,7 +330,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(120);
       handle.terminate('done');
       await wait(20);
@@ -360,7 +360,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(150);
       handle.terminate('done');
       await wait(20);
@@ -388,7 +388,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(80); // let it seed on the backlog
       feed.push({id: 'fresh', seq: 2});
       await wait(150);
@@ -425,7 +425,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(80); // several cycles against an empty feed
       feed.push({id: 'first-ever', seq: 1});
       await wait(150);
@@ -460,7 +460,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(150);
       handle.terminate('done');
       await wait(20);
@@ -493,7 +493,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(80);
       // Each new item forces a rollover, so seeding is re-evaluated in a run
       // that did not start the poller.
@@ -531,7 +531,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(60);
     handle.cancel();
     await wait(60);

@@ -69,9 +69,13 @@ function boom(): string {
 describe('a child whose parent has closed', () => {
   it('is terminated by default when the parent completes', async () => {
     const store = new MemoryHistoryStore();
-    runtimeWith(store, 'kid-1', undefined, () => 'done').start('parent', [], {
-      workflowId: 'par-1',
-    });
+    runtimeWith(store, 'kid-1', undefined, () => 'done').start(
+      'parent',
+      undefined,
+      {
+        workflowId: 'par-1',
+      },
+    );
     await wait(200);
 
     expect((await store.get('par-1'))?.status).toBe('completed');
@@ -84,7 +88,7 @@ describe('a child whose parent has closed', () => {
 
   it('is terminated when the parent fails', async () => {
     const store = new MemoryHistoryStore();
-    runtimeWith(store, 'kid-2', undefined, boom).start('parent', [], {
+    runtimeWith(store, 'kid-2', undefined, boom).start('parent', undefined, {
       workflowId: 'par-2',
     });
     await wait(200);
@@ -106,7 +110,7 @@ describe('a child whose parent has closed', () => {
         return 'unreachable';
       });
 
-    const handle = rt.start('parent', [], {workflowId: 'par-3'});
+    const handle = rt.start('parent', undefined, {workflowId: 'par-3'});
     await wait(50);
     handle.terminate('operator pulled it');
     await wait(100);
@@ -117,9 +121,13 @@ describe('a child whose parent has closed', () => {
 
   it('keeps running under `abandon`', async () => {
     const store = new MemoryHistoryStore();
-    runtimeWith(store, 'kid-4', 'abandon', () => 'done').start('parent', [], {
-      workflowId: 'par-4',
-    });
+    runtimeWith(store, 'kid-4', 'abandon', () => 'done').start(
+      'parent',
+      undefined,
+      {
+        workflowId: 'par-4',
+      },
+    );
     await wait(200);
 
     expect((await store.get('par-4'))?.status).toBe('completed');
@@ -135,9 +143,13 @@ describe('a child whose parent has closed', () => {
    */
   it('is asked to unwind under `cancel`', async () => {
     const store = new MemoryHistoryStore();
-    runtimeWith(store, 'kid-5', 'cancel', () => 'done').start('parent', [], {
-      workflowId: 'par-5',
-    });
+    runtimeWith(store, 'kid-5', 'cancel', () => 'done').start(
+      'parent',
+      undefined,
+      {
+        workflowId: 'par-5',
+      },
+    );
     await wait(200);
 
     const kid = await store.get('kid-5');
@@ -165,7 +177,7 @@ describe('a child whose parent has closed', () => {
         await sleep(30); // long enough for the grandchild to be dispatched
         return 'done';
       })
-      .start('parent', [], {workflowId: 'par-6'});
+      .start('parent', undefined, {workflowId: 'par-6'});
     await wait(300);
 
     expect((await store.get('kid-6'))?.status).toBe('terminated');
@@ -196,7 +208,7 @@ describe('a child whose parent has closed', () => {
         return 'unreachable';
       });
 
-    const handle = rt.start('parent', [], {workflowId: 'par-7'});
+    const handle = rt.start('parent', undefined, {workflowId: 'par-7'});
     await wait(50);
     handle.cancel();
     await wait(150);
@@ -226,7 +238,7 @@ describe('a child whose parent has closed', () => {
         return 'done';
       });
 
-    rt.start('parent', [], {workflowId: 'par-8'});
+    rt.start('parent', undefined, {workflowId: 'par-8'});
     const child = rt.getHandle('awaited-1');
 
     await expectAsync(child.result()).toBeRejected();

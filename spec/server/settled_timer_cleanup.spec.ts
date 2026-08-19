@@ -53,7 +53,7 @@ describe('a settled execution and its timer', () => {
   it('stops reporting the timer as pending once it is cancelled', async () => {
     const store = new MemoryHistoryStore();
     const rt = sleeper(store);
-    const handle = rt.start('sleeper', [], {workflowId: 'p1'});
+    const handle = rt.start('sleeper', undefined, {workflowId: 'p1'});
     await wait(80);
 
     // Waiting, and honestly reporting it.
@@ -78,7 +78,7 @@ describe('a settled execution and its timer', () => {
   it('keeps the timerStarted in history for the postmortem', async () => {
     const store = new MemoryHistoryStore();
     const rt = sleeper(store);
-    const handle = rt.start('sleeper', [], {workflowId: 'p2'});
+    const handle = rt.start('sleeper', undefined, {workflowId: 'p2'});
     await wait(80);
     handle.cancel();
     await wait(120);
@@ -96,7 +96,7 @@ describe('a settled execution and its timer', () => {
   it('still reports that a cancel was requested', async () => {
     const store = new MemoryHistoryStore();
     const rt = sleeper(store);
-    const handle = rt.start('sleeper', [], {workflowId: 'p3'});
+    const handle = rt.start('sleeper', undefined, {workflowId: 'p3'});
     await wait(80);
     handle.cancel();
     await wait(120);
@@ -228,7 +228,7 @@ describe('a completed execution', () => {
       },
     );
 
-    await rt.start('brief', [], {workflowId: 'c1'}).result();
+    await rt.start('brief', undefined, {workflowId: 'c1'}).result();
     const detail = await rt.service.describeExecution('c1');
 
     expect(detail?.status).toBe('completed');

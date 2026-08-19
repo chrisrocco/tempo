@@ -69,7 +69,7 @@ describe('workflow versioning — changing a running workflow', () => {
         return seen.join(',');
       });
 
-    const handle = rt.start<string>('watcher', [], {workflowId: 'w-1'});
+    const handle = rt.start<string>('watcher', undefined, {workflowId: 'w-1'});
     rt.getHandle('w-1').signal(tick);
     await wait(100);
 
@@ -107,7 +107,7 @@ describe('workflow versioning — changing a running workflow', () => {
       return 'old';
     });
 
-    const handle = rt.start<string>('once', [], {workflowId: 'w-2'});
+    const handle = rt.start<string>('once', undefined, {workflowId: 'w-2'});
     await expectAsync(handle.result()).toBeResolvedTo('new');
 
     const detail = await rt.getHandle('w-2').describe();
@@ -137,7 +137,7 @@ describe('workflow versioning — changing a running workflow', () => {
         return 'waited';
       });
 
-    const running = rt.start<string>('waiter', [], {workflowId: 'w-3'});
+    const running = rt.start<string>('waiter', undefined, {workflowId: 'w-3'});
     await wait(120); // long enough to dispatch the activity and arm the timer
 
     // The deploy: the wait is gone for anything that has not already started it.
@@ -147,7 +147,7 @@ describe('workflow versioning — changing a running workflow', () => {
       return 'waited';
     });
 
-    const fresh = rt.start<string>('waiter', [], {workflowId: 'w-4'});
+    const fresh = rt.start<string>('waiter', undefined, {workflowId: 'w-4'});
 
     await expectAsync(fresh.result()).toBeResolvedTo('waited');
     // Still running: its timer is real and it is still owed.
@@ -177,7 +177,7 @@ describe('workflow versioning — an unversioned change is loud', () => {
         return 'waited';
       });
 
-    const handle = rt.start<string>('waiter', [], {workflowId: 'w-5'});
+    const handle = rt.start<string>('waiter', undefined, {workflowId: 'w-5'});
     await wait(120);
 
     // The same deploy as above, minus the `patched` guard — the mistake.
@@ -213,7 +213,7 @@ describe('workflow versioning — an unversioned change is loud', () => {
         return 'waited';
       });
 
-    const handle = rt.start<string>('waiter', [], {workflowId: 'w-6'});
+    const handle = rt.start<string>('waiter', undefined, {workflowId: 'w-6'});
     await wait(120);
 
     rt.registerWorkflow('waiter', async () => {

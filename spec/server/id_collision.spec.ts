@@ -115,7 +115,7 @@ describe('child ids derived from lineage', () => {
       for (const seq of [0, 1]) {
         const id = childExecutionId('poller', run, seq);
         ids.push(id);
-        await host.start('planner', [], {workflowId: id});
+        await host.start('planner', undefined, {workflowId: id});
       }
       await new Promise<void>((r) => setTimeout(r, 10));
       host.shutdown();

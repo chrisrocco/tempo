@@ -63,7 +63,7 @@ function spawnerRuntime(
 describe('commands issued by the task that finishes a workflow', () => {
   it('launches a fire-and-forget child spawned on the way out', async () => {
     const store = new MemoryHistoryStore();
-    spawnerRuntime(store, 'leaf-1', 'abandon').start('spawner', [], {
+    spawnerRuntime(store, 'leaf-1', 'abandon').start('spawner', undefined, {
       workflowId: 'sp-1',
     });
     await wait(200);
@@ -79,7 +79,7 @@ describe('commands issued by the task that finishes a workflow', () => {
    */
   it('closes that child immediately when it was not asked to outlive its parent', async () => {
     const store = new MemoryHistoryStore();
-    spawnerRuntime(store, 'leaf-2', undefined).start('spawner', [], {
+    spawnerRuntime(store, 'leaf-2', undefined).start('spawner', undefined, {
       workflowId: 'sp-2',
     });
     await wait(200);

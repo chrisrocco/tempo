@@ -33,7 +33,7 @@ describe('a child execution and its parent', () => {
       .registerWorkflow('parent', async () =>
         executeChild('child', {workflowId: 'kid-1'}),
       )
-      .start('parent', [], {workflowId: 'p-1'});
+      .start('parent', undefined, {workflowId: 'p-1'});
     await wait(150);
 
     expect((await store.get('kid-1'))?.parent).toEqual({
@@ -53,7 +53,7 @@ describe('a child execution and its parent', () => {
         await wait(30);
         return 'started it';
       })
-      .start('parent', [], {workflowId: 'p-2'});
+      .start('parent', undefined, {workflowId: 'p-2'});
     await wait(200);
 
     expect((await store.get('kid-2'))?.parent).toEqual({
@@ -71,7 +71,7 @@ describe('a child execution and its parent', () => {
       .registerWorkflow('parent', async () =>
         executeChild('child', {workflowId: 'kid-3'}),
       )
-      .start('parent', [], {workflowId: 'p-3'});
+      .start('parent', undefined, {workflowId: 'p-3'});
     await wait(200);
 
     const child = await store.get('kid-3');
@@ -83,7 +83,7 @@ describe('a child execution and its parent', () => {
     const store = new MemoryHistoryStore();
     createLocalRuntime({historyStore: store})
       .registerWorkflow('solo', async () => 'done')
-      .start('solo', [], {workflowId: 'alone'});
+      .start('solo', undefined, {workflowId: 'alone'});
     await wait(120);
 
     expect((await store.get('alone'))?.parent).toBeUndefined();
@@ -100,7 +100,7 @@ describe('a child execution and its parent', () => {
         .registerWorkflow('parent', async () =>
           executeChild('child', {workflowId: 'kid-4'}),
         )
-        .start('parent', [], {workflowId: 'p-4'});
+        .start('parent', undefined, {workflowId: 'p-4'});
       await wait(250);
     } finally {
       await store.close();

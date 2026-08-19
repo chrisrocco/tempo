@@ -62,7 +62,7 @@ async function historyOfEveryKind(): Promise<HistoryEvent[]> {
       return 'unreachable';
     });
 
-  const handle = rt.start('wf', [], {workflowId: 'wf-1'});
+  const handle = rt.start('wf', undefined, {workflowId: 'wf-1'});
   await wait(60);
   handle.signal(go);
   await wait(40);
@@ -129,7 +129,7 @@ describe('history event timestamps', () => {
       .registerActivity('ok', () => 'fine')
       .registerWorkflow('wf', async () => runActivity('ok'));
 
-    await rt.start('wf', [], {workflowId: 'wf-1'}).result();
+    await rt.start('wf', undefined, {workflowId: 'wf-1'}).result();
     const before = (await store.get('wf-1'))!.history.map((e) => e.ts);
     await wait(25);
     const after = (await store.get('wf-1'))!.history.map((e) => e.ts);

@@ -32,6 +32,6 @@ const rt = createLocalRuntime()
     return 'done';
   });
 
-rt.start('parked', [], {workflowId: 'parked-1'});
+rt.start('parked', undefined, {workflowId: 'parked-1'});
 
 process.stdout.write('SCRIPT_ENDED\n');
