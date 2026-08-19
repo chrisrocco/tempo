@@ -33,7 +33,7 @@ function runtimeWith(store: MemoryHistoryStore, ran: string[]) {
   return createLocalRuntime({historyStore: store})
     .registerActivity('nextFire', nextFire)
     .registerWorkflow('scheduler', scheduler)
-    .registerWorkflow('target', async (label: string) => {
+    .registerWorkflow('target', async ({label}: {label?: string} = {}) => {
       ran.push(label ?? 'run');
       return 'ok';
     });
@@ -43,7 +43,7 @@ const definition = (
   over: Partial<ScheduleDefinition> = {},
 ): ScheduleDefinition => ({
   spec: {type: 'interval', everyMs: 40},
-  target: {name: 'target', args: ['run']},
+  target: {name: 'target', props: {label: 'run'}},
   ...over,
 });
 
