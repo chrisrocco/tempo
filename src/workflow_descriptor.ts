@@ -3,40 +3,25 @@
  * Attaching a `WorkflowDescriptor` to a workflow function, and reading it back.
  *
  * At `src/` root rather than in a layer, beside `activity_registry.ts`, and for the same
- * reason: it is glue between author code and the host. A workflow module calls
- * `defineWorkflow`; a worker reads the result. Neither `core/` nor `worker/` owns that.
+ * reason: it is glue between author code and the host. `createWorkflow` writes; a worker
+ * assembling its catalogue reads. Neither `core/` nor `worker/` owns that.
  *
- * ## Why it wraps the function instead of naming it
+ * ## Why the descriptor rides on the function
  *
  * The alternative was a module-scope map — `describeWorkflows({greeter: {...}})`, which is
- * literally what `proxyActivities` does for activities. It was rejected for one reason: a
- * map is keyed by a string, and a string that has to match a function's registered name is
- * a thing that can be typo'd, and can silently drift when the function is renamed. Nothing
- * would report it; the workflow would simply have no description forever.
+ * literally what `proxyActivities` does for activities. A map is keyed by a string, and a
+ * string that has to match a function is a thing that can be typo'd and can silently drift.
+ * Nothing would report it; the workflow would simply have no description forever.
  *
- * Wrapping binds the description to the function's identity instead. There is no name to
- * keep in step, and a rename carries the description with it.
+ * Riding on the function binds the two together, so whatever holds the function holds the
+ * description — which is what lets `startWorker({workflows})` and the registry both find it
+ * without being told where to look.
  *
- * ## What it costs
- *
- * It mutates the `run` function it is handed, which is worth being explicit about. The
- * property is non-enumerable, so it does not appear in `Object.keys`, spreads, or
- * `JSON.stringify`, and the descriptor is frozen so a reader cannot alter what other
- * readers see. `run` is handed back unchanged in every way an author can observe: same
- * reference, same signature, still directly callable in a unit test.
- *
- * That last property is the point of the whole shape. `startWorker({workflows: {greeter}})`
- * is unchanged, `registerWorkflow('greeter', greeter)` is unchanged, and a workflow with no
- * descriptor keeps working exactly as before.
- *
- * ## Describing one function twice
- *
- * The last call wins, and nothing complains. Throwing was considered and declined for the
- * reason `activity_registry` gives at length: these calls run at module load, where a throw
- * fires while modules are still evaluating and crashes the process on import rather than
- * reporting anything usable. There is no transport yet either, so a conflict has no
- * consequence to protect against — when there is one, the place to report it is wherever
- * descriptors are collected, by which point every module has loaded.
+ * It mutates the function, which is worth being explicit about. The property is
+ * non-enumerable, so it does not appear in `Object.keys`, spreads, or `JSON.stringify`, and
+ * the descriptor is frozen so a reader cannot alter what other readers see. The function is
+ * otherwise unchanged in every way an author can observe: same reference, same signature,
+ * still directly callable in a unit test — which is what `WorkflowRef.impl` hands back.
  */
 
 import type {WorkflowDescriptor} from './protocol';
@@ -80,54 +65,12 @@ const DESCRIPTOR = Symbol.for('tempo.workflowDescriptor');
  */
 export type AnyWorkflowFn = (props?: any) => Promise<unknown>;
 
-/** A workflow and everything it says about itself, in one object. */
-export interface WorkflowDefinition<
-  S extends AnyWorkflowFn,
-> extends WorkflowDescriptor {
-  /**
-   * The workflow itself, taking the props described above as one object.
-   *
-   * Named `run` rather than `start` because `start` is taken, and taken by the
-   * opposite side: `client.start` and `service.start` *dispatch* a workflow from
-   * outside, and this is the body that then runs. Two meanings of one word
-   * across one API is worse than a word that is merely less evocative.
-   */
-  run: S;
-}
-
 /**
- * Define a workflow and describe it in one place.
+ * Attach a description to a workflow body, and hand the body straight back.
  *
- * ```ts
- * export const greeter = defineWorkflow({
- *   title: 'Greet a customer',
- *   description: 'Sends the welcome email and records the touchpoint.',
- *   props: {
- *     type: 'object',
- *     properties: {
- *       customerId: {type: 'string'},
- *       locale: {type: 'string', description: 'Defaults to the account language.'},
- *     },
- *     required: ['customerId'],
- *   },
- *   async run(props: {customerId: string; locale?: string}) {
- *     return act.greet(props.customerId);
- *   },
- * });
- * ```
- *
- * **Returns `run` itself**, so nothing downstream changes:
- * `startWorker({workflows: {greeter}})` registers it under `greeter`, the engine invokes
- * it exactly as it invokes any other workflow function, and a unit test still calls it
- * directly. The description rides along on a non-enumerable property and is invisible to
- * everything that does not ask for it.
- *
- * ## One object, with the function inside it
- *
- * The first shape took the description and the function as two arguments. Folding the
- * function in reads better at the definition site — everything about the workflow is one
- * literal, and the props sit next to the signature that consumes them — and it means
- * there is no argument order to get backwards.
+ * Internal to `createWorkflow`, which is the only thing that writes one — the
+ * key and the description arrive together there, so there is no second place a
+ * workflow can be described and no way for two descriptions to race.
  *
  * ## The props type is written once, in `run`
  *
@@ -137,13 +80,14 @@ export interface WorkflowDefinition<
  * compiler.
  *
  * That duplication is real, and is the price of taking no schema library: deriving one from
- * the other needs one, which would be a runtime dependency this package does not have — and one whose major versions would then skew against every consumer that had
- * its own copy.
+ * the other needs one, which would be a runtime dependency this package does not have —
+ * and one whose major versions would then skew against every consumer that had its own
+ * copy.
  */
-export function defineWorkflow<S extends AnyWorkflowFn>(
-  definition: WorkflowDefinition<S>,
+export function describeWorkflow<S extends AnyWorkflowFn>(
+  run: S,
+  descriptor: WorkflowDescriptor,
 ): S {
-  const {run, ...descriptor} = definition;
   Object.defineProperty(run, DESCRIPTOR, {
     // Copied and frozen: the caller's object stays theirs to keep mutating if they
     // insist, and every reader sees the same thing regardless.

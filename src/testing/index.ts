@@ -69,7 +69,12 @@ import {
 } from '../services';
 import * as scenarioActivities from './scenario_activities';
 import * as scenarioWorkflows from './scenarios.workflow';
-import {SCENARIOS, type ScenarioName, type SeedContext} from './scenarios';
+import {
+  describedAs,
+  SCENARIOS,
+  type ScenarioName,
+  type SeedContext,
+} from './scenarios';
 import {
   createActivityRegistry,
   createActivityWorker,
@@ -82,7 +87,6 @@ import {
   type WorkerLoop,
 } from '../worker';
 import type {WorkflowFn} from '../core';
-import {workflowDescriptor} from '../workflow_descriptor';
 import type {AddressInfo} from 'node:net';
 
 export {
@@ -189,7 +193,7 @@ export async function startScenario(
   // which is half of what a dashboard developer came here for.
   const reporter = startWorkflowReporter(
     service,
-    workflows.map(([name, fn]) => ({name, ...(workflowDescriptor(fn) ?? {})})),
+    workflows.map(([name]) => ({name, ...describedAs(name)})),
     {identity: 'scenario-harness', taskQueue: SCENARIO_QUEUE},
   );
 

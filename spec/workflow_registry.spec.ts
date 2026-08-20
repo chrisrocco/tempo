@@ -12,12 +12,7 @@
  */
 
 import {createLocalRuntime} from '../src';
-import {
-  condition,
-  createWorkflow,
-  defineWorkflow,
-  sleep,
-} from '../src/workflow';
+import {condition, createWorkflow, sleep} from '../src/workflow';
 import {workflowDescriptor} from '../src/workflow_descriptor';
 import {
   registeredWorkflowImpls,
@@ -58,22 +53,6 @@ describe('createWorkflow — the reference and the registry', () => {
     });
 
     expect(workflowDescriptor(nightly.impl)?.title).toBe('Nightly report');
-  });
-
-  it('keeps a description the body already carried', () => {
-    // `defineWorkflow` *writes* the descriptor, so registering an already
-    // described function must not run it again with nothing to say — that would
-    // overwrite the title with an empty descriptor, and nothing would report it.
-    const described = defineWorkflow({
-      title: 'Already described',
-      async run() {
-        return 'hi';
-      },
-    });
-
-    const ref = createWorkflow({key: 'described', run: described});
-
-    expect(workflowDescriptor(ref.impl)?.title).toBe('Already described');
   });
 
   it('throws a directing error when called outside a workflow', () => {

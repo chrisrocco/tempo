@@ -134,11 +134,7 @@ export {
   type WorkflowInfo,
 } from './core/workflow_api';
 
-export {
-  defineWorkflow,
-  type AnyWorkflowFn,
-  type WorkflowDefinition,
-} from './workflow_descriptor';
+export type {AnyWorkflowFn} from './workflow_descriptor';
 export {
   createWorkflow,
   type WorkflowRef,

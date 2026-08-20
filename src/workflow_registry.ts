@@ -27,9 +27,8 @@
  * parent's history and it would half-work until it didn't. So the reference
  * wraps `executeChild` (and `startChild`, via `.detached()`), the *registry* holds
  * the real function for the engine to invoke, and a unit test that wants the
- * body calls `.impl` — the one deliberate departure from `defineWorkflow`'s
- * "returns `run` itself" contract, and the reason this is a new export rather
- * than a change to that one.
+ * body calls `.impl`, which is the same function the author wrote: the
+ * descriptor rides on it, and nothing about it changed.
  *
  * ## The name is the author's now
  *
@@ -67,11 +66,8 @@ import {
   type ChildHandle,
   type ChildOptions,
 } from './core';
-import {
-  defineWorkflow,
-  type AnyWorkflowFn,
-  type WorkflowDefinition,
-} from './workflow_descriptor';
+import {describeWorkflow, type AnyWorkflowFn} from './workflow_descriptor';
+import type {WorkflowDescriptor} from './protocol';
 
 /** Any callable. `any[]` rest params are required for assignability — see `core/workflow_api`. */
 type AnyFn = (...args: any[]) => unknown;
@@ -159,7 +155,7 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
  */
 export interface WorkflowRegistration<
   F extends AnyWorkflowFn,
-> extends WorkflowDefinition<F> {
+> extends WorkflowDescriptor {
   /**
    * The wire name: what `client.start` takes, what a task is routed by, and what
    * a second `createWorkflow` claiming it collides with.
@@ -170,6 +166,15 @@ export interface WorkflowRegistration<
    * silently.
    */
   key: string;
+  /**
+   * The workflow itself, taking the props described above as one object.
+   *
+   * Named `run` rather than `start` because `start` is taken, and taken by the
+   * opposite side: `client.start` and `service.start` *dispatch* a workflow from
+   * outside, and this is the body that then runs. Two meanings of one word
+   * across one API is worse than a word that is merely less evocative.
+   */
+  run: F;
 }
 
 /**
@@ -188,15 +193,10 @@ export function createWorkflow<F extends AnyWorkflowFn>(
   registration: WorkflowRegistration<F>,
 ): WorkflowRef<F> {
   const {key: name, run, ...descriptor} = registration;
-  // Described only when there is something to say. `defineWorkflow` *writes* the
-  // descriptor, so calling it unconditionally would overwrite one the function
-  // already carries — a `run` that was itself `defineWorkflow`'d elsewhere would
-  // silently lose its title here. An undescribed workflow is left untouched,
-  // which is also what a catalogue already reads as "not described".
-  const impl =
-    Object.keys(descriptor).length === 0
-      ? run
-      : defineWorkflow({...descriptor, run} as WorkflowDefinition<F>);
+  // Unconditional: this is the only thing that writes a descriptor, so there is
+  // never an existing one to overwrite. An empty one reads as "not described"
+  // everywhere it is consumed.
+  const impl = describeWorkflow(run, descriptor);
 
   const existing = registered.get(name);
   if (existing && existing !== impl) conflicted.add(name);
