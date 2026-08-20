@@ -67,10 +67,12 @@ export function createActivityWorker(
           } catch (e) {
             // This is the only place in the system holding the thrown Error, so
             // it is the only place the stack can be taken from. Everything
-            // downstream sees strings.
+            // downstream sees strings. A thrown non-Error has no message field —
+            // reading one anyway recorded the literal text "undefined" — so it
+            // is coerced whole: `throw 'a bare string'` fails as 'a bare string'.
             return {
               ok: false,
-              error: (e as Error).message,
+              error: e instanceof Error ? e.message : String(e),
               stack: e instanceof Error ? e.stack : undefined,
             };
           }

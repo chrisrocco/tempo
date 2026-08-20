@@ -56,16 +56,10 @@ export interface ConventionViolation {
 
 /**
  * Every directory of hand-written source in the repo. Wider than the boundary
- * checker's `src`/`examples` on purpose: these rules are about how code is
- * written, and `tools/` and `spec/` are written by the same hands.
+ * checker's `src` on purpose: these rules are about how code is written, and
+ * `tools/` and `spec/` are written by the same hands.
  */
-export const CHECKED_DIRS = [
-  'bin',
-  'examples',
-  'spec',
-  'src',
-  'tools',
-] as const;
+export const CHECKED_DIRS = ['bin', 'spec', 'src', 'tools'] as const;
 
 /**
  * Blank the *bodies* of string and template literals, keeping the quotes and

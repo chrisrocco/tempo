@@ -1,16 +1,20 @@
 /**
  * @fileoverview
- * The reference deployable worker, in one file: an activity, a workflow, and the
+ * The reference worker binary, in one file: an activity, a workflow, and the
  * entrypoint that hands both to the library.
  *
- * Run it directly against a server — `--server=URL` picks the server and
+ * In spec/support/ rather than an examples/ tree, deliberately: a runnable file
+ * is honest only while something runs it, and here the suite is what does —
+ * spec/integration/distributed.spec.ts launches this binary exactly as a
+ * deployment would (one process per role) and spec/integration/local_run.spec.ts
+ * runs its `--local` path. The examples/ tree it used to live in held files CI
+ * only typechecked, which is how examples rot.
+ *
+ * Run it by hand the same way — `--server=URL` picks the server and
  * `--role=ROLE` picks a single poll loop (see src/tempo.ts for the full input
  * surface). Or run one workflow through it with no server at all:
  *
- *   tsx examples/greeter.ts --local=greeter --props='{"name":"world"}'
- *
- * This is the binary spec/integration/distributed.spec.ts and
- * spec/integration/local_run.spec.ts actually run, so it stays honest.
+ *   tsx spec/support/greeter_worker.ts --local=greeter --props='{"name":"world"}'
  *
  * Real projects should split activities and workflows into separate modules: a
  * workflow module that imports activities with `import type * as` keeps their
@@ -18,8 +22,8 @@
  * Everything is together here for readability.
  */
 
-import {startWorker} from '../src';
-import {proxyActivities} from '../src/workflow';
+import {startWorker} from '../../src';
+import {proxyActivities} from '../../src/workflow';
 
 // ── activities — the only place I/O is allowed ─────────────────────────────
 export const GREETING = 'Hello';

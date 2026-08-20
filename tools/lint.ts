@@ -38,7 +38,7 @@ import {checkStyle, formatStyleViolations, programFor} from './style';
 // tools/style.ts); `__dirname` is what CommonJS gives instead.
 const root = path.resolve(__dirname, '..');
 
-const files = readSourceFiles(root, ['src', 'examples']);
+const files = readSourceFiles(root, ['src']);
 const boundaryViolations = checkBoundaries(files);
 if (boundaryViolations.length === 0) {
   console.log(`boundaries: clean (${files.length} files checked)`);

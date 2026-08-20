@@ -440,9 +440,9 @@ function checkPurity(
  * `proxyActivities<typeof activities>` needs the activities module's *shape* in the
  * workflow module, and the only way to get it without a runtime edge is
  * `import type * as activities from './activities'`. That is precisely what
- * `examples/greeter.ts` tells authors to do. Without the exemption, following the
- * documented advice fails `npm run lint`, and there is no other way to write a
- * typed workflow module that the convention accepts.
+ * `spec/support/greeter_worker.ts` tells authors to do. Without the exemption,
+ * following the documented advice fails `npm run lint`, and there is no other way
+ * to write a typed workflow module that the convention accepts.
  *
  * The layering rule is deliberately *not* given the same exemption. That one is
  * about which layers may know about which, and a type dependency is still

@@ -28,6 +28,14 @@ import type {
 interface Waiter {
   resolve: (v: unknown) => void;
   reject: (e: unknown) => void;
+  /**
+   * Where the command was issued, captured unformatted — the frames a failure
+   * completion stitches onto the rebuilt error so a recorded stack from another
+   * process connects to the workflow line that awaited it. The same diagnostic
+   * side-channel as `BlockedCondition.site` below, with the same guarantee:
+   * never read by replay, never reaches a command.
+   */
+  site?: Error;
 }
 interface BlockedCondition {
   fn: () => boolean;

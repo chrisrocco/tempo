@@ -11,7 +11,7 @@
  * - **The real binary, spawned** — the claim the in-process cases cannot make.
  *   The reason this flag exists is to prove a *shipped artifact* has its
  *   workflows registered, and an assertion that never leaves this process proves
- *   nothing about a process. These cases run `examples/greeter.ts` the way a
+ *   nothing about a process. These cases run `spec/support/greeter_worker.ts` the way a
  *   developer would and read its stdout and exit code.
  *
  * The refusals get as much room as the happy path on purpose. `--local` in a
@@ -27,7 +27,7 @@ import {resolveLocalRun, runLocally} from '../../src/tempo';
 import {runActivity} from '../../src/workflow';
 import {repoPath} from '../support/repo_root';
 
-const GREETER = repoPath('examples/greeter.ts');
+const GREETER = repoPath('spec/support/greeter_worker.ts');
 
 /** The registries `startWorker` builds from module namespaces, as it builds them. */
 const activities: [string, (...args: any[]) => unknown][] = [

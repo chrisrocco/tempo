@@ -357,12 +357,15 @@ Not every test is documentation, and forcing it to be makes both worse.
 
 `spec/integration/local.spec.ts` is the reference for all six.
 
-### Examples must be spec-covered
+### There is no examples/ tree
 
-Every file in `examples/` must be exercised by a spec. An example nobody runs
-rots silently; one that CI runs cannot. `examples/greeter.ts` is covered by
-`spec/integration/distributed.spec.ts` and
-`spec/integration/worker_entrypoint.spec.ts`.
+A runnable file is honest only while something runs it — an example nobody runs
+rots silently — so anything runnable lives where the suite runs it:
+`spec/support/greeter_worker.ts` is the reference worker binary, deployed for
+real by `spec/integration/distributed.spec.ts` and run in `--local` mode by
+`spec/integration/local_run.spec.ts`. Authoring examples belong in the README's
+snippets and the documentation specs, which CI executes. An `examples/` tree
+held files CI merely typechecked, and that is the gap this rule closes.
 
 ## Commands
 

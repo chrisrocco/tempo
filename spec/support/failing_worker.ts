@@ -12,8 +12,8 @@
  * spec/server/task_failure.spec.ts). Only the first kind ever settles, so only
  * the first kind can be awaited by a caller that expects an answer.
  *
- * It lives in spec/support/ rather than examples/ because nothing about it is
- * exemplary — the reference worker is examples/greeter.ts.
+ * Nothing about it is exemplary — the reference worker is greeter_worker.ts
+ * next door.
  */
 
 import {startWorker} from '../../src';

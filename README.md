@@ -109,7 +109,7 @@ rt.shutdown(); // stop background timers so the process exits
 Or run one workflow through your worker binary, with no server at all:
 
 ```bash
-tsx examples/greeter.ts --local=greeter --props='{"name":"world"}'
+tsx spec/support/greeter_worker.ts --local=greeter --props='{"name":"world"}'
 # LOCAL RUN greeter greeter — one workflow, then exit. Not a deployment: …
 # "Hello, world!"
 ```
@@ -129,8 +129,8 @@ Or run the real thing — a server and the two worker tiers, each its own proces
 
 ```bash
 tsx bin/server-main.ts --port=7777 --data-dir=./data &          # LISTENING 7777 127.0.0.1
-tsx examples/greeter.ts --server=http://127.0.0.1:7777 --role=workflow &
-tsx examples/greeter.ts --server=http://127.0.0.1:7777 --role=activity &
+tsx spec/support/greeter_worker.ts --server=http://127.0.0.1:7777 --role=workflow &
+tsx spec/support/greeter_worker.ts --server=http://127.0.0.1:7777 --role=activity &
 ```
 
 Each prints one readiness line — `LISTENING <port> <host>` and `WORKER_READY
@@ -181,6 +181,17 @@ be reachable only through the host entrypoint, which meant a dashboard pulled
 `fetch`. Both paths are now **checked** to reach no Node builtin and no workflow
 module, transitively — a barrel that would quietly undo it fails `npm run lint`
 rather than a consumer's bundler.
+
+One deployment note the engine cannot handle for you: **failure stacks are
+formatted in the process that threw** and travel as strings, so a bundled worker
+binary owns the legibility of its own frames. Emit _inline_ source maps (a
+binary moved to a stable location silently breaks a relative
+`sourceMappingURL`), run workers with `node --enable-source-maps`, and keep
+identifier names through the bundle (`--keep-names`, no identifier minification)
+— otherwise the stack the engine faithfully carries from an activity to your
+terminal names positions in a bundle nobody can open. Each process fixes its
+own half: activity frames in the activity worker, the awaited-at frames in the
+workflow worker.
 
 Reading the surface is one thing; **developing** against it is another.
 `workflow-engine/testing` starts a real server, on a real port, already holding
@@ -434,8 +445,8 @@ src/
                   in the states a UI has to render
   process_flags.ts  how a deployed process reads its own configuration
 bin/              server-main.ts — the reference server binary, one call
-examples/         greeter.ts — the reference worker binary, one call
-spec/             the executable documentation
+spec/             the executable documentation; spec/support/greeter_worker.ts
+                  is the reference worker binary the process-level specs deploy
 ```
 
 The `★` entrypoints are load-bearing: workflow code imports only from
