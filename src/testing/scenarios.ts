@@ -93,18 +93,15 @@ export interface ScenarioDefinition {
 }
 
 /**
- * Workflow-type names a scenario can start.
- *
- * All but the last are registered by the harness's workers. `undeployed` is
- * **deliberately not registered** — see the `stuck` scenario, and the note at the
- * foot of `scenarios.workflow.ts`. Its absence is what produces the state.
- */
-/**
  * What a scenario workflow says about itself, or nothing when it says nothing.
  *
  * The fixtures carry their descriptions as data rather than on the functions —
  * `scenarios.workflow.ts` explains why — so this is the lookup both the harness
  * and the split-manifest seed report through.
+ *
+ * Still `?? {}` even though the map's keys are now typed: this takes any name the
+ * registry holds, and `undeployed` — plus anything a consumer registered
+ * alongside the fixtures — legitimately describes nothing.
  */
 export function describedAs(name: string): WorkflowDescriptor {
   const described: Record<string, WorkflowDescriptor> =
@@ -112,6 +109,13 @@ export function describedAs(name: string): WorkflowDescriptor {
   return described[name] ?? {};
 }
 
+/**
+ * Workflow-type names a scenario can start.
+ *
+ * All but the last are registered by the harness's workers. `undeployed` is
+ * **deliberately not registered** — see the `stuck` scenario, and the note at the
+ * foot of `scenarios.workflow.ts`. Its absence is what produces the state.
+ */
 export const SCENARIO_WORKFLOWS = {
   completes: 'scenarioCompletes',
   fails: 'scenarioFails',
@@ -119,6 +123,24 @@ export const SCENARIO_WORKFLOWS = {
   retries: 'scenarioRetries',
   undeployed: 'scenarioNotDeployedYet',
 } as const;
+
+/**
+ * The scenario workflows the harness's workers register — everything but
+ * `undeployed`, whose whole job is to be missing.
+ *
+ * Exported so `scenarios.workflow.ts` can key `SCENARIO_DESCRIPTORS` by it. That
+ * module holds its descriptions as data rather than on the functions, and a
+ * name-keyed map is exactly the shape where a string can drift away from the
+ * thing it names. It cannot here: the map is typed by this, so a mistyped key
+ * and a workflow added without a description are both compile errors.
+ *
+ * A workflow module may reach this because the import is `import type` and so is
+ * erased — `tools/boundaries.ts` exempts those for this reason.
+ */
+export type RegisteredScenarioName = (typeof SCENARIO_WORKFLOWS)[Exclude<
+  keyof typeof SCENARIO_WORKFLOWS,
+  'undeployed'
+>];
 
 /**
  * Execution ids are fixed rather than generated.

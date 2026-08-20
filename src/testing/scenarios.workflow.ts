@@ -44,6 +44,11 @@ import {
   proxyActivities,
   setHandler,
 } from '../workflow';
+// Type-only, and erased — which is the whole reason a workflow module may reach
+// past `workflow.ts` for them at all (`tools/boundaries.ts`). They buy the
+// name-keyed map below a compiler.
+import type {WorkflowDescriptor} from '../protocol';
+import type {RegisteredScenarioName} from './scenarios';
 
 /**
  * One attempt and no more, so the execution *settles* as failed rather than
@@ -95,10 +100,24 @@ export async function scenarioRetries(): Promise<unknown> {
  * — see the fileoverview for why this is data here rather than riding on the
  * functions.
  *
+ * **`RegisteredScenarioName` is what keeps the map honest.** A name-keyed map is
+ * the shape where a string drifts away from the thing it names, and that is the
+ * objection the fileoverview answers. It is answered by the compiler rather than
+ * by care: a mistyped key, and a scenario added without a description, are both
+ * errors here. `undeployed` is excluded by that type because it is deliberately
+ * never registered, so describing it would describe nothing.
+ *
+ * The titles themselves still need a spec — a type cannot know what a title
+ * ought to say — and `spec/testing/scenarios.spec.ts` asserts every one of them
+ * against the published catalogue.
+ *
  * Not exported as a workflow: the harness filters its registry down to callables,
  * so this object is skipped by the same check that skips `release`.
  */
-export const SCENARIO_DESCRIPTORS = {
+export const SCENARIO_DESCRIPTORS: Record<
+  RegisteredScenarioName,
+  WorkflowDescriptor
+> = {
   scenarioCompletes: {
     title: 'Completes immediately',
     description:
