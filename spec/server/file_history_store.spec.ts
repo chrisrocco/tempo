@@ -204,15 +204,28 @@ describe('file store — a data directory from before props', () => {
     );
     await fs.writeFile(path.join(exec, 'events.jsonl'), '');
 
-    await expectAsync(FileHistoryStore.open(dir)).toBeRejectedWithError(
-      // It has to name the *data* directory, which is what the reader is told
-      // to delete. The offending record lives one level down, and naming only
-      // that sends someone to delete a subdirectory — which clears this record
-      // and stops the next boot on the next one.
-      new RegExp(
-        `older format[\\s\\S]*no migration — delete ${dir}[^\\n]*--data-dir`,
-      ),
-    );
+    // Read off the message rather than matched against a pattern built from the
+    // paths. A regex interpolating a directory is only literal where separators
+    // are `/`: on Windows the same string carries `\w`, `\t`, `\d`, which are
+    // character classes, so the pattern stops matching the very string it was
+    // built from — passing on POSIX and failing here, for a message that is
+    // correct either way.
+    let error: Error | undefined;
+    try {
+      await FileHistoryStore.open(dir);
+    } catch (e) {
+      error = e as Error;
+    }
+
+    expect(error).toBeDefined();
+    expect(error?.message).toContain('older format');
+    // Names the record, one level down, so the reader can see what is wrong…
+    expect(error?.message).toContain(exec);
+    // …and names the *data* directory as the thing to delete. The comma is what
+    // makes this discriminating: deleting only the record clears this one and
+    // stops the next boot on the next.
+    expect(error?.message).toContain(`delete ${dir},`);
+    expect(error?.message).toContain('--data-dir');
 
     await fs.rm(dir, {recursive: true, force: true});
   });
