@@ -16,6 +16,7 @@ import {condition, createWorkflow, sleep} from '../src/workflow';
 import {workflowDescriptor} from '../src/workflow_descriptor';
 import {
   registeredWorkflowImpls,
+  resolveListedWorkflow,
   resolveWorkflowRegistration,
   workflowNameConflicts,
 } from '../src/workflow_registry';
@@ -98,6 +99,36 @@ describe('createWorkflow — the reference and the registry', () => {
       'plain',
       plain,
     ]);
+  });
+
+  it('takes a list of references, each registering under its own key', () => {
+    const pay = createWorkflow({key: 'pay', run: async () => 'paid'});
+    const ship = createWorkflow({key: 'ship', run: async () => 'shipped'});
+
+    expect(resolveListedWorkflow(pay, 0)).toEqual(['pay', pay.impl]);
+    expect(resolveListedWorkflow(ship, 1)).toEqual(['ship', ship.impl]);
+  });
+
+  // A list has no key to give a plain function, and `fn.name` cannot stand in
+  // under minification. The map form is what covers that case, so the error
+  // names it rather than only reporting the refusal.
+  it('refuses a plain function in the list, naming both ways to give it a name', () => {
+    const plain = async (): Promise<string> => 'plain';
+
+    expect(() => resolveListedWorkflow(plain, 2)).toThrowError(
+      /workflows\[2\][\s\S]*createWorkflow[\s\S]*module namespace/,
+    );
+  });
+
+  // Through the entrypoint, to pin that the list is a branch `startWorker`
+  // actually takes rather than a helper nothing reaches. It refuses before any
+  // poll loop starts, which is what makes this assertable without a server.
+  it('reaches the list branch from startWorker itself', () => {
+    const plain = async (): Promise<string> => 'plain';
+
+    expect(() =>
+      startWorker({name: 'listed', workflows: [plain]}),
+    ).toThrowError(/workflows\[0\] is a plain function/);
   });
 });
 

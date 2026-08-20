@@ -36,8 +36,16 @@
  * chosen at the entrypoint. A reference usable at a call site has to know its
  * wire name at *definition* time, and `fn.name` is not a candidate — workers
  * ship as bundled artifacts, and minification renames functions silently. So
- * the author writes it as `key`, which also means two modules that never see
- * each other can claim one name. That conflict is **recorded, not thrown**:
+ * the author writes it as `key`.
+ *
+ * That is why `startWorker` also takes a **list** — `{workflows: [order]}`.
+ * Once the name is on the workflow, the map's keys have nothing to supply, and
+ * a list cannot let an export alias disagree with the key. The map stays for
+ * the case the key does not cover: a workflow that is just a function, whose
+ * export name is the only name it has (`resolveListedWorkflow`).
+ *
+ * An author-written name also means two modules that never see each other can
+ * claim one name. That conflict is **recorded, not thrown**:
  * these calls run at module load, where a throw fires mid-evaluation and
  * crashes the process on import instead of reporting anything actionable
  * (`activity_registry.ts` argues this at length). `startWorker` checks
@@ -284,6 +292,38 @@ export function resolveWorkflowRegistration(
   return impl === fn
     ? [exported, fn]
     : [(fn as unknown as WorkflowRef<AnyWorkflowFn>).workflowName, impl];
+}
+
+/**
+ * What one entry of the **list** form registers: a `WorkflowRef` under its own
+ * wire name.
+ *
+ * The list exists because the key is now a property of the workflow, so the map
+ * form's export keys have nothing left to supply — `{workflows: [order]}` says
+ * what the map said, without inviting an export alias to disagree with the key.
+ *
+ * A plain function is refused here rather than registered, because a list has no
+ * name to give it and `fn.name` is not a candidate — workers ship bundled and
+ * minification renames functions silently, which is the same reason `key` is
+ * written by hand. The map form remains exactly right for plain functions, and
+ * the error says so; this is a missing name, not a deprecation.
+ *
+ * Not a compile error, because it cannot be: an array is an `object`, so the
+ * option's type admits either form and neither branch can exclude the other.
+ */
+export function resolveListedWorkflow(
+  fn: AnyFn,
+  index: number,
+): [string, AnyFn] {
+  const impl = workflowImplOf(fn);
+  if (impl === fn)
+    throw new Error(
+      `workflows[${index}] is a plain function, which carries no wire name. ` +
+        `Declare it with createWorkflow({key, run}) to give it one, or pass a ` +
+        `module namespace — startWorker({workflows: modules}) — where the ` +
+        `export name supplies it.`,
+    );
+  return [(fn as unknown as WorkflowRef<AnyWorkflowFn>).workflowName, impl];
 }
 
 /**

@@ -222,8 +222,8 @@ export const order = Tempo.createWorkflow({
 
 // worker.ts — bundle this, run it twice, once per --role
 import { startWorker } from 'workflow-engine';
-import * as workflows from './workflows';
-startWorker({ name: 'orders', workflows });
+import { order } from './workflows/order.workflow';
+startWorker({ name: 'orders', workflows: [order] });
 ```
 
 plus the client above, and the **flag vocabulary** both processes read
