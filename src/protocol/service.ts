@@ -462,6 +462,27 @@ export interface PendingActivityView {
    * reader must treat it as "not between attempts" rather than as "due now".
    */
   nextAttemptAt?: number;
+  /**
+   * The most recent checkpoint the running attempt reported, via `heartbeat()`.
+   *
+   * A **register, not a log**: one slot per attempt, overwritten by each beat,
+   * and only a sample of beats is sent. Readable anyway because every beat
+   * carries a complete checkpoint — the contract is on `heartbeat` in
+   * `worker/activity_context`. A consumer treating this as a stream of progress
+   * events will silently miss most of them; history is where a trail lives.
+   *
+   * Absent until the attempt beats, and gone once it settles: live state about
+   * an attempt in flight, so an activity waiting out a backoff has none.
+   */
+  checkpoint?: unknown;
+  /**
+   * When `checkpoint` arrived, epoch ms.
+   *
+   * Beside the value because sampling makes it routinely older than the work it
+   * describes: without the age, what an activity managed to send just before
+   * wedging reads as what it is doing now.
+   */
+  checkpointAt?: number;
 }
 
 /**
@@ -479,7 +500,7 @@ export interface ExecutionParentView {
 
 /** `Client.describe()`: the summary, plus history and what the execution awaits. */
 export interface ExecutionDetail extends ExecutionSummary {
-  args: unknown[];
+  props: unknown;
   /**
    * Absent on an execution a client started directly.
    *
@@ -863,12 +884,12 @@ export type QueueLiveness = Omit<
  * this repo reading `QueueWorkers` gets the verdict rather than reimplementing
  * it, and reimplementing it is how "served" quietly comes to mean two things.
  *
- * **A busy worker would otherwise look like an absent one.** The activity loop
- * is sequential: it awaits the activity it claimed before polling again, so a
- * worker running a single 60-second activity stops polling for 60 seconds and
- * its queue goes stale. That is distinguishable — a worker holding a live
- * lease is reported `busy` (see `WorkerInfo`), and a busy worker serves its
- * queue however long it has been since it last asked for more.
+ * **Recency alone cannot tell a busy worker from an absent one.** The activity
+ * loop is sequential: it awaits the activity it claimed before polling again, so
+ * a worker running a single 60-second activity stops polling for 60 seconds and
+ * its queue goes stale. Hence the second input — a worker holding a live lease is
+ * reported `busy` (see `WorkerInfo`), and a busy worker serves its queue however
+ * long it has been since it last asked for more.
  *
  * The recency test remains for the idle case, which is the common one: a worker
  * with nothing to do holds no lease and is known only by polling.
@@ -913,12 +934,12 @@ export function isQueueServed(
  *
  * ## Never a reason to refuse
  *
- * `false` is a **report**, not a veto. `spec/integration/distributed.spec.ts` settles
- * this: an unregistered name used to fail an execution on the reading that it was a
- * typo, and that was wrong, because once tasks route by queue it far more often means
- * a deploy still rolling — *"failing fast would trade a recoverable state for an
- * unrecoverable one"*. What a manifest adds is the ability to say which of the two it
- * is, not permission to act on the answer.
+ * `false` is a **report**, not a veto. Failing an execution on it — on the reading
+ * that an unregistered name is a typo — trades a recoverable state for an
+ * unrecoverable one: once tasks route by queue, an unregistered name far more often
+ * means a deploy still rolling. What a manifest adds is the ability to say which of
+ * the two it is, not permission to act on the answer.
+ * `spec/integration/distributed.spec.ts` holds the case.
  */
 export function isNameServed(
   queues: readonly QueueLiveness[],
@@ -970,7 +991,7 @@ export interface WorkflowService {
   // ── client-facing ──
   start(
     name: string,
-    args?: unknown[],
+    props?: unknown,
     opts?: StartWorkflowOptions,
   ): {workflowId: string};
   signal(workflowId: string, signalName: string, payload?: unknown): void;
@@ -1065,10 +1086,13 @@ export interface WorkflowService {
    * Report that this attempt is still alive. Renews the task's lease so it is not
    * redelivered, and resets the `heartbeatTimeoutMs` deadline if one is set.
    *
+   * `checkpoint` replaces whatever this attempt last reported, surfacing on
+   * `PendingActivityView.checkpoint`. Last write wins; no history event.
+   *
    * A no-op for an attempt the server has already given up on — the worker finds
    * out when it reports a result and the completion is dropped, not here.
    */
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
 }
 
 /**
@@ -1142,7 +1166,7 @@ export interface WorkflowTask {
   token: TaskToken;
   workflowId: string;
   name: string;
-  args: unknown[];
+  props: unknown;
   history: HistoryEvent[];
   continueAsNewSuggested: boolean;
   /** What the previous task (or the previous run) left behind. */

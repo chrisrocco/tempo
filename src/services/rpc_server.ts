@@ -5,12 +5,11 @@
  * polled task that came back `undefined` is sent as JSON `null` (undefined is not
  * valid JSON); the client maps it back. `bin/server-main` wraps this in a process.
  *
- * **One endpoint, and nothing else.** This used to also serve a dashboard, which
- * meant the engine carried a TypeScript transpiler, an import-map generator, and
- * a static file server for the benefit of a browser app that imported the engine
- * back. That app became a separate package, and then left the repo entirely. An
- * operator UI is a client like any other: it reaches this over the same RPC, and
- * that was the only interface it ever needed.
+ * **One endpoint, and nothing else.** An operator UI is a client like any other:
+ * it reaches this over the same RPC, and that is the only interface it needs.
+ * Serving one from here instead would put a TypeScript transpiler, an import-map
+ * generator, and a static file server inside the engine, for the benefit of a
+ * browser app that imports the engine back.
  *
  * **There is no auth and no TLS on this transport** — it is plain HTTP+JSON.
  * `bin/server-main` binds loopback for that reason. Expose it only on loopback or
@@ -40,7 +39,7 @@ async function dispatch(
 ): Promise<unknown> {
   switch (request.method) {
     case 'start':
-      return host.start(request.name, request.args, request.opts);
+      return host.start(request.name, request.props, request.opts);
     case 'signal':
       return host.signal(
         request.workflowId,
@@ -96,7 +95,7 @@ async function dispatch(
     case 'completeActivityTask':
       return host.completeActivityTask(request.token, request.result);
     case 'heartbeatActivityTask':
-      return host.heartbeatActivityTask(request.token);
+      return host.heartbeatActivityTask(request.token, request.checkpoint);
     default:
       return assertNever(request);
   }

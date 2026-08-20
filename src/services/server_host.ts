@@ -92,7 +92,7 @@ export interface ServerHost {
    */
   start(
     name: string,
-    args?: unknown[],
+    props?: unknown,
     opts?: StartWorkflowOptions,
   ): Promise<StartResult>;
   signal(
@@ -137,7 +137,7 @@ export interface ServerHost {
     request?: PollRequest,
   ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
   /** Re-drive persisted executions after a restart. */
   resume(): Promise<void>;
   /** Stop background timers so the process can exit. */
@@ -167,8 +167,8 @@ export interface ServerHostOptions {
    *   Pick a window comfortably longer than the longest a caller waits before
    *   collecting.
    * - **A `workflowId` claim lasts only as long as the record.** Starting under
-   *   a swept id creates a fresh execution where it used to return the old one
-   *   — "one workflow per order" becomes "one per order per window". See
+   *   a swept id creates a fresh execution where an unswept one returns the
+   *   original — "one workflow per order" becomes "one per order per window". See
    *   `StartWorkflowOptions.workflowId`.
    *
    * Running executions are never swept, however old, and a settled child is
@@ -299,7 +299,7 @@ export function createServerHost(
   async function createAndEnqueue(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string,
     parent?: ExecutionParent,
   ): Promise<boolean> {
@@ -309,7 +309,7 @@ export function createServerHost(
         name,
         sameRequest:
           existing.name === name &&
-          JSON.stringify(existing.args) === JSON.stringify(args),
+          JSON.stringify(existing.props) === JSON.stringify(props),
       });
       return false;
     };
@@ -318,7 +318,7 @@ export function createServerHost(
     if (existing) return claimed(existing);
 
     try {
-      await historyStore.create(workflowId, name, args, taskQueue, parent);
+      await historyStore.create(workflowId, name, props, taskQueue, parent);
     } catch (error: unknown) {
       const raced = await historyStore.get(workflowId);
       if (!raced) throw error;
@@ -356,12 +356,12 @@ export function createServerHost(
   }
 
   return {
-    async start(name, args = [], opts = {}) {
+    async start(name, props, opts = {}) {
       const workflowId = opts.workflowId ?? `${name}-${++counter}`;
       const created = await createAndEnqueue(
         workflowId,
         name,
-        args,
+        props,
         opts.taskQueue ?? DEFAULT_TASK_QUEUE,
       );
       return {workflowId, created};
@@ -407,7 +407,10 @@ export function createServerHost(
     },
     async describeExecution(workflowId, options) {
       const rec = await historyStore.get(workflowId);
-      return rec && describeExecution(rec, options);
+      return (
+        rec &&
+        describeExecution(rec, options, core.activityCheckpoints(workflowId))
+      );
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
@@ -455,8 +458,8 @@ export function createServerHost(
     completeActivityTask(token, result) {
       return core.completeActivityTask(token, result);
     },
-    heartbeatActivityTask(token) {
-      return core.heartbeatActivityTask(token);
+    heartbeatActivityTask(token, checkpoint) {
+      return core.heartbeatActivityTask(token, checkpoint);
     },
     async resume() {
       const records = await historyStore.list();

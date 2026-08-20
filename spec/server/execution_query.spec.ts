@@ -25,7 +25,7 @@ function record(
     workflowId,
     runId: 0,
     name: 'greeter',
-    args: [],
+    props: undefined,
     taskQueue: 'default',
     createdAt: 1_000,
     history: [],

@@ -29,6 +29,7 @@ export function isolateWorkflowRegistry(): void {
     // Restored through `createWorkflow` (the references it mints go unused):
     // the registry was just cleared, and each saved name held one function, so
     // this re-records no conflicts — the same fidelity the activity helper has.
-    for (const [name, fn] of saved) createWorkflow(name, fn as AnyWorkflowFn);
+    for (const [key, fn] of saved)
+      createWorkflow({key, run: fn as AnyWorkflowFn});
   });
 }

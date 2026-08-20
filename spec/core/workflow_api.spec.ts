@@ -294,7 +294,7 @@ describe('core primitives — continueAsNew', () => {
 
     expect(ctx.commands[0]).toEqual({
       type: 'continueAsNew',
-      args: ['carried'],
+      props: 'carried',
       seq: 0,
     });
     expect(reachedAfter).toBeFalse();

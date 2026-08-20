@@ -16,6 +16,7 @@ import {condition, createWorkflow, sleep} from '../src/workflow';
 import {workflowDescriptor} from '../src/workflow_descriptor';
 import {
   registeredWorkflowImpls,
+  resolveListedWorkflow,
   resolveWorkflowRegistration,
   workflowNameConflicts,
 } from '../src/workflow_registry';
@@ -26,10 +27,10 @@ describe('createWorkflow — the reference and the registry', () => {
   isolateWorkflowRegistry();
 
   it('registers the implementation under the explicit name', async () => {
-    const greet = createWorkflow(
-      'greet',
-      async ({name}: {name: string}) => `hi ${name}`,
-    );
+    const greet = createWorkflow({
+      key: 'greet',
+      run: async ({name}: {name: string}) => `hi ${name}`,
+    });
 
     expect(registeredWorkflowImpls()).toEqual([['greet', greet.impl]]);
     expect(greet.workflowName).toBe('greet');
@@ -39,10 +40,15 @@ describe('createWorkflow — the reference and the registry', () => {
   });
 
   it('accepts the described literal and attaches the descriptor to the body', () => {
-    const nightly = createWorkflow('nightly', {
+    const nightly = createWorkflow({
+      key: 'nightly',
       title: 'Nightly report',
-      props: [{name: 'day', required: true, type: 'string'}],
-      async start(props: {day: string}) {
+      props: {
+        type: 'object',
+        properties: {day: {type: 'string'}},
+        required: ['day'],
+      },
+      async run(props: {day: string}) {
         return props.day;
       },
     });
@@ -51,31 +57,29 @@ describe('createWorkflow — the reference and the registry', () => {
   });
 
   it('throws a directing error when called outside a workflow', () => {
-    const greet = createWorkflow('greet', async () => 'hi');
+    const greet = createWorkflow({key: 'greet', run: async () => 'hi'});
 
     // The reference looks like the function it replaced, so the error must
     // answer "why didn't my function run?" — and say where each caller goes.
     expect(() => greet()).toThrowError(/dispatches a child workflow/);
-    expect(() => greet.detached([])).toThrowError(
-      /dispatches a child workflow/,
-    );
-    expect(() => greet.execute([])).toThrowError(/dispatches a child workflow/);
+    expect(() => greet.detached()).toThrowError(/dispatches a child workflow/);
+    expect(() => greet.execute()).toThrowError(/dispatches a child workflow/);
   });
 
   it('records a conflict for a name two implementations claim, tolerating re-evaluation', () => {
     const body = async (): Promise<string> => 'one';
-    createWorkflow('dup', body);
+    createWorkflow({key: 'dup', run: body});
     // The same function again is a module evaluating twice, not a mistake.
-    createWorkflow('dup', body);
+    createWorkflow({key: 'dup', run: body});
     expect(workflowNameConflicts()).toEqual([]);
 
-    createWorkflow('dup', async () => 'two');
+    createWorkflow({key: 'dup', run: async () => 'two'});
     expect(workflowNameConflicts()).toEqual(['dup']);
   });
 
   it('makes startWorker refuse while a conflict is unresolved', () => {
-    createWorkflow('charge', async () => 'a');
-    createWorkflow('charge', async () => 'b');
+    createWorkflow({key: 'charge', run: async () => 'a'});
+    createWorkflow({key: 'charge', run: async () => 'b'});
 
     expect(() => startWorker({name: 'conflicted'})).toThrowError(
       /claimed by more than one createWorkflow call: charge/,
@@ -83,7 +87,7 @@ describe('createWorkflow — the reference and the registry', () => {
   });
 
   it('resolves a WorkflowRef entry to its own wire name, and a plain function to its export name', () => {
-    const pay = createWorkflow('pay', async () => 'paid');
+    const pay = createWorkflow({key: 'pay', run: async () => 'paid'});
     const plain = async (): Promise<string> => 'plain';
 
     // An export alias must not become a second name for a registered workflow.
@@ -96,16 +100,46 @@ describe('createWorkflow — the reference and the registry', () => {
       plain,
     ]);
   });
+
+  it('takes a list of references, each registering under its own key', () => {
+    const pay = createWorkflow({key: 'pay', run: async () => 'paid'});
+    const ship = createWorkflow({key: 'ship', run: async () => 'shipped'});
+
+    expect(resolveListedWorkflow(pay, 0)).toEqual(['pay', pay.impl]);
+    expect(resolveListedWorkflow(ship, 1)).toEqual(['ship', ship.impl]);
+  });
+
+  // A list has no key to give a plain function, and `fn.name` cannot stand in
+  // under minification. The map form is what covers that case, so the error
+  // names it rather than only reporting the refusal.
+  it('refuses a plain function in the list, naming both ways to give it a name', () => {
+    const plain = async (): Promise<string> => 'plain';
+
+    expect(() => resolveListedWorkflow(plain, 2)).toThrowError(
+      /workflows\[2\][\s\S]*createWorkflow[\s\S]*module namespace/,
+    );
+  });
+
+  // Through the entrypoint, to pin that the list is a branch `startWorker`
+  // actually takes rather than a helper nothing reaches. It refuses before any
+  // poll loop starts, which is what makes this assertable without a server.
+  it('reaches the list branch from startWorker itself', () => {
+    const plain = async (): Promise<string> => 'plain';
+
+    expect(() =>
+      startWorker({name: 'listed', workflows: [plain]}),
+    ).toThrowError(/workflows\[0\] is a plain function/);
+  });
 });
 
 describe('createWorkflow — dispatching children', () => {
   isolateWorkflowRegistry();
 
   it('runs an invoked reference as a blocking child, not inline', async () => {
-    const child = createWorkflow(
-      'child',
-      async ({name}: {name: string}) => `hi ${name}`,
-    );
+    const child = createWorkflow({
+      key: 'child',
+      run: async ({name}: {name: string}) => `hi ${name}`,
+    });
     const rt = createLocalRuntime()
       // The reference itself is registered, which must unwrap: an engine
       // invoking the dispatcher would start the child as its own child forever.
@@ -139,19 +173,21 @@ describe('createWorkflow — dispatching children', () => {
    * `executeChild` documents, reachable through the typed reference.
    */
   it('correlates two .execute calls under one claimed id to one child', async () => {
-    const step = createWorkflow(
-      'step',
-      async ({tag}: {tag: string}) => `ran ${tag}`,
-    );
+    const step = createWorkflow({
+      key: 'step',
+      run: async ({tag}: {tag: string}) => `ran ${tag}`,
+    });
     const rt = createLocalRuntime()
       .registerWorkflow(step.workflowName, step)
       .registerWorkflow('parent', async () => {
-        const first = await step.execute([{tag: 'a'}], {
-          workflowId: 'claimed-step',
-        });
-        const second = await step.execute([{tag: 'b'}], {
-          workflowId: 'claimed-step',
-        });
+        const first = await step.execute(
+          {tag: 'a'},
+          {workflowId: 'claimed-step'},
+        );
+        const second = await step.execute(
+          {tag: 'b'},
+          {workflowId: 'claimed-step'},
+        );
         return [first, second];
       });
 
@@ -168,14 +204,20 @@ describe('createWorkflow — dispatching children', () => {
   });
 
   it('spawns a detached child under a claimed id via .detached()', async () => {
-    const kid = createWorkflow('kid', async () => {
-      await condition(() => false);
-      return 'unreachable';
+    const kid = createWorkflow({
+      key: 'kid',
+      async run() {
+        await condition(() => false);
+        return 'unreachable';
+      },
     });
     const rt = createLocalRuntime()
       .registerWorkflow(kid.workflowName, kid)
       .registerWorkflow('parent', async () => {
-        kid.detached([], {workflowId: 'the-kid', parentClosePolicy: 'abandon'});
+        kid.detached(undefined, {
+          workflowId: 'the-kid',
+          parentClosePolicy: 'abandon',
+        });
         // Dispatched by an earlier task than the one that settles the parent —
         // a start issued in the settling task is dropped (see
         // `parent_close.spec.ts`), and this spec is about the spawn, not that.

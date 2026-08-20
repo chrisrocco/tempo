@@ -65,7 +65,7 @@ async function runTask(
   const task = await core.buildWorkflowTask(workflowId);
   if (!task) return;
   const ctx = createContext(
-    task.args,
+    task.props,
     task.history,
     task.continueAsNewSuggested,
   );

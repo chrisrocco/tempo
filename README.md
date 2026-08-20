@@ -109,7 +109,7 @@ rt.shutdown(); // stop background timers so the process exits
 Or run one workflow through your worker binary, with no server at all:
 
 ```bash
-tsx spec/support/greeter_worker.ts --local=greeter --args='["world"]'
+tsx spec/support/greeter_worker.ts --local=greeter --props='{"name":"world"}'
 # LOCAL RUN greeter greeter — one workflow, then exit. Not a deployment: …
 # "Hello, world!"
 ```
@@ -224,14 +224,17 @@ import * as Tempo from 'workflow-engine/workflow';
 import * as payments from '../activities/payments';
 const act = Tempo.proxyActivities(payments, { retry: { maximumAttempts: 3 } });
 
-export const order = Tempo.createWorkflow('order', async (id: string) => {
-  await act.charge(id);
+export const order = Tempo.createWorkflow({
+  key: 'order',
+  async run({ id }: { id: string }) {
+    await act.charge(id);
+  },
 });
 
 // worker.ts — bundle this, run it twice, once per --role
 import { startWorker } from 'workflow-engine';
-import * as workflows from './workflows';
-startWorker({ name: 'orders', workflows });
+import { order } from './workflows/order.workflow';
+startWorker({ name: 'orders', workflows: [order] });
 ```
 
 plus the client above, and the **flag vocabulary** both processes read
@@ -363,7 +366,7 @@ the engine:
     At most one task per execution is in flight; a wake landing mid-task
     coalesces into exactly one more. This is where the two concurrency bugs are
     prevented.
-4.  **A workflow worker polls** and gets `{name, args, history}` plus a lease —
+4.  **A workflow worker polls** and gets `{name, props, history}` plus a lease —
     [`worker/worker_loops.ts`](src/worker/worker_loops.ts). It holds no state
     between tasks, so any worker can serve any execution.
 5.  **Replay** builds a fresh context and re-runs the workflow function against

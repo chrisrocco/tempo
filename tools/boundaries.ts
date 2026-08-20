@@ -440,9 +440,9 @@ function checkPurity(
  * `proxyActivities<typeof activities>` needs the activities module's *shape* in the
  * workflow module, and the only way to get it without a runtime edge is
  * `import type * as activities from './activities'`. That is precisely what
- * `spec/support/greeter_worker.ts` tells authors to do, and this checker used to reject it —
- * so following the documented advice failed `npm run lint`, and there was no other
- * way to write a typed workflow module that the convention would accept.
+ * `spec/support/greeter_worker.ts` tells authors to do. Without the exemption,
+ * following the documented advice fails `npm run lint`, and there is no other way
+ * to write a typed workflow module that the convention accepts.
  *
  * The layering rule is deliberately *not* given the same exemption. That one is
  * about which layers may know about which, and a type dependency is still
@@ -466,8 +466,8 @@ function checkPurity(
  *
  * Nothing else in the repo catches the second line. Activities modules are not
  * purity-checked — I/O is their whole job — and the call site matches no
- * nondeterministic pattern. The type-only import used to prevent it by making the
- * binding not exist.
+ * nondeterministic pattern. A type-only import prevents it by making the binding
+ * not exist.
  *
  * So the value import is allowed **only in the shape that cannot be misused**:
  * `import * as NAME from '…'` where every occurrence of `NAME` in the file is an

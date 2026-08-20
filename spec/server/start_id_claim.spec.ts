@@ -67,7 +67,7 @@ describe('starting under an id that is already taken', () => {
       await host.start('order', [{amount: 100}], {workflowId: 'order-44'});
       await host.start('order', [{amount: 500}], {workflowId: 'order-44'});
 
-      expect((await store.get('order-44'))?.args).toEqual([{amount: 100}]);
+      expect((await store.get('order-44'))?.props).toEqual([{amount: 100}]);
     } finally {
       host.shutdown();
     }

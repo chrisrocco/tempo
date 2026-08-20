@@ -40,7 +40,7 @@ const activities: [string, (...args: any[]) => unknown][] = [
   ],
 ];
 const workflows: [string, (...args: any[]) => unknown][] = [
-  ['greeter', (name: string) => runActivity<string>('greet', name)],
+  ['greeter', ({name}: {name: string}) => runActivity<string>('greet', name)],
   ['detonator', () => runActivity('explode')],
 ];
 
@@ -74,20 +74,20 @@ describe('--local — what the launch site asked for', () => {
     expect(resolveLocalRun(['--role=workflow'])).toBeUndefined();
   });
 
-  it('names the workflow, and defaults to no arguments', () => {
+  it('names the workflow, and defaults to no props', () => {
     expect(resolveLocalRun(['--local=greeter'])).toEqual({
       workflow: 'greeter',
-      args: [],
+      props: undefined,
     });
   });
 
-  it('reads arguments as a JSON array', () => {
-    expect(resolveLocalRun(['--local=greeter', '--args=["world", 2]'])).toEqual(
-      {
-        workflow: 'greeter',
-        args: ['world', 2],
-      },
-    );
+  it('reads props as a JSON object', () => {
+    expect(
+      resolveLocalRun(['--local=greeter', '--props={"name":"world","n":2}']),
+    ).toEqual({
+      workflow: 'greeter',
+      props: {name: 'world', n: 2},
+    });
   });
 
   it('refuses --local without a workflow to run', () => {
@@ -118,23 +118,32 @@ describe('--local — the flags it refuses', () => {
     ).toThrowError(/--role cannot be combined with --local/);
   });
 
-  it('refuses arguments that are not a JSON array', () => {
-    // The arguments are spread into the workflow's parameters. A bare string
-    // would arrive as one argument the workflow did not expect and fail
-    // somewhere inside it, which is much further from the mistake.
+  it('refuses props that are not a JSON object', () => {
+    // A workflow takes one props object. A bare string arrives as something it
+    // cannot destructure and fails somewhere inside it, which is much further
+    // from the mistake.
     expect(() =>
-      resolveLocalRun(['--local=greeter', '--args="world"']),
-    ).toThrowError(/--args must be a JSON array/);
+      resolveLocalRun(['--local=greeter', '--props="world"']),
+    ).toThrowError(/--props must be a JSON object/);
     expect(() =>
-      resolveLocalRun(['--local=greeter', '--args=not json']),
-    ).toThrowError(/--args must be JSON/);
+      resolveLocalRun(['--local=greeter', '--props=not json']),
+    ).toThrowError(/--props must be JSON/);
+  });
+
+  it('names the array case, which is what the old --args spelling passed', () => {
+    // A command line written against the older `--args` spelling still passes an
+    // array here. Naming that shape is the difference between a one-line fix and
+    // re-reading the entrypoint.
+    expect(() =>
+      resolveLocalRun(['--local=greeter', '--props=["world"]']),
+    ).toThrowError(/--props must be a JSON object, not an array/);
   });
 });
 
 describe('--local — running the workflow', () => {
   it('runs it against the registries the entrypoint was handed', async () => {
     const result = await runLocally(
-      {workflow: 'greeter', args: ['world']},
+      {workflow: 'greeter', props: {name: 'world'}},
       registrations,
     );
 
@@ -148,13 +157,13 @@ describe('--local — running the workflow', () => {
     // never registered otherwise says nothing until executions park on a queue
     // whose workers reject every task.
     await expectAsync(
-      runLocally({workflow: 'absent', args: []}, registrations),
+      runLocally({workflow: 'absent', props: undefined}, registrations),
     ).toBeRejectedWithError(/no workflow registered as absent/);
   });
 
   it('rejects with the workflow’s own failure', async () => {
     await expectAsync(
-      runLocally({workflow: 'detonator', args: []}, registrations),
+      runLocally({workflow: 'detonator', props: undefined}, registrations),
     ).toBeRejectedWithError(/activity blew up/);
   });
 
@@ -164,7 +173,10 @@ describe('--local — running the workflow', () => {
     // `startLocalRun`, which sets `process.exitCode` instead of calling
     // `process.exit` so stdout is not truncated. If this ever regressed the
     // spawned cases below would hang rather than fail.
-    await runLocally({workflow: 'greeter', args: ['world']}, registrations);
+    await runLocally(
+      {workflow: 'greeter', props: {name: 'world'}},
+      registrations,
+    );
     expect(true).toBeTrue();
   });
 });
@@ -173,7 +185,7 @@ describe('--local — the real binary', () => {
   it('prints the result as JSON on stdout and exits 0', async () => {
     const {code, out, err} = await runBinary([
       '--local=greeter',
-      '--args=["world"]',
+      '--props={"name":"world"}',
     ]);
 
     expect(code).toBe(0);
@@ -187,7 +199,10 @@ describe('--local — the real binary', () => {
   }, 30000);
 
   it('says LOCAL RUN on stderr before it runs, on every run', async () => {
-    const {err} = await runBinary(['--local=greeter', '--args=["world"]']);
+    const {err} = await runBinary([
+      '--local=greeter',
+      '--props={"name":"world"}',
+    ]);
 
     // The only defence against a `--local` left in a supervisor's command line.
     // Nothing here can detect a supervisor — that would mean knowing which one,
@@ -212,7 +227,7 @@ describe('--local — the real binary', () => {
     // remote composition would hang here rather than answer.
     const {code, out} = await runBinary([
       '--local=greeter',
-      '--args=["alone"]',
+      '--props={"name":"alone"}',
     ]);
 
     expect(code).toBe(0);

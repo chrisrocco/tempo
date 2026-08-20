@@ -1,10 +1,9 @@
 /**
  * @fileoverview
- * In-memory HistoryStore: a Map of execution records. This is the old runtime's
- * `executions` map, promoted behind the async port. The methods are async to
- * satisfy the interface, but their bodies are synchronous (Map access), so each
- * is atomic — a filesystem/db adapter is the Phase-4 swap and serializes its own
- * writes. Powers LocalService and the fast test path.
+ * In-memory HistoryStore: a Map of execution records, behind the async port. The
+ * methods are async to satisfy the interface, but their bodies are synchronous
+ * (Map access), so each is atomic — a filesystem/db adapter (ROADMAP Phase 4)
+ * serializes its own writes. Powers LocalService and the fast test path.
  */
 
 import {
@@ -34,7 +33,7 @@ export class MemoryHistoryStore implements HistoryStore {
   async create(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string = DEFAULT_TASK_QUEUE,
     parent?: ExecutionParent,
   ): Promise<void> {
@@ -45,7 +44,7 @@ export class MemoryHistoryStore implements HistoryStore {
       workflowId,
       runId: 0,
       name,
-      args,
+      props,
       taskQueue,
       createdAt: Date.now(),
       history: [],
@@ -192,12 +191,12 @@ export class MemoryHistoryStore implements HistoryStore {
 
   async resetForContinueAsNew(
     workflowId: string,
-    args: unknown[],
+    props: unknown,
   ): Promise<void> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.history = [];
-    rec.args = args;
+    rec.props = props;
     rec.version = 0;
     rec.runId += 1;
     // status stays 'running'; result/failure remain unset — this is not a close.

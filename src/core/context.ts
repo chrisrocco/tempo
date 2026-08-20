@@ -55,16 +55,16 @@ interface BlockedCondition {
 }
 
 /**
- * A registered workflow function. The `any[]` rest parameter is deliberate and
- * cannot be `unknown[]`: `strictFunctionTypes` makes parameters contravariant, so
- * an author's `(name: string) => Promise<string>` would not be assignable to a
- * registry of `(...args: unknown[]) => …`. Arguments arrive from history as
- * `unknown[]` and are checked by the workflow's own signature.
+ * A registered workflow function: one props object in, a promise out.
+ *
+ * `core/` cannot import the author-facing `AnyWorkflowFn`, so this restates it —
+ * see `src/workflow_descriptor.ts` for why the parameter is `any`, and for what
+ * the single parameter does and does not enforce.
  */
-export type WorkflowFn = (...args: any[]) => Promise<unknown>;
+export type WorkflowFn = (props?: any) => Promise<unknown>;
 
 export interface WorkflowContext {
-  args: unknown[];
+  props: unknown;
   events: HistoryEvent[];
   idx: number;
   seq: number; // command id counter (activities, timers, children) — recorded in history
@@ -221,7 +221,7 @@ function patchesInHistory(events: HistoryEvent[]): Map<number, string> {
  * about.
  */
 export function createContext(
-  args: unknown[],
+  props: unknown,
   events: HistoryEvent[],
   continueAsNewSuggested = false,
   carryover: Carryover = {},
@@ -229,7 +229,7 @@ export function createContext(
   workflowId = '',
 ): WorkflowContext {
   return {
-    args,
+    props,
     events,
     // Both copied, not aliased: the task's carryover belongs to the caller, and
     // a replay that mutated it in place would leave the caller's copy holding

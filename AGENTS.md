@@ -179,6 +179,20 @@ believed. Where a comment and the code disagree, the code is the truth and the
 comment is a bug — fix it rather than working around it. Don't leave a pointer
 to something that no longer exists.
 
+**Write the state, not the delta.** "This used to…", "that stopped being enough
+when…", "an earlier version of this file…" describe the repo's history rather
+than its code, and a reader arriving later has to work out which half is
+current. State what is true now, in the present tense.
+
+The distinction that matters is whether an **alternative** is being recorded. A
+decision had options, and naming the one not taken is the half that stops it
+being relitigated — so write it as a live alternative, not as a past event.
+"There used to be an `isLive` flag here" is autobiography; "the alternative is a
+live edge, which answers a question about position that is really about content"
+is the same argument, present tense, and it stays true. Where there was no real
+fork — nobody weighed having `activityRetryScheduled` against not having it —
+there is no decision to record: say what the thing is for and stop.
+
 Two ways prose goes stale without ever being wrong when written:
 
 - **A claim a later change falsified.** `ActivityRetryGroup` called flakiness
@@ -216,10 +230,11 @@ trailing commas). Two rules need local judgement rather than literal
 application:
 
 - **`any` in rest-parameter positions is correct here and must stay.**
-  `WorkflowFn`, `ActivityFn`, and `AnyFn` take `(...args: any[])` because
-  `strictFunctionTypes` makes parameters contravariant: a real `(name: string)
-=> Promise<string>` is _not_ assignable to `(...args: unknown[]) => …`, so a
-  registry typed that way would accept nothing anyone writes. Return types
+  `ActivityFn` and `AnyFn` take `(...args: any[])`, and `WorkflowFn` takes
+  `(props?: any)`, because `strictFunctionTypes` makes parameters
+  contravariant: a real `({name}: {name: string}) => Promise<string>` is _not_
+  assignable to `(props?: unknown) => …`, so a registry typed that way would
+  accept nothing anyone writes. Return types
   carry no such constraint and stay `unknown`. Each such `any` is documented
   at its declaration — Google's rule is to justify it, not to pretend it is
   avoidable.

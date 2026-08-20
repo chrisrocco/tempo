@@ -9,9 +9,28 @@
  * a signal that never arrives unless someone sends it, the retrying one backs off
  * for a minute at a time, and the wedged one fails its task forever.
  *
- * Every workflow here is `defineWorkflow`d, because half the point of the harness
- * is giving a catalogue view something to show: a dashboard developer needs rows
+ * Every workflow here is described, because half the point of the harness is
+ * giving a catalogue view something to show: a dashboard developer needs rows
  * with titles, descriptions and props, not five bare identifiers.
+ *
+ * The descriptions live in `SCENARIO_DESCRIPTORS` below rather than on the
+ * functions, which is the one place in the repo that reads that way round. Two
+ * rules meet here and leave no third option:
+ *
+ * - `createWorkflow` is the only way to describe a workflow, and it **registers**
+ *   into the process-global registry at module load. This module is imported by
+ *   `testing/index.ts`, the published test entrypoint, so declaring these would
+ *   mean anyone importing the harness silently gets four scenario workflows
+ *   folded into their own worker.
+ * - Reaching the internal writer directly is what `tools/boundaries.ts` forbids:
+ *   a workflow module may import `workflow.ts` and nothing else.
+ *
+ * So the fixtures carry their descriptions as data the harness merges when it
+ * reports. The usual objection to a name-keyed map — a string that has to match a
+ * function can drift silently — is answered here specifically: these names are
+ * already strings in `SCENARIO_WORKFLOWS`, already what the harness starts them
+ * by, and `spec/testing/scenarios.spec.ts` asserts the published catalogue
+ * carries these exact titles. Drift fails a spec rather than going unnoticed.
  *
  * A workflow module, so it obeys the author entrypoint — imports only
  * `workflow.ts`, and hands its activities namespace to nothing but
@@ -22,7 +41,6 @@ import * as scenarioActivities from './scenario_activities';
 import {
   condition,
   defineSignal,
-  defineWorkflow,
   proxyActivities,
   setHandler,
 } from '../workflow';
@@ -49,54 +67,69 @@ const retrying = proxyActivities(scenarioActivities, {
 /** Sent to a parked execution to release it — the scenario's escape hatch. */
 export const release = defineSignal('release');
 
-export const scenarioCompletes = defineWorkflow({
-  title: 'Completes immediately',
-  description:
-    'Runs one activity that returns straight away, then settles as completed.',
-  props: [
-    {
-      name: 'value',
-      type: 'string',
-      required: true,
-      description: 'Echoed back as the execution result.',
+export async function scenarioCompletes(props: {
+  value: string;
+}): Promise<unknown> {
+  return settling.scenario_succeed(props.value);
+}
+
+export async function scenarioFails(): Promise<unknown> {
+  return settling.scenario_fail();
+}
+
+export async function scenarioParks(): Promise<string> {
+  let released = false;
+  setHandler(release, () => {
+    released = true;
+  });
+  await condition(() => released);
+  return 'released';
+}
+
+export async function scenarioRetries(): Promise<unknown> {
+  return retrying.scenario_fail();
+}
+
+/**
+ * What each scenario says about itself, keyed by the name it is registered under
+ * — see the fileoverview for why this is data here rather than riding on the
+ * functions.
+ *
+ * Not exported as a workflow: the harness filters its registry down to callables,
+ * so this object is skipped by the same check that skips `release`.
+ */
+export const SCENARIO_DESCRIPTORS = {
+  scenarioCompletes: {
+    title: 'Completes immediately',
+    description:
+      'Runs one activity that returns straight away, then settles as completed.',
+    props: {
+      type: 'object',
+      required: ['value'],
+      properties: {
+        value: {
+          type: 'string',
+          description: 'Echoed back as the execution result.',
+        },
+      },
     },
-  ],
-  async start(props: {value: string}): Promise<unknown> {
-    return settling.scenario_succeed(props.value);
   },
-});
-
-export const scenarioFails = defineWorkflow({
-  title: 'Fails immediately',
-  description:
-    'Runs one activity that throws, with no retries, so the execution settles as failed.',
-  async start(): Promise<unknown> {
-    return settling.scenario_fail();
+  scenarioFails: {
+    title: 'Fails immediately',
+    description:
+      'Runs one activity that throws, with no retries, so the execution settles as failed.',
   },
-});
-
-export const scenarioParks = defineWorkflow({
-  title: 'Waits for a signal',
-  description:
-    'Parks on a condition that only a `release` signal makes true. Stays running until it gets one.',
-  async start(): Promise<string> {
-    let released = false;
-    setHandler(release, () => {
-      released = true;
-    });
-    await condition(() => released);
-    return 'released';
+  scenarioParks: {
+    title: 'Waits for a signal',
+    description:
+      'Parks on a condition that only a `release` signal makes true. Stays running until it gets one.',
   },
-});
-
-export const scenarioRetries = defineWorkflow({
-  title: 'Retries an activity',
-  description:
-    'Runs an activity that always throws, backing off a minute between attempts. Stays running with its attempt count climbing.',
-  async start(): Promise<unknown> {
-    return retrying.scenario_fail();
+  scenarioRetries: {
+    title: 'Retries an activity',
+    description:
+      'Runs an activity that always throws, backing off a minute between attempts. Stays running with its attempt count climbing.',
   },
-});
+} as const;
 
 // There is deliberately no workflow here for the `stuck` scenario, and that is
 // the fixture rather than an omission.

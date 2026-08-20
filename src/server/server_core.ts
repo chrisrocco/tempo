@@ -39,20 +39,18 @@
  * `childStarted.detached`: the marker is unconditional, and the flag tells the
  * recovery path which children have a completion coming.
  *
- * **Every** command leaves one, with no exceptions left. `cancelChild` used to be
- * the exception, on the grounds that its effect is already a durable record — the
- * `cancelRequested` it appends to the *child's* history — and that `requestCancel`
+ * **Every** command leaves one, with no exceptions. `cancelChild` is the one that
+ * looks like it could go without: its effect is already a durable record — the
+ * `cancelRequested` it appends to the *child's* history — and `requestCancel`
  * short-circuits on finding one, so a re-dispatched cancel is idempotent rather
- * than a second cancellation. All of that is still true, and it is an argument
- * about **safety**: re-dispatch does no harm.
- *
- * It stopped being sufficient when replay began deciding what to emit by asking
- * whether history holds a command's seq (`core/workflow_api`). That question needs
- * **observability**, and a record living on another execution cannot supply it: a
- * cancel that reached the workflow mid-batch was dropped and never re-issued, with
- * not even a gap in the seqs to notice — the wedge of issue #39, surviving in the
- * one place its fix could not see (issue #50). `childCancelRequested` is what
- * closes it.
+ * than a second cancellation. That argument is sound, and it is about **safety**:
+ * re-dispatch does no harm. Safety is not what replay asks about. Replay decides
+ * what to emit by asking whether history holds a command's seq
+ * (`core/workflow_api`), which needs **observability**, and a record living on
+ * another execution cannot supply it — a cancel reaching the workflow mid-batch
+ * is dropped and never re-issued, without even a gap in the seqs to notice. That
+ * is the wedge of issue #39 in the one place its fix could not see (issue #50),
+ * and `childCancelRequested` is what closes it.
  *
  * `recordPatch` is the invariant read from the other end: a command that is
  * *nothing but* its marker. It dispatches no work, so there is no "record the
@@ -167,6 +165,7 @@ import type {
   WorkflowTaskResult,
 } from '../protocol';
 import {ANY_TASK_QUEUE} from '../protocol';
+import type {ActivityCheckpoints} from './execution_view';
 import {completedSeqs, pendingWork} from './pending_work';
 import {
   createWorkerRegistry,
@@ -270,7 +269,7 @@ export interface ServerCoreDeps {
   launch(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string,
     parent: ExecutionParent | undefined,
   ): void;
@@ -284,15 +283,15 @@ export interface ServerCoreDeps {
    * Exists because not every settle follows a workflow task. `LocalService`
    * learns an execution's outcome by watching its own drain loop — it applies a
    * task, re-reads the record, and settles the caller's `getResult` — and
-   * `terminate` produces no task at all, so it used to patch its bookkeeping by
-   * hand from the client side.
+   * `terminate` produces no task at all.
    *
-   * That stopped being enough when the server acquired a reason of its own to
+   * Patching that bookkeeping by hand from the client side covers only the
+   * terminations a client asked for, and the server has reasons of its own to
    * terminate an execution nobody asked about: a child whose parent closed under
-   * a `terminate` policy (see `closeChildren`). Without this the child would be
-   * `terminated` on the record while local mode still reported it `running`, and
-   * anyone holding its `getResult` promise would wait forever for an outcome
-   * that had already happened.
+   * a `terminate` policy (see `closeChildren`). Without this the child is
+   * `terminated` on the record while local mode still reports it `running`, and
+   * anyone holding its `getResult` promise waits forever for an outcome that has
+   * already happened.
    *
    * Called at every terminal transition rather than only that one, so there is
    * no rule to remember about which settles are observable. Optional because a
@@ -343,12 +342,11 @@ export interface ServerCore {
   /**
    * Request cancellation, cascading to **every** child this execution started.
    *
-   * Not only the fire-and-forget ones: both kinds
-   * go into `childrenByParent`, so a blocking child is cancelled alongside a
-   * detached one. That is the intended behaviour — a parent unwinding through a
-   * `CancelledFailure` is not going to consume the result it was awaiting — and
-   * cancellation remains the only thing that walks downward at all (see the
-   * header).
+   * Not only the fire-and-forget ones: both kinds go into `childrenByParent`, so
+   * a blocking child is cancelled alongside a detached one. That is the intended
+   * behaviour — a parent unwinding through a `CancelledFailure` is not going to
+   * consume the result it was awaiting — and cancellation remains the only thing
+   * that walks downward at all (see the header).
    */
   requestCancel(workflowId: string): Promise<void>;
   /**
@@ -462,8 +460,19 @@ export interface ServerCore {
   /**
    * The attempt behind `token` is still alive: renew its lease and reset its
    * silence deadline. Ignored once the server has given up on that attempt.
+   *
+   * `checkpoint` replaces this attempt's checkpoint, readable back through
+   * `activityCheckpoints`. Omitting it leaves the previous one standing.
    */
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
+  /**
+   * What each of `workflowId`'s in-flight attempts last reported, keyed by seq.
+   *
+   * Live state, and the one input to `describeExecution` history cannot supply.
+   * Deliberately **not** durable: a restart abandons every attempt, so a
+   * persisted checkpoint would outlive the work it describes.
+   */
+  activityCheckpoints(workflowId: string): ActivityCheckpoints;
 }
 
 export function createServerCore(deps: ServerCoreDeps): ServerCore {
@@ -515,9 +524,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
+  // The checkpoint rides on the lease so it is cleaned up by construction: every
+  // path that ends an attempt already deletes the lease. A parallel map would
+  // need each of them to remember, and the one that forgot would leave `describe`
+  // reporting an attempt nobody is running.
   const activityLeases = new Map<
     TaskToken,
-    {workflowId: string; seq: number}
+    {
+      workflowId: string;
+      seq: number;
+      checkpoint?: {checkpoint: unknown; at: number};
+    }
   >();
   // `polledAt` exists purely so a completion can report how long the task was out
   // with a worker — the task-latency number Phase 7 wants to aggregate.
@@ -748,7 +765,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         launch(
           childId,
           cmd.childName,
-          cmd.childArgs,
+          cmd.childProps,
           cmd.taskQueue ?? taskQueue,
           {workflowId, seq: cmd.seq},
         );
@@ -797,7 +814,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         launch(
           cmd.targetId,
           cmd.name,
-          cmd.args,
+          cmd.props,
           cmd.taskQueue ?? taskQueue,
           undefined,
         );
@@ -900,7 +917,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       token: workflowId,
       workflowId,
       name: rec.name,
-      args: rec.args,
+      props: rec.props,
       history: rec.history.slice(),
       continueAsNewSuggested:
         rec.history.length >= continueAsNewSuggestThreshold,
@@ -933,10 +950,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // Dispatch before settling, not instead of it. A task can both issue
     // commands and finish the workflow — `signalWorkflow(parent, done); return
     // result;` is one activation — and the dispositions below all return early,
-    // so a batch reaching them would be discarded. Nothing raises: the
-    // execution completed normally, having silently not done what its last line
-    // said. Every command has this shape, and the fire-and-forget ones have it
-    // worst, since they are the ones with no promise whose absence would be
+    // so a batch reaching them without this would be discarded. Nothing raises:
+    // the execution completes normally, having silently not done what its last
+    // line said. Every command has this shape, and the fire-and-forget ones have
+    // it worst, since they are the ones with no promise whose absence would be
     // noticed.
     //
     // Safe for a settling execution because a dispatch outliving it is already
@@ -1023,7 +1040,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // this is the one moment where changing the seed cannot split a run.
       if (result.carryover !== undefined)
         await historyStore.setCarryover(workflowId, result.carryover);
-      await historyStore.resetForContinueAsNew(workflowId, caN.args);
+      await historyStore.resetForContinueAsNew(workflowId, caN.props);
       wake(workflowId); // drive the fresh run
       return;
     }
@@ -1651,7 +1668,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         token: leased.token,
         workflowId: leased.workflowId,
         name: rec.name,
-        args: rec.args,
+        props: rec.props,
         history: rec.history.slice(),
         carryover: {...rec.carryover},
         continueAsNewSuggested:
@@ -1801,6 +1818,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowId: task.workflowId,
       seq: task.seq,
     });
+    // A new attempt supersedes the last one's checkpoint, which now describes
+    // work being redone. This is the one path that ends an attempt without
+    // deleting its lease — the queue expiring it and redelivering — and the stale
+    // lease must stay: `completeActivityTask` relies on it to accept a late
+    // completion from the abandoned worker. So only the checkpoint is cleared.
+    for (const [token, lease] of activityLeases)
+      if (
+        token !== task.token &&
+        lease.workflowId === task.workflowId &&
+        lease.seq === task.seq
+      )
+        lease.checkpoint = undefined;
     // Stamped here rather than reported by the worker at completion, for two
     // reasons. One clock: a `startedAt` from the worker is on the worker's clock,
     // and a skewed one could claim to have started after the server recorded it
@@ -1825,7 +1854,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     return task;
   }
 
-  async function heartbeatActivityTask(token: TaskToken): Promise<void> {
+  async function heartbeatActivityTask(
+    token: TaskToken,
+    checkpoint?: unknown,
+  ): Promise<void> {
     const lease = activityLeases.get(token);
     const task = heartbeatTasks.get(token);
     // Silence is the only signal the server has, so a heartbeat for an attempt
@@ -1836,11 +1868,28 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const timeoutMs = task.options.heartbeatTimeoutMs;
     if (timeoutMs !== undefined && timeoutMs > 0)
       armAttemptTimer(task, 'heartbeat', timeoutMs);
+    // One slot, overwritten. A bare `heartbeat()` leaves the last checkpoint
+    // standing rather than clearing it: reporting liveness is not a statement
+    // that the attempt forgot where it was.
+    if (checkpoint !== undefined)
+      lease.checkpoint = {checkpoint, at: Date.now()};
     log('activity.heartbeat', {
       workflowId: lease.workflowId,
       seq: lease.seq,
       name: task.name,
     });
+  }
+
+  /**
+   * Walks the leases rather than keeping a per-execution index: few attempts are
+   * ever out at once, and a second structure is a second thing to keep in step.
+   */
+  function activityCheckpoints(workflowId: string): ActivityCheckpoints {
+    const out: ActivityCheckpoints = {};
+    for (const lease of activityLeases.values())
+      if (lease.workflowId === workflowId && lease.checkpoint)
+        out[lease.seq] = lease.checkpoint;
+    return out;
   }
 
   async function completeActivityTask(
@@ -1883,5 +1932,6 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     pollActivityTask,
     completeActivityTask,
     heartbeatActivityTask,
+    activityCheckpoints,
   };
 }

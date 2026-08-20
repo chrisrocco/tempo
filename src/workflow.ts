@@ -17,9 +17,12 @@
  * ```ts
  * import * as Tempo from 'workflow-engine/workflow';
  *
- * const charge = Tempo.createWorkflow('charge', async (id: string) => {
- *   await Tempo.sleep(1000);
- *   return acts.capture(id);
+ * const charge = Tempo.createWorkflow({
+ *   key: 'charge',
+ *   async run({id}: {id: string}) {
+ *     await Tempo.sleep(1000);
+ *     return acts.capture(id);
+ *   },
  * });
  * ```
  *
@@ -131,12 +134,12 @@ export {
   type WorkflowInfo,
 } from './core/workflow_api';
 
+export type {AnyWorkflowFn} from './workflow_descriptor';
 export {
-  defineWorkflow,
-  type AnyWorkflowFn,
-  type WorkflowDefinition,
-} from './workflow_descriptor';
-export {createWorkflow, type WorkflowRef} from './workflow_registry';
+  createWorkflow,
+  type WorkflowRef,
+  type WorkflowRegistration,
+} from './workflow_registry';
 
 // author-facing option types (erased at runtime; safe on the deterministic surface)
 export type {
@@ -144,8 +147,8 @@ export type {
   ParentClosePolicy,
   RetryPolicy,
   WorkflowDescriptor,
-  WorkflowProp,
-  WorkflowPropType,
+  WorkflowPropsSchema,
+  JsonSchema,
 } from './protocol';
 export type {
   ActivityOptionsInput,
@@ -170,20 +173,20 @@ export type {ActivityProxy};
  *
  * ## Why it takes the implementations
  *
- * This used to take only a type — `proxyActivities<typeof payments>(options)` — which
- * did the typing and nothing else, leaving the implementations to reach the worker by
- * a second, unrelated route: a flat `activities` object at the entrypoint, maintained
- * by hand. That holds up for a small artifact and stops holding up for a large
- * workflow split across helper modules, where the entrypoint must name every
- * activities module any helper touches. Nothing checks the list, and an omission
- * surfaces as an execution parking on a retrying activity rather than as a
- * configuration error.
- *
- * Now **declaring that a workflow will call an activity is what registers it.** There
- * is no list to maintain and no order to get wrong: the entrypoint imports its
+ * **Declaring that a workflow will call an activity is what registers it.** There is
+ * no list to maintain and no order to get wrong: the entrypoint imports its
  * workflows, loading them runs these calls, and the worker ends up with exactly the
  * activities its workflows asked for. `startWorker({activities})` still works and
  * still wins on a name collision, for a worker that would rather be explicit.
+ *
+ * Taking only a type — `proxyActivities<typeof payments>(options)` — would do the
+ * typing and nothing else, leaving the implementations to reach the worker by a
+ * second, unrelated route: a flat `activities` object at the entrypoint, maintained
+ * by hand. That holds up for a small artifact and stops holding up for a large
+ * workflow split across helper modules, where the entrypoint must name every
+ * activities module any helper touches. Nothing checks that list, and an omission
+ * surfaces as an execution parking on a retrying activity rather than as a
+ * configuration error.
  *
  * ## Why this is on the deterministic surface at all
  *

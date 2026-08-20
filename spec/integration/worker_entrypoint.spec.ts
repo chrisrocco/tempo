@@ -10,11 +10,10 @@
  * entrypoint does on the caller's behalf, and the precedence rules that decide
  * where the work goes.
  *
- * Every case runs against a real server on loopback, because a worker only has
- * one shape now — poll loops against a `RemoteService`. These used to compose an
- * in-process runtime through `--runtime=local` to avoid the port; that flag is
- * gone (see `src/tempo.ts`), and a loopback server is cheap enough that it was
- * never the reason to keep it.
+ * Every case runs against a real server on loopback, because a worker has one
+ * shape — poll loops against a `RemoteService` (see `src/tempo.ts`). Composing an
+ * in-process runtime here to avoid the port would test a shape no deployment has,
+ * and a loopback server is cheap.
  */
 
 import 'jasmine';

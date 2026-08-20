@@ -8,7 +8,7 @@
  *   lock                       — single-writer guard (this process's pid)
  *   deleted.json               — {highestDeletedSuffix}; see `HistoryStore.delete`
  *   executions/<enc-id>/
- *     meta.json                — {workflowId, runId, name, args, status, result, failure}
+ *     meta.json                — {workflowId, runId, name, props, status, result, failure}
  *     events.jsonl             — the history, one JSON event per line (append-only)
  *
  * The event-sourced history maps almost 1:1 onto an append-only log: `append` is
@@ -37,11 +37,44 @@ import type {
 } from '../ports/history_store';
 import {VersionConflictError, trailingIdSuffix} from '../ports/history_store';
 
+/**
+ * Refuse a data directory written before workflows took one props object.
+ *
+ * A workflow's arguments used to persist as `args: unknown[]`; they now persist
+ * as `props: unknown`. Nothing translates between the two, and that is the
+ * decision — this was a prototype, and a converter would be a permanent tax for
+ * a format nobody had deployed.
+ *
+ * What is **not** acceptable is reading such a dir anyway. Every field is
+ * optional-shaped after `JSON.parse`, so an old `meta.json` loads happily with
+ * `props: undefined`, and every execution resumes running against nothing: a
+ * workflow that charged an order silently charges `undefined`. Silent is worse
+ * than broken, so a record carrying the old key stops the boot and says what to
+ * do about it.
+ *
+ * Detected by the old key rather than by a version stamp because no stamp was
+ * ever written — the only evidence a dir predates this is the shape of what is
+ * in it. New dirs are written with `props` and never match.
+ */
+function assertReadableFormat(
+  meta: PersistedMeta,
+  recordDir: string,
+  dataDir: string,
+): void {
+  if (!('args' in meta)) return;
+  throw new Error(
+    `${dataDir} was written by an older format: an execution's arguments are ` +
+      `stored as \`props\` (one object) and ${recordDir} still has \`args\` (a list). ` +
+      `There is no migration — delete ${dataDir}, or point --data-dir at a new ` +
+      `one. Deleting the one record is not enough: the next boot stops on the next.`,
+  );
+}
+
 interface PersistedMeta {
   workflowId: string;
   runId: number;
   name: string;
-  args: unknown[];
+  props: unknown;
   /** Absent in data dirs written before routing existed; reads as the default. */
   taskQueue?: string;
   status: ExecutionStatus;
@@ -139,12 +172,25 @@ export class FileHistoryStore implements HistoryStore {
     return this.dir;
   }
 
-  /** Open (or create) a data dir: acquire the single-writer lock, then load state. */
+  /**
+   * Open (or create) a data dir: acquire the single-writer lock, then load state.
+   *
+   * The lock is released if loading throws. It is taken before the load and so
+   * would otherwise outlive a failed open, and the next attempt would report
+   * `data dir … is locked` — burying the reason the first one failed under a
+   * complaint about the wreckage it left. `assertReadableFormat` is exactly such
+   * a failure, and its whole job is to be read.
+   */
   static async open(dir: string): Promise<FileHistoryStore> {
     await fs.mkdir(dir, {recursive: true});
     await acquireLock(dir);
     const store = new FileHistoryStore(dir);
-    await store.load();
+    try {
+      await store.load();
+    } catch (e) {
+      await fs.rm(path.join(dir, 'lock'), {force: true});
+      throw e;
+    }
     return store;
   }
 
@@ -158,7 +204,7 @@ export class FileHistoryStore implements HistoryStore {
   async create(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string = DEFAULT_TASK_QUEUE,
     parent?: ExecutionParent,
   ): Promise<void> {
@@ -169,7 +215,7 @@ export class FileHistoryStore implements HistoryStore {
       workflowId,
       runId: 0,
       name,
-      args,
+      props,
       taskQueue,
       createdAt: Date.now(),
       history: [],
@@ -363,12 +409,12 @@ export class FileHistoryStore implements HistoryStore {
 
   async resetForContinueAsNew(
     workflowId: string,
-    args: unknown[],
+    props: unknown,
   ): Promise<void> {
     const rec = this.cache.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.history = [];
-    rec.args = args;
+    rec.props = props;
     rec.version = 0;
     rec.runId += 1;
     await this.enqueue(workflowId, async () => {
@@ -412,7 +458,7 @@ export class FileHistoryStore implements HistoryStore {
       workflowId: rec.workflowId,
       runId: rec.runId,
       name: rec.name,
-      args: rec.args,
+      props: rec.props,
       taskQueue: rec.taskQueue,
       status: rec.status,
       createdAt: rec.createdAt,
@@ -472,6 +518,7 @@ export class FileHistoryStore implements HistoryStore {
         .catch(() => null);
       if (metaRaw === null) continue;
       const meta = JSON.parse(metaRaw) as PersistedMeta;
+      assertReadableFormat(meta, d, this.dir);
       const eventsRaw = await fs
         .readFile(path.join(d, 'events.jsonl'), 'utf8')
         .catch(() => '');
@@ -480,7 +527,7 @@ export class FileHistoryStore implements HistoryStore {
         workflowId: meta.workflowId,
         runId: meta.runId,
         name: meta.name,
-        args: meta.args,
+        props: meta.props,
         taskQueue: meta.taskQueue ?? DEFAULT_TASK_QUEUE,
         // A data dir written before creation time was recorded still has to sort
         // somewhere, and the first event's timestamp is the closest true answer

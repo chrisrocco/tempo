@@ -320,7 +320,7 @@ describe('core replay — new work reached while history remains', () => {
   it('emits a cancelChild reached mid-batch, which no marker records', async () => {
     // The gap #49 left open. The completion moves the workflow on to `cancel()`
     // while the signal behind it keeps history from having run out — the shape
-    // that used to drop the command with nothing to show it had gone.
+    // that drops the command, with nothing to show it had gone.
     const events: HistoryEvent[] = [
       {type: 'childStarted', seq: 0, childId: 'child', detached: true},
       {type: 'activityScheduled', seq: 1, name: 'look', args: [], options: {}},

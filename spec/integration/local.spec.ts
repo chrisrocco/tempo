@@ -16,6 +16,7 @@
  */
 
 import {createLocalRuntime} from '../../src';
+import {heartbeat} from '../../src/activity';
 import {
   CancelledFailure,
   condition,
@@ -157,6 +158,52 @@ describe('local runtime — activities', () => {
     await expectAsync(rt.start('missing').result()).toBeRejectedWithError(
       /no activity does-not-exist/,
     );
+  });
+});
+
+describe('local runtime — activity progress', () => {
+  // The headline: `describe` — the call a dashboard makes — hands back where a
+  // long activity has got to, while the attempt is still in flight.
+  it('reports the checkpoint a running activity last heartbeated', async () => {
+    let release = (): void => {};
+    const blocked = new Promise<void>((r) => {
+      release = r;
+    });
+    const rt = createLocalRuntime()
+      .registerActivity('scan', async () => {
+        heartbeat({jobId: 'q-8823', pct: 40});
+        await blocked;
+        return 'scanned';
+      })
+      .registerWorkflow('scanner', async () => runActivity<string>('scan'));
+
+    const handle = rt.start<string>('scanner');
+    await wait(20); // the attempt starts and beats
+
+    const detail = await handle.describe();
+    expect(detail!.pending.activities[0].checkpoint).toEqual({
+      jobId: 'q-8823',
+      pct: 40,
+    });
+    expect(detail!.pending.activities[0].checkpointAt).toBeDefined();
+
+    release();
+    await expectAsync(handle.result()).toBeResolvedTo('scanned');
+  });
+
+  it('stops reporting a checkpoint once the activity settles', async () => {
+    const rt = createLocalRuntime()
+      .registerActivity('scan', async () => {
+        heartbeat({pct: 99});
+        return 'scanned';
+      })
+      .registerWorkflow('scanner', async () => runActivity<string>('scan'));
+
+    const handle = rt.start<string>('scanner');
+    await expectAsync(handle.result()).toBeResolvedTo('scanned');
+
+    const detail = await handle.describe();
+    expect(detail!.pending.activities).toEqual([]);
   });
 });
 
@@ -334,12 +381,12 @@ describe('local runtime — child workflows', () => {
   it('runs a blocking child and returns its result to the parent', async () => {
     const rt = createLocalRuntime()
       .registerActivity('square', (n: number) => n * n)
-      .registerWorkflow('child', async (n: number) =>
+      .registerWorkflow('child', async ({n}: {n: number}) =>
         runActivity<number>('square', n),
       )
       .registerWorkflow('parent', async () => {
-        const a = await executeChild<number>('child', {args: [3]});
-        const b = await executeChild<number>('child', {args: [4]});
+        const a = await executeChild<number>('child', {props: {n: 3}});
+        const b = await executeChild<number>('child', {props: {n: 4}});
         return a + b;
       });
 
@@ -353,13 +400,13 @@ describe('local runtime — child workflows', () => {
         worked.push(n);
         return n * 10;
       })
-      .registerWorkflow('child', async (n: number) =>
+      .registerWorkflow('child', async ({n}: {n: number}) =>
         runActivity<number>('work', n),
       )
       .registerWorkflow('parent', async () =>
         Promise.all([
-          executeChild<number>('child', {args: [1]}),
-          executeChild<number>('child', {args: [2]}),
+          executeChild<number>('child', {props: {n: 1}}),
+          executeChild<number>('child', {props: {n: 2}}),
         ]),
       );
 
@@ -459,7 +506,7 @@ describe('local runtime — child workflows', () => {
 describe('local runtime — parent close policy', () => {
   /**
    * The default, and the leak it closes: a child started to serve its parent is
-   * garbage the moment the parent is gone, and nothing used to stop it.
+   * garbage the moment the parent is gone, and nothing else stops it.
    */
   it('terminates a child when its parent closes', async () => {
     const rt = createLocalRuntime()
@@ -591,14 +638,14 @@ describe('local runtime — cancellation', () => {
         return ticks.length;
       })
       // loops forever until cancelled — if cancel is broken, this never terminates
-      .registerWorkflow('ticker', async (id: string) => {
+      .registerWorkflow('ticker', async ({id}: {id: string}) => {
         while (true) {
           await runActivity('tick', id);
           await sleep(2);
         }
       })
       .registerWorkflow('parent', async () => {
-        const child = startChild('ticker', {args: ['c1']});
+        const child = startChild('ticker', {props: {id: 'c1'}});
         await sleep(15); // let the child tick a few times
         child.cancel();
         return 'parent-done';

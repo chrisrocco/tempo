@@ -4,9 +4,9 @@
  *
  * The stack is the one part of a failure that cannot be reconstructed after the
  * fact: it lives on the thrown `Error`, in the worker process, and every hop from
- * there to a client is a place that used to flatten the failure to `.message`.
- * There were four, and any one of them silently undoes the others — which is why
- * this is pinned end to end rather than at a single seam.
+ * there to a client is a place that can flatten the failure to `.message`. There
+ * are four, and any one of them silently undoes the others — which is why this is
+ * pinned end to end rather than at a single seam.
  *
  * The frame these tests look for is the *activity's own*, not the engine's. A
  * stack that survives the trip but points at replay machinery would satisfy a
