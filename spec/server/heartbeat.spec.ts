@@ -315,3 +315,63 @@ describe('a checkpoint reported with a heartbeat', () => {
     expect(core.activityCheckpoints('wf')).toEqual({});
   });
 });
+
+/**
+ * The fourth way an attempt can end. With neither timeout set, the queue lease is
+ * all that bounds it, and expiry redelivers without passing any path that deletes
+ * the lease — `completeActivityTask` explains why the stale entry stays. Its
+ * checkpoint must not stay with it, or a dead attempt's progress is reported as
+ * the live one's.
+ */
+describe('a checkpoint superseded by redelivery', () => {
+  it('is not reported against the attempt that replaced it', async () => {
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, {});
+    enqueue(activityTaskQueue, {});
+
+    const first = await core.pollActivityTask();
+    await core.heartbeatActivityTask(first!.token, {pct: 40});
+    await wait(80); // the worker dies; the lease expires
+
+    const second = await core.pollActivityTask(); // redelivered, new token
+    expect(second!.token).not.toBe(first!.token);
+    expect(core.activityCheckpoints('wf')).toEqual({});
+  });
+
+  it('gives way to whatever the new attempt reports', async () => {
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, {});
+    enqueue(activityTaskQueue, {});
+
+    const first = await core.pollActivityTask();
+    await core.heartbeatActivityTask(first!.token, {pct: 40});
+    await wait(80);
+
+    const second = await core.pollActivityTask();
+    await core.heartbeatActivityTask(second!.token, {pct: 5});
+
+    expect(core.activityCheckpoints('wf')[0]!.checkpoint).toEqual({pct: 5});
+  });
+
+  /**
+   * The stale lease itself must survive, because a late completion from the
+   * abandoned worker is still accepted — at-least-once means that work really
+   * ran, and the first outcome to arrive is the one recorded.
+   */
+  it('leaves the abandoned attempt still able to report its result', async () => {
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, {});
+    enqueue(activityTaskQueue, {});
+
+    const first = await core.pollActivityTask();
+    await core.heartbeatActivityTask(first!.token, {pct: 40});
+    await wait(80);
+    await core.pollActivityTask(); // redelivered
+
+    await core.completeActivityTask(first!.token, {ok: true, result: 'rows'});
+
+    const terminal = await terminalEvents(historyStore);
+    expect(terminal.length).toBe(1);
+    expect(terminal[0].type).toBe('activityCompleted');
+  });
+});

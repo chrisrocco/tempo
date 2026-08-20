@@ -1825,6 +1825,24 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowId: task.workflowId,
       seq: task.seq,
     });
+    // A new attempt supersedes whatever the last one reported: that checkpoint
+    // describes work now being redone, and reporting it against the attempt just
+    // started would credit this one with the dead one's progress.
+    //
+    // Needed because a lease can end a fourth way, without passing any of the
+    // paths that delete it. When the queue expires a lease and redelivers, the
+    // superseded entry stays in this map — `completeActivityTask` says why, and
+    // relies on it: a late completion from the abandoned worker is still accepted
+    // there, deduped downstream rather than dropped. So the stale *lease* has a
+    // job to do and must stay; only its checkpoint is now false, and only that is
+    // cleared here.
+    for (const [token, lease] of activityLeases)
+      if (
+        token !== task.token &&
+        lease.workflowId === task.workflowId &&
+        lease.seq === task.seq
+      )
+        lease.checkpoint = undefined;
     // Stamped here rather than reported by the worker at completion, for two
     // reasons. One clock: a `startedAt` from the worker is on the worker's clock,
     // and a skewed one could claim to have started after the server recorded it
