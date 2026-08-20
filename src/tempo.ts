@@ -146,6 +146,7 @@ import {createRemoteService} from './services';
 import {workflowDescriptor} from './workflow_descriptor';
 import {
   registeredWorkflowImpls,
+  resolveListedWorkflow,
   resolveWorkflowRegistration,
   workflowNameConflicts,
 } from './workflow_registry';
@@ -252,16 +253,26 @@ export interface StartWorkerOptions {
   /** Ceiling for that doubling. */
   maxErrorBackoffMs?: number;
   /**
-   * Module namespace of workflow functions, keyed by export name — the roots.
+   * The roots this deployment serves directly, either way round:
+   *
+   * - **A list of references** — `{workflows: [order, refund]}`. Each carries
+   *   its own wire name, so nothing here supplies one. Prefer this where the
+   *   workflows are declared with `createWorkflow`.
+   * - **A module namespace**, keyed by export name — `{workflows: modules}`.
+   *   The key names a plain function, which is how a workflow that is just a
+   *   function gets a wire name at all. A `WorkflowRef` in a namespace still
+   *   registers under its *own* name rather than the export key, so an alias
+   *   cannot become a second name for one workflow.
+   *
+   * A plain function in the **list** form throws, because a list has no key to
+   * give it; the error names both fixes.
    *
    * Everything `createWorkflow` registered is included automatically, so
-   * children invoked through their references need no entry here; this names
-   * what the deployment *serves directly*, and it doubles as the escape hatch
-   * when two `createWorkflow` calls claim one name (an entry here wins). A
-   * `WorkflowRef` entry registers its implementation under its own wire name
-   * rather than the export key — the name is intrinsic to the workflow.
+   * children invoked through their references need no entry here. This doubles
+   * as the escape hatch when two `createWorkflow` calls claim one name — an
+   * entry here wins.
    */
-  workflows?: object;
+  workflows?: object | readonly AnyFn[];
   /** Module namespace of activity functions, keyed by export name. */
   activities?: object;
 }
@@ -594,9 +605,11 @@ export function startWorker(options: StartWorkerOptions): Worker {
   // is a `WorkflowRef` registers its implementation under its own wire name:
   // the reference only dispatches, and the engine invoking it would be a
   // workflow forever starting itself as its own child.
-  const explicitWorkflows = callableEntries(options.workflows).map(
-    ([exported, fn]) => resolveWorkflowRegistration(exported, fn),
-  );
+  const explicitWorkflows = Array.isArray(options.workflows)
+    ? (options.workflows as readonly AnyFn[]).map(resolveListedWorkflow)
+    : callableEntries(options.workflows).map(([exported, fn]) =>
+        resolveWorkflowRegistration(exported, fn),
+      );
   const workflows = [
     ...new Map([...registeredWorkflowImpls(), ...explicitWorkflows]),
   ];
