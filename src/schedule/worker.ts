@@ -21,7 +21,7 @@
  * The split puts the safe half on the shorter, more obvious path. The dangerous direction
  * is the one that cannot be reached by accident: importing the client path in a worker
  * binary loses `scheduleWorkflows`, which is a compile error, whereas importing this in a
- * browser used to be silent.
+ * browser is silent.
  */
 
 import {scheduler} from './scheduler.workflow';

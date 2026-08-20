@@ -8,19 +8,16 @@
  *
  * ## It covers the whole client-facing surface, deliberately
  *
- * This used to wrap six of the service's eleven client-facing methods — the ones
- * that drive a single execution — and leave the reads (`describeExecution`,
+ * All eleven of the service's client-facing methods are here. Wrapping only the six
+ * that drive a single execution — and leaving the reads (`describeExecution`,
  * `listExecutions`, `listQueues`, `groupExecutions`) and `reset` to be reached by
- * dropping down to a raw `WorkflowService`.
+ * dropping down to a raw `WorkflowService` — would make this the ergonomic layer
+ * for exactly the calls that need one least. Anything assembling an operator tool
+ * wants all eleven, and half of them arriving through a different object, with a
+ * different shape, no handle, and no type parameter, is a seam for a distinction
+ * nobody is making.
  *
- * That split was an accident of what got built first, and it made this the
- * ergonomic layer for exactly the calls that needed one least. Anything assembling
- * an operator tool wants all eleven, and half of them arriving through a different
- * object — with a different shape, no handle, and no type parameter — is a seam
- * for a distinction nobody is making.
- *
- * So the division here is by *what the call is about* rather than by when it was
- * written:
+ * The division is by *what the call is about*:
  *
  * - **`WorkflowHandle`** — one execution. Its result, its status, its history, and
  *   the three ways to intervene in it.

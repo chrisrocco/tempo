@@ -12,14 +12,14 @@
  * work the process still owes someone — so it keeps the process alive, like any
  * other unfinished operation.
  *
- * These used to be `unref`'d, on the reasoning that a stray timer must never
- * hold a process open. That produced a worse failure than the one it prevented:
- * a script that started a workflow and let it park exited **code 0 with no
- * output**, having run none of the workflow past its first `sleep`. Silence and
- * success are the two things a lost execution should never look like.
+ * `unref`'ing them — on the reasoning that a stray timer must never hold a
+ * process open — buys a worse failure than the one it prevents: a script that
+ * starts a workflow and lets it park exits **code 0 with no output**, having run
+ * none of the workflow past its first `sleep`. Silence and success are the two
+ * things a lost execution should never look like.
  *
- * The suite could not see it — Jasmine's runner holds the event loop open, so
- * the timer always fired anyway. `spec/integration/process_lifetime.spec.ts`
+ * The suite cannot see that failure — Jasmine's runner holds the event loop
+ * open, so the timer fires anyway. `spec/integration/process_lifetime.spec.ts`
  * spawns a real process for exactly that reason.
  *
  * Nothing leaks: a fired timer stops holding the loop by itself, `cancel`

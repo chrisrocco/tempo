@@ -24,12 +24,12 @@
  * server has never done. The rule lives in `workflow_api.issue`; this loop does
  * not participate in it at all.
  *
- * That last part is the design, not an accident. There used to be an `isLive`
- * flag here, set as the last recorded event was taken, and commands were emitted
- * only past it — the **live edge**. It reads like the same rule and is not: it
+ * That last part is the design, not an accident. The alternative is a **live
+ * edge**: an `isLive` flag here, set as the last recorded event is taken, with
+ * commands emitted only past it. It reads like the same rule and is not — it
  * answers a question about *position* that is really about *content*, and the two
  * agree only when the batch's final event is the one that unblocks the workflow.
- * Two ordinary situations break that, and they broke it in different places:
+ * Two ordinary situations break that, in different places:
  *
  * - **A batch with a trailing event.** `ports/workflow_task_queue` coalesces a
  *   wake landing mid-task into exactly one more, so a signal arriving while an
@@ -38,16 +38,16 @@
  *   continuously. Settling the earlier completion carries the workflow to a
  *   genuinely new command while the flag is still false.
  * - **A first task that already has history**, which is not about this loop at
- *   all. The flag started false whenever history was non-empty, and a signal
+ *   all. The flag starts false whenever history is non-empty, and a signal
  *   landing between the start and the worker's first poll gives task one a
- *   history of `[signal]` — so the initial `settle` below reached the workflow's
+ *   history of `[signal]` — so the initial `settle` below reaches the workflow's
  *   *first* command with the flag already false.
  *
- * Either way the command was recorded in `requested` and never pushed: the worker
- * responded without it, history never got its marker, and the next replay dropped
- * it for the same reason, forever. Nothing threw, the execution stayed `running`
- * with no task failures, and it was parked on work the server had no record of —
- * a permanent, silent wedge (issue #39). Keying on history instead is what makes
+ * Either way the command is recorded in `requested` and never pushed: the worker
+ * responds without it, history never gets its marker, and the next replay drops
+ * it for the same reason, forever. Nothing throws, the execution stays `running`
+ * with no task failures, parked on work the server has no record of — a
+ * permanent, silent wedge (issue #39). Keying on history instead is what makes
  * this loop's only job applying events.
  *
  * ## `settle`: drain + condition unblock

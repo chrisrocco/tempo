@@ -24,9 +24,8 @@
  *
  * Four things, and each is here because something cannot be built without it:
  *
- * - **`startServer`** — a server artifact. The composition used to exist only as
- *   a script in `bin/`, which left a consumer able to build a worker and with
- *   nothing to point it at.
+ * - **`startServer`** — a server artifact. Without it a consumer can build a
+ *   worker and have nothing to point it at.
  * - **`startWorker`** — a worker artifact.
  * - **`createRemoteClient` + `createRemoteService`** — a client. The client was
  *   already exported and the service to construct it from was not, so the one

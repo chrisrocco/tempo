@@ -22,19 +22,16 @@
  *
  * ## Why this is a function and not only a script
  *
- * It used to be only `bin/server-main.ts` — a script, in this repo's tree, whose
- * composition (`createServerHost`, `createRpcServer`, `FileHistoryStore.open`)
- * was unexported and unreachable from outside. Anyone consuming this library
- * under their own build system had no supported way to *produce a server*: they
- * could bundle their own worker, because `startWorker` is a function, and then
- * had nothing to point it at.
+ * Assembling a deployment is entirely the consumer's job (see `README.md`), so
+ * the server and the worker have to be equally buildable — which means both
+ * entrypoints have to be *values*. A composition left as a script in `bin/`,
+ * with `createServerHost`, `createRpcServer` and `FileHistoryStore.open`
+ * unexported, is unreachable from outside: a consumer on their own build system
+ * could bundle a worker, because `startWorker` is a function, and have nothing
+ * to point it at.
  *
- * That asymmetry was invisible while a deployment library lived here and knew
- * both paths itself. Now that assembling a deployment is entirely the consumer's
- * job (see `README.md`), the two artifacts have to be equally buildable, and that
- * means both entrypoints have to be *values*. `bin/server-main.ts` still exists
- * and is still what the specs spawn — it is now the reference invocation of this
- * function, and the file a consumer copies.
+ * `bin/server-main.ts` still exists and is still what the specs spawn — it is the
+ * reference invocation of this function, and the file a consumer copies.
  *
  * ## The options object is the configuration, and three flags override it
  *

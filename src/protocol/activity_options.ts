@@ -22,9 +22,10 @@ export interface RetryPolicy {
    *
    * Enforced by the **server**, which counts attempts on the execution record —
    * so the budget is the same however the engine is hosted, and survives a worker
-   * dying mid-backoff or a server restart. It used to be applied by whichever
-   * loop happened to be running the activity, which meant local mode honoured it
-   * and distributed mode silently ignored it.
+   * dying mid-backoff or a server restart. Applied instead by whichever loop
+   * happens to be running the activity, the budget would be a property of the
+   * host rather than of the policy: local mode honours it, distributed mode
+   * silently ignores it.
    */
   maximumAttempts?: number;
   /** Delay before the second attempt. Grows by `backoffCoefficient` each retry. */

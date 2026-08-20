@@ -4,10 +4,10 @@
  *
  * One activation can both dispatch and complete — `signalWorkflow(parent, done);
  * return result;` — and the terminal dispositions in `applyWorkflowTaskResult`
- * all return early. The batch used to reach them and be discarded: the execution
- * completed normally, having silently not done what its last line said, with
- * nothing raised anywhere. The fire-and-forget commands wear it worst, because
- * they are the ones with no promise whose absence would be noticed.
+ * all return early. A batch reaching them undispatched is discarded: the
+ * execution completes normally, having silently not done what its last line said,
+ * with nothing raised anywhere. The fire-and-forget commands wear it worst,
+ * because they are the ones with no promise whose absence would be noticed.
  *
  * ## Dispatching is not the same as surviving
  *

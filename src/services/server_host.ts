@@ -167,8 +167,8 @@ export interface ServerHostOptions {
    *   Pick a window comfortably longer than the longest a caller waits before
    *   collecting.
    * - **A `workflowId` claim lasts only as long as the record.** Starting under
-   *   a swept id creates a fresh execution where it used to return the old one
-   *   — "one workflow per order" becomes "one per order per window". See
+   *   a swept id creates a fresh execution where an unswept one returns the
+   *   original — "one workflow per order" becomes "one per order per window". See
    *   `StartWorkflowOptions.workflowId`.
    *
    * Running executions are never swept, however old, and a settled child is

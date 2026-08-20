@@ -19,11 +19,10 @@
  * reaches the author entrypoint and registers activities into a process-global registry
  * as an import side effect — correct in a worker binary, wrong in a browser.
  *
- * This file was both for about a day, which meant a dashboard importing
- * `createScheduleClient` also got the workflow runtime. Splitting puts the safe half on
- * the shorter path and leaves the dangerous one unreachable by accident: importing the
- * client path in a worker binary loses `scheduleWorkflows` and fails to compile, where
- * the reverse used to fail silently.
+ * Splitting puts the safe half on the shorter path and leaves the dangerous one
+ * unreachable by accident. The asymmetry is the reason: importing the client path in a
+ * worker binary loses `scheduleWorkflows` and fails to compile, where importing the
+ * worker path in a browser fails silently.
  *
  * ## Where the types live
  *

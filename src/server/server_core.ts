@@ -39,20 +39,18 @@
  * `childStarted.detached`: the marker is unconditional, and the flag tells the
  * recovery path which children have a completion coming.
  *
- * **Every** command leaves one, with no exceptions left. `cancelChild` used to be
- * the exception, on the grounds that its effect is already a durable record — the
- * `cancelRequested` it appends to the *child's* history — and that `requestCancel`
+ * **Every** command leaves one, with no exceptions. `cancelChild` is the one that
+ * looks like it could go without: its effect is already a durable record — the
+ * `cancelRequested` it appends to the *child's* history — and `requestCancel`
  * short-circuits on finding one, so a re-dispatched cancel is idempotent rather
- * than a second cancellation. All of that is still true, and it is an argument
- * about **safety**: re-dispatch does no harm.
- *
- * It stopped being sufficient when replay began deciding what to emit by asking
- * whether history holds a command's seq (`core/workflow_api`). That question needs
- * **observability**, and a record living on another execution cannot supply it: a
- * cancel that reached the workflow mid-batch was dropped and never re-issued, with
- * not even a gap in the seqs to notice — the wedge of issue #39, surviving in the
- * one place its fix could not see (issue #50). `childCancelRequested` is what
- * closes it.
+ * than a second cancellation. That argument is sound, and it is about **safety**:
+ * re-dispatch does no harm. Safety is not what replay asks about. Replay decides
+ * what to emit by asking whether history holds a command's seq
+ * (`core/workflow_api`), which needs **observability**, and a record living on
+ * another execution cannot supply it — a cancel reaching the workflow mid-batch
+ * is dropped and never re-issued, without even a gap in the seqs to notice. That
+ * is the wedge of issue #39 in the one place its fix could not see (issue #50),
+ * and `childCancelRequested` is what closes it.
  *
  * `recordPatch` is the invariant read from the other end: a command that is
  * *nothing but* its marker. It dispatches no work, so there is no "record the
@@ -285,15 +283,15 @@ export interface ServerCoreDeps {
    * Exists because not every settle follows a workflow task. `LocalService`
    * learns an execution's outcome by watching its own drain loop — it applies a
    * task, re-reads the record, and settles the caller's `getResult` — and
-   * `terminate` produces no task at all, so it used to patch its bookkeeping by
-   * hand from the client side.
+   * `terminate` produces no task at all.
    *
-   * That stopped being enough when the server acquired a reason of its own to
+   * Patching that bookkeeping by hand from the client side covers only the
+   * terminations a client asked for, and the server has reasons of its own to
    * terminate an execution nobody asked about: a child whose parent closed under
-   * a `terminate` policy (see `closeChildren`). Without this the child would be
-   * `terminated` on the record while local mode still reported it `running`, and
-   * anyone holding its `getResult` promise would wait forever for an outcome
-   * that had already happened.
+   * a `terminate` policy (see `closeChildren`). Without this the child is
+   * `terminated` on the record while local mode still reports it `running`, and
+   * anyone holding its `getResult` promise waits forever for an outcome that has
+   * already happened.
    *
    * Called at every terminal transition rather than only that one, so there is
    * no rule to remember about which settles are observable. Optional because a
@@ -344,12 +342,11 @@ export interface ServerCore {
   /**
    * Request cancellation, cascading to **every** child this execution started.
    *
-   * Not only the fire-and-forget ones: both kinds
-   * go into `childrenByParent`, so a blocking child is cancelled alongside a
-   * detached one. That is the intended behaviour — a parent unwinding through a
-   * `CancelledFailure` is not going to consume the result it was awaiting — and
-   * cancellation remains the only thing that walks downward at all (see the
-   * header).
+   * Not only the fire-and-forget ones: both kinds go into `childrenByParent`, so
+   * a blocking child is cancelled alongside a detached one. That is the intended
+   * behaviour — a parent unwinding through a `CancelledFailure` is not going to
+   * consume the result it was awaiting — and cancellation remains the only thing
+   * that walks downward at all (see the header).
    */
   requestCancel(workflowId: string): Promise<void>;
   /**
@@ -953,10 +950,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // Dispatch before settling, not instead of it. A task can both issue
     // commands and finish the workflow — `signalWorkflow(parent, done); return
     // result;` is one activation — and the dispositions below all return early,
-    // so a batch reaching them would be discarded. Nothing raises: the
-    // execution completed normally, having silently not done what its last line
-    // said. Every command has this shape, and the fire-and-forget ones have it
-    // worst, since they are the ones with no promise whose absence would be
+    // so a batch reaching them without this would be discarded. Nothing raises:
+    // the execution completes normally, having silently not done what its last
+    // line said. Every command has this shape, and the fire-and-forget ones have
+    // it worst, since they are the ones with no promise whose absence would be
     // noticed.
     //
     // Safe for a settling execution because a dispatch outliving it is already

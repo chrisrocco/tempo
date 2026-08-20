@@ -34,13 +34,13 @@ function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-// No type argument: `SignalDef` is not generic here, and the `<[string]>` this
-// used to carry was Temporal's shape rather than this engine's. Temporal signals
-// take an argument *list*, so its defs are parameterised by a tuple; a signal
-// here carries one payload, delivered as `fn(payload)` — the handler below takes
-// a `string`, and `.signal('jobDone', 'finished')` sends one. A tuple would have
-// been the wrong type even if it had compiled. `core/signals.ts` records why
-// making `SignalDef` generic is the right long-term fix and what it would buy.
+// No type argument: `SignalDef` is not generic here. A `<[string]>` would be
+// Temporal's shape rather than this engine's — Temporal signals take an argument
+// *list*, so its defs are parameterised by a tuple, where a signal here carries
+// one payload, delivered as `fn(payload)`. The handler below takes a `string`, and
+// `.signal('jobDone', 'finished')` sends one, so a tuple would be the wrong type
+// even if it compiled. `core/signals.ts` records why making `SignalDef` generic is
+// the right long-term fix and what it would buy.
 const jobDone = defineSignal('jobDone');
 
 describe('a workflow knows its own id', () => {

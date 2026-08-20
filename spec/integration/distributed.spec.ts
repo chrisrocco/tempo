@@ -31,8 +31,8 @@ const WORKER = repoPath('examples/greeter.ts');
 
 /**
  * Run a deployable entrypoint the way a systemd unit would: an argv and nothing
- * ambient. Configuration used to arrive here as environment variables; it is
- * flags now, for the reasons in `src/process_flags.ts`.
+ * ambient. Configuration arrives as flags rather than environment variables, for
+ * the reasons in `src/process_flags.ts`.
  */
 function spawnMain(script: string, args: string[] = []): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx', script, ...args], {
@@ -170,11 +170,10 @@ describe('distributed — real server process over RPC', () => {
   /**
    * A workflow the worker cannot run keeps its execution alive and reports why.
    *
-   * This used to settle the execution as failed, on the reading that an
-   * unregistered name is a typo. Once tasks are routed by queue it far more often
-   * means a deploy still rolling, and a typo is no longer expensive to diagnose:
-   * the reason is on the record, `describe` prints it, and `terminate` ends it.
-   * Failing fast would trade a recoverable state for an unrecoverable one.
+   * Settling it as failed would trade a recoverable state for an unrecoverable
+   * one; `protocol/service.isNameServed` owns that argument. What this case adds
+   * is that a typo stays cheap to diagnose either way: the reason is on the
+   * record, `describe` prints it, and `terminate` ends it.
    */
   it('keeps an execution alive when no worker has its workflow, and says why', async () => {
     const {url, proc: server} = await spawnServer();

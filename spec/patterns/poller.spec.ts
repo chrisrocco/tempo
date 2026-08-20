@@ -142,7 +142,7 @@ describe('pollForever', () => {
    * The stream half, and the reason `query` exists: the mark goes to the source,
    * so a feed that can filter never resends what has been seen. Doubles as the
    * regression test for carryover determinism — the poll argument is derived
-   * from carried state, which is exactly what used to wedge replay.
+   * from carried state, which is exactly the shape that wedges replay.
    */
   it('hands the cursor to the source and advances it', async () => {
     const handled: number[] = [];
@@ -236,7 +236,7 @@ describe('pollForever', () => {
   /**
    * With no `args` given, the next run gets what this one was started with.
    *
-   * The old default — no arguments at all — restarted `monitor(label)` as
+   * Defaulting to no arguments at all would restart `monitor(label)` as
    * `monitor(undefined)`. The execution stays healthy-looking, so the damage
    * shows up as a poller that has quietly stopped watching anything, one
    * rollover after the omission that caused it.

@@ -170,20 +170,20 @@ export type {ActivityProxy};
  *
  * ## Why it takes the implementations
  *
- * This used to take only a type — `proxyActivities<typeof payments>(options)` — which
- * did the typing and nothing else, leaving the implementations to reach the worker by
- * a second, unrelated route: a flat `activities` object at the entrypoint, maintained
- * by hand. That holds up for a small artifact and stops holding up for a large
- * workflow split across helper modules, where the entrypoint must name every
- * activities module any helper touches. Nothing checks the list, and an omission
- * surfaces as an execution parking on a retrying activity rather than as a
- * configuration error.
- *
- * Now **declaring that a workflow will call an activity is what registers it.** There
- * is no list to maintain and no order to get wrong: the entrypoint imports its
+ * **Declaring that a workflow will call an activity is what registers it.** There is
+ * no list to maintain and no order to get wrong: the entrypoint imports its
  * workflows, loading them runs these calls, and the worker ends up with exactly the
  * activities its workflows asked for. `startWorker({activities})` still works and
  * still wins on a name collision, for a worker that would rather be explicit.
+ *
+ * Taking only a type — `proxyActivities<typeof payments>(options)` — would do the
+ * typing and nothing else, leaving the implementations to reach the worker by a
+ * second, unrelated route: a flat `activities` object at the entrypoint, maintained
+ * by hand. That holds up for a small artifact and stops holding up for a large
+ * workflow split across helper modules, where the entrypoint must name every
+ * activities module any helper touches. Nothing checks that list, and an omission
+ * surfaces as an execution parking on a retrying activity rather than as a
+ * configuration error.
  *
  * ## Why this is on the deterministic surface at all
  *

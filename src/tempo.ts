@@ -50,25 +50,21 @@
  * completion, prints its result as JSON on stdout, and the process exits — 0 on
  * success, 1 on failure.
  *
- * **This is deliberately a second composition inside a deployable artifact,
- * which an earlier version of this file removed for being exactly that.** The
- * removal was right at the time and the reasoning is worth keeping, because what
- * changed is the circumstances rather than the argument:
+ * **This is deliberately a second composition inside a deployable artifact**,
+ * which is normally the thing to refuse. Three objections stand against it, and
+ * each has an answer:
  *
- * - The old `--runtime=local` made the artifact *become* a long-lived local
- *   runtime — two services to keep working, and a startup path that branched on
- *   which one it was. This one is **terminal**: it runs, it prints, it exits.
- *   There is no second long-lived thing, and no state in which a process is half
- *   a worker.
- * - The capability was going to come back as `tempo run-local`, a command of the
- *   CLI. That CLI is gone for good (#64), so there is no other home left. The
- *   choice is this or nothing.
- * - The objection that it "can only run what its own binary compiled in" still
- *   stands, and is now the *point*: it runs the shipped artifact, so it proves
- *   the workflow is registered in the bundle a deployment would install. That
- *   check had no home after `--runtime=local` went, and an artifact whose
- *   workflows were never registered otherwise reports nothing until executions
- *   park on a queue whose workers reject every task.
+ * - **"It makes the artifact two services."** A long-lived local runtime would —
+ *   two things to keep working, and a startup path that branches on which one it
+ *   is. This one is **terminal**: it runs, it prints, it exits. There is no
+ *   second long-lived thing, and no state in which a process is half a worker.
+ * - **"It belongs in the CLI."** There is no CLI and there will not be one
+ *   (#64), so there is no other home. The choice is this or nothing.
+ * - **"It can only run what its own binary compiled in."** True, and that is the
+ *   *point*: it runs the shipped artifact, so it proves the workflow is
+ *   registered in the bundle a deployment would install. Nothing else checks
+ *   that, and an artifact whose workflows were never registered reports nothing
+ *   until executions park on a queue whose workers reject every task.
  *
  * **It refuses `--server` and `--role`** rather than quietly winning over them.
  * Both are contradictions at the launch site: there is no server to dial, and one
@@ -120,12 +116,8 @@
  * override — so code supplies the default the application ships with and the
  * launch site supplies the deviation.
  *
- * They used to be `TEMPO_SERVER_URL`, `TEMPO_TASK_QUEUE`, and `TEMPO_ROLE`. The
- * reason they are flags is in `process_flags.ts` and is the same reason the
- * `--runtime` flag that used to live here was a flag: **an environment variable
- * is inherited and a flag is not**, and one stale `TEMPO_SERVER_URL` in a shell
- * turns the next worker launched from it into a process that serves nobody while
- * printing `WORKER_READY` and looking healthy to its supervisor.
+ * They are flags rather than environment variables for the reasons in
+ * `process_flags.ts`, which owns that argument.
  *
  * Everything else is code only, deliberately. A value that changes only when the
  * code changes has no business being ambient, where it is invisible at the call
@@ -136,8 +128,8 @@
  * deployments set.
  *
  * The shape follows Temporal's client, where the address is a connection
- * argument rather than ambient state — and it is what the older "deployment
- * config is never passed in code" rule was really protecting, since the launch
+ * argument rather than ambient state — and it keeps what a strict "deployment
+ * config is never passed in code" rule is really protecting, since the launch
  * site still overrides the three values a redeploy needs.
  */
 
@@ -424,8 +416,8 @@ export interface LocalRun {
  * - **`--props` that is not a JSON object** — a workflow takes one props object,
  *   so an array or a bare string is a workflow called with something it cannot
  *   destructure, failing somewhere inside rather than here. An array is worth
- *   naming separately: it is what this flag used to take, so it is the shape a
- *   command line written against the old spelling still carries.
+ *   naming separately: it is what a command line written against the older
+ *   `--args` spelling still passes.
  *
  * The options object is deliberately not consulted: `--local` says this run is
  * not a deployment, and `serverUrl`/`role` in code are the deployment's defaults.

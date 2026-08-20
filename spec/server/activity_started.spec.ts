@@ -86,8 +86,8 @@ describe('activityStarted', () => {
     const at = (type: string): number =>
       history.find((e) => e.type === type)!.ts!;
 
-    // Three points now, where there used to be two — so queue time and execution
-    // time are separately measurable rather than summed into one bar.
+    // Three points rather than two, so queue time and execution time are
+    // separately measurable rather than summed into one bar.
     expect(at('activityStarted')).toBeGreaterThanOrEqual(
       at('activityScheduled'),
     );

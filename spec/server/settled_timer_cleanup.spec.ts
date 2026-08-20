@@ -156,10 +156,10 @@ describe('the timer table when an execution settles', () => {
   });
 
   /**
-   * Not a correctness fix, and this is the spec that says so. Before the cleanup a
-   * surviving timer was harmless: `onFire` drops a fire for a record that is no longer
-   * running, appending nothing and waking nothing. The cleanup stops it being *held*,
-   * which is a resource question.
+   * Not a correctness fix, and this is the spec that says so. A surviving timer is
+   * harmless: `onFire` drops a fire for a record that is no longer running, appending
+   * nothing and waking nothing. The cleanup stops it being *held*, which is a resource
+   * question.
    */
   it('would have been harmless anyway: a fire for a settled execution is dropped', async () => {
     const store = new MemoryHistoryStore();

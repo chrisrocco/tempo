@@ -10,7 +10,7 @@
  * ## Three divergence checks, catching different failures
  *
  * **A completion for an unknown seq** — nothing is parked on it — means history
- * has an operation the code no longer has. That check has always been here.
+ * has an operation the code no longer has.
  *
  * **A marker that disagrees with the command issued at its seq** catches the case
  * the first one cannot see. Correlation is by `seq`, assigned in call order, so

@@ -112,10 +112,9 @@ describe('worker identity — naming workers', () => {
   });
 
   // Whether a worker holds a lease is `server_core`'s join to make; this table
-  // watches polls and nothing else. It used to report `busy: false` — honest but
-  // still an assertion it had not observed — and now does not carry the field at
-  // all, so a caller cannot read a claim that was never made. `ObservedWorker`
-  // is what enforces that; this case is what says why.
+  // watches polls and nothing else, so it does not carry the field at all and a
+  // caller cannot read a claim that was never made. `ObservedWorker` is what
+  // enforces that; this case is what says why.
   it('does not report whether a worker is busy, because it cannot know', () => {
     const registry = createWorkerRegistry(() => 1_000);
 

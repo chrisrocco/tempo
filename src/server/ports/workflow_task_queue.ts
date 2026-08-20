@@ -1,10 +1,10 @@
 /**
  * @fileoverview
- * The queue of executions that need a workflow task run. It is the distributed
- * replacement for the old in-process `pump`: instead of a per-execution mutex +
- * rerun flag held in one process, wakes enqueue an execution here, a worker polls
- * it (taking a lease), and completion releases it. It adds a lease so a crashed
- * worker's task redelivers on timeout.
+ * The queue of executions that need a workflow task run. Wakes enqueue an
+ * execution here, a worker polls it (taking a lease), and completion releases it.
+ * A per-execution mutex and rerun flag would do the same job in one process; the
+ * lease is what makes it work across several, redelivering a crashed worker's
+ * task on timeout.
  *
  * The queue carries two guarantees, each preventing a concrete bug. They are the
  * reason this is a queue and not just a list of pending executions.

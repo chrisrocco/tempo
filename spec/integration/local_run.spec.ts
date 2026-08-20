@@ -131,9 +131,9 @@ describe('--local — the flags it refuses', () => {
   });
 
   it('names the array case, which is what the old --args spelling passed', () => {
-    // The one wrong shape that used to be the *only* right one, so it is what a
-    // command line written against the previous flag still carries. Saying so is
-    // the difference between a one-line fix and re-reading the entrypoint.
+    // A command line written against the older `--args` spelling still passes an
+    // array here. Naming that shape is the difference between a one-line fix and
+    // re-reading the entrypoint.
     expect(() =>
       resolveLocalRun(['--local=greeter', '--props=["world"]']),
     ).toThrowError(/--props must be a JSON object, not an array/);
