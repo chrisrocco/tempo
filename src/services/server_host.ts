@@ -137,7 +137,7 @@ export interface ServerHost {
     request?: PollRequest,
   ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
   /** Re-drive persisted executions after a restart. */
   resume(): Promise<void>;
   /** Stop background timers so the process can exit. */
@@ -407,7 +407,10 @@ export function createServerHost(
     },
     async describeExecution(workflowId, options) {
       const rec = await historyStore.get(workflowId);
-      return rec && describeExecution(rec, options);
+      return (
+        rec &&
+        describeExecution(rec, options, core.activityCheckpoints(workflowId))
+      );
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
@@ -455,8 +458,8 @@ export function createServerHost(
     completeActivityTask(token, result) {
       return core.completeActivityTask(token, result);
     },
-    heartbeatActivityTask(token) {
-      return core.heartbeatActivityTask(token);
+    heartbeatActivityTask(token, checkpoint) {
+      return core.heartbeatActivityTask(token, checkpoint);
     },
     async resume() {
       const records = await historyStore.list();

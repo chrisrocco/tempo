@@ -462,6 +462,27 @@ export interface PendingActivityView {
    * reader must treat it as "not between attempts" rather than as "due now".
    */
   nextAttemptAt?: number;
+  /**
+   * The most recent checkpoint the running attempt reported, via `heartbeat()`.
+   *
+   * A **register, not a log**: one slot per attempt, overwritten by each beat,
+   * and only a sample of beats is sent. Readable anyway because every beat
+   * carries a complete checkpoint — the contract is on `heartbeat` in
+   * `worker/activity_context`. A consumer treating this as a stream of progress
+   * events will silently miss most of them; history is where a trail lives.
+   *
+   * Absent until the attempt beats, and gone once it settles: live state about
+   * an attempt in flight, so an activity waiting out a backoff has none.
+   */
+  checkpoint?: unknown;
+  /**
+   * When `checkpoint` arrived, epoch ms.
+   *
+   * Beside the value because sampling makes it routinely older than the work it
+   * describes: without the age, what an activity managed to send just before
+   * wedging reads as what it is doing now.
+   */
+  checkpointAt?: number;
 }
 
 /**
@@ -1065,10 +1086,13 @@ export interface WorkflowService {
    * Report that this attempt is still alive. Renews the task's lease so it is not
    * redelivered, and resets the `heartbeatTimeoutMs` deadline if one is set.
    *
+   * `checkpoint` replaces whatever this attempt last reported, surfacing on
+   * `PendingActivityView.checkpoint`. Last write wins; no history event.
+   *
    * A no-op for an attempt the server has already given up on — the worker finds
    * out when it reports a result and the completion is dropped, not here.
    */
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
 }
 
 /**

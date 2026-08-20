@@ -226,8 +226,11 @@ export function createRemoteService(
     ): Promise<void> {
       await call({method: 'completeActivityTask', token, result});
     },
-    async heartbeatActivityTask(token: TaskToken): Promise<void> {
-      await call({method: 'heartbeatActivityTask', token});
+    async heartbeatActivityTask(
+      token: TaskToken,
+      checkpoint?: unknown,
+    ): Promise<void> {
+      await call({method: 'heartbeatActivityTask', token, checkpoint});
     },
   };
 }

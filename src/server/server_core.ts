@@ -167,6 +167,7 @@ import type {
   WorkflowTaskResult,
 } from '../protocol';
 import {ANY_TASK_QUEUE} from '../protocol';
+import type {ActivityCheckpoints} from './execution_view';
 import {completedSeqs, pendingWork} from './pending_work';
 import {
   createWorkerRegistry,
@@ -462,8 +463,19 @@ export interface ServerCore {
   /**
    * The attempt behind `token` is still alive: renew its lease and reset its
    * silence deadline. Ignored once the server has given up on that attempt.
+   *
+   * `checkpoint` replaces this attempt's checkpoint, readable back through
+   * `activityCheckpoints`. Omitting it leaves the previous one standing.
    */
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
+  /**
+   * What each of `workflowId`'s in-flight attempts last reported, keyed by seq.
+   *
+   * Live state, and the one input to `describeExecution` history cannot supply.
+   * Deliberately **not** durable: a restart abandons every attempt, so a
+   * persisted checkpoint would outlive the work it describes.
+   */
+  activityCheckpoints(workflowId: string): ActivityCheckpoints;
 }
 
 export function createServerCore(deps: ServerCoreDeps): ServerCore {
@@ -515,9 +527,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
+  // The checkpoint rides on the lease so it is cleaned up by construction: every
+  // path that ends an attempt already deletes the lease. A parallel map would
+  // need each of them to remember, and the one that forgot would leave `describe`
+  // reporting an attempt nobody is running.
   const activityLeases = new Map<
     TaskToken,
-    {workflowId: string; seq: number}
+    {
+      workflowId: string;
+      seq: number;
+      checkpoint?: {checkpoint: unknown; at: number};
+    }
   >();
   // `polledAt` exists purely so a completion can report how long the task was out
   // with a worker — the task-latency number Phase 7 wants to aggregate.
@@ -1801,6 +1821,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowId: task.workflowId,
       seq: task.seq,
     });
+    // A new attempt supersedes the last one's checkpoint, which now describes
+    // work being redone. This is the one path that ends an attempt without
+    // deleting its lease — the queue expiring it and redelivering — and the stale
+    // lease must stay: `completeActivityTask` relies on it to accept a late
+    // completion from the abandoned worker. So only the checkpoint is cleared.
+    for (const [token, lease] of activityLeases)
+      if (
+        token !== task.token &&
+        lease.workflowId === task.workflowId &&
+        lease.seq === task.seq
+      )
+        lease.checkpoint = undefined;
     // Stamped here rather than reported by the worker at completion, for two
     // reasons. One clock: a `startedAt` from the worker is on the worker's clock,
     // and a skewed one could claim to have started after the server recorded it
@@ -1825,7 +1857,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     return task;
   }
 
-  async function heartbeatActivityTask(token: TaskToken): Promise<void> {
+  async function heartbeatActivityTask(
+    token: TaskToken,
+    checkpoint?: unknown,
+  ): Promise<void> {
     const lease = activityLeases.get(token);
     const task = heartbeatTasks.get(token);
     // Silence is the only signal the server has, so a heartbeat for an attempt
@@ -1836,11 +1871,28 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const timeoutMs = task.options.heartbeatTimeoutMs;
     if (timeoutMs !== undefined && timeoutMs > 0)
       armAttemptTimer(task, 'heartbeat', timeoutMs);
+    // One slot, overwritten. A bare `heartbeat()` leaves the last checkpoint
+    // standing rather than clearing it: reporting liveness is not a statement
+    // that the attempt forgot where it was.
+    if (checkpoint !== undefined)
+      lease.checkpoint = {checkpoint, at: Date.now()};
     log('activity.heartbeat', {
       workflowId: lease.workflowId,
       seq: lease.seq,
       name: task.name,
     });
+  }
+
+  /**
+   * Walks the leases rather than keeping a per-execution index: few attempts are
+   * ever out at once, and a second structure is a second thing to keep in step.
+   */
+  function activityCheckpoints(workflowId: string): ActivityCheckpoints {
+    const out: ActivityCheckpoints = {};
+    for (const lease of activityLeases.values())
+      if (lease.workflowId === workflowId && lease.checkpoint)
+        out[lease.seq] = lease.checkpoint;
+    return out;
   }
 
   async function completeActivityTask(
@@ -1883,5 +1935,6 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     pollActivityTask,
     completeActivityTask,
     heartbeatActivityTask,
+    activityCheckpoints,
   };
 }

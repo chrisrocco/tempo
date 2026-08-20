@@ -96,7 +96,7 @@ async function dispatch(
     case 'completeActivityTask':
       return host.completeActivityTask(request.token, request.result);
     case 'heartbeatActivityTask':
-      return host.heartbeatActivityTask(request.token);
+      return host.heartbeatActivityTask(request.token, request.checkpoint);
     default:
       return assertNever(request);
   }

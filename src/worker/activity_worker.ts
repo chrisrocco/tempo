@@ -44,7 +44,7 @@ export interface ActivityWorker {
    */
   runTask(
     task: ActivityTask,
-    sendHeartbeat?: () => void,
+    sendHeartbeat?: (checkpoint?: unknown) => void,
   ): Promise<ActivityResult>;
 }
 
@@ -54,7 +54,7 @@ export function createActivityWorker(
   return {
     async runTask(
       task: ActivityTask,
-      sendHeartbeat: () => void = () => {},
+      sendHeartbeat: (checkpoint?: unknown) => void = () => {},
     ): Promise<ActivityResult> {
       const fn = registry.get(task.name);
       if (!fn) return {ok: false, error: `no activity ${task.name}`};

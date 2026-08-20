@@ -15,6 +15,12 @@
  * mattered most — while an operator is trying to work out why an execution is
  * stuck.
  *
+ * One input is neither derived nor stored: the live checkpoints in-flight
+ * attempts have reported. They are passed in per call because history holds no
+ * record of them and they must not be persisted — `ServerCore.activityCheckpoints`
+ * owns that reasoning. Defaulting to none keeps this a pure function of its
+ * arguments, and is the honest answer for a caller with no live server to ask.
+ *
  * The projection is deliberately not the record itself. `ExecutionRecord` carries
  * a `version` that only means something to the optimistic CAS, and a `failure`
  * that is an arbitrary thrown value and need not survive JSON. Both are dropped;
@@ -74,9 +80,19 @@ function historyWindow(
   return {offset: Math.max(0, Math.min(offset, total)), limit};
 }
 
+/**
+ * What each in-flight attempt last reported, keyed by the `scheduleActivity`
+ * seq. `ServerCore.activityCheckpoints` is where it comes from.
+ */
+export type ActivityCheckpoints = Record<
+  number,
+  {checkpoint: unknown; at: number}
+>;
+
 export function describeExecution(
   rec: ExecutionRecord,
   options: DescribeOptions = {},
+  checkpoints: ActivityCheckpoints = {},
 ): ExecutionDetail {
   const {offset, limit} = historyWindow(rec.history.length, options);
   // Derived from the WHOLE history, never the page. What an execution is
@@ -123,6 +139,10 @@ export function describeExecution(
         // entry is only written once an attempt fails, and cleared the moment
         // the activity settles.
         const retry = rec.activityAttempts[e.seq];
+        // Absent while the activity waits out a backoff: the attempt that
+        // reported it is over, and carrying it into the gap would describe the
+        // run that failed as though it were the one about to start.
+        const live = checkpoints[e.seq];
         return {
           seq: e.seq,
           name: e.name,
@@ -134,6 +154,9 @@ export function describeExecution(
           ...(retry?.nextAttemptAt === undefined
             ? {}
             : {nextAttemptAt: retry.nextAttemptAt}),
+          ...(live === undefined
+            ? {}
+            : {checkpoint: live.checkpoint, checkpointAt: live.at}),
         };
       }),
       timers: pending.timers.map((e) => ({seq: e.seq, fireAt: e.fireAt})),
