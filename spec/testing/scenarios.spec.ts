@@ -21,6 +21,7 @@ import {
   UNSERVED_QUEUE,
   type ScenarioServer,
 } from '../../src/testing';
+import {SCENARIO_DESCRIPTORS} from '../../src/testing/scenarios.workflow';
 
 /** Generous: it stands up a server and waits for six states to be observable. */
 const SETUP_TIMEOUT_MS = 60_000;
@@ -159,6 +160,31 @@ describe('the scenario harness', () => {
 
     expect(parks?.title).toBe('Waits for a signal');
     expect(parks?.description).toContain('release');
+  });
+
+  /**
+   * The one above reads as an example; this one is the guarantee. The fixtures
+   * hold their descriptions in a name-keyed map, and the compiler now pins the
+   * *keys* to registered workflows — but it cannot see whether a description
+   * ever reaches the wire. Asserting one of four left three that could stop
+   * arriving silently, which is the half of the drift a type does not cover.
+   */
+  it('carries every described scenario through to that catalogue', async () => {
+    const workflows = await server.client.workflows();
+
+    for (const [name, descriptor] of Object.entries(SCENARIO_DESCRIPTORS)) {
+      const published = workflows.find((workflow) => workflow.name === name);
+
+      expect(published)
+        .withContext(`${name} missing from the catalogue`)
+        .toBeDefined();
+      expect(published?.title)
+        .withContext(`${name} title`)
+        .toBe(descriptor.title);
+      expect(published?.description)
+        .withContext(`${name} description`)
+        .toBe(descriptor.description);
+    }
   });
 
   it('reports a workflow two workers describe differently as conflicting', async () => {
