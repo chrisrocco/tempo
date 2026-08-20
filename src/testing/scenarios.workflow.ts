@@ -63,7 +63,7 @@ export const scenarioCompletes = defineWorkflow({
       },
     },
   },
-  async start(props: {value: string}): Promise<unknown> {
+  async run(props: {value: string}): Promise<unknown> {
     return settling.scenario_succeed(props.value);
   },
 });
@@ -72,7 +72,7 @@ export const scenarioFails = defineWorkflow({
   title: 'Fails immediately',
   description:
     'Runs one activity that throws, with no retries, so the execution settles as failed.',
-  async start(): Promise<unknown> {
+  async run(): Promise<unknown> {
     return settling.scenario_fail();
   },
 });
@@ -81,7 +81,7 @@ export const scenarioParks = defineWorkflow({
   title: 'Waits for a signal',
   description:
     'Parks on a condition that only a `release` signal makes true. Stays running until it gets one.',
-  async start(): Promise<string> {
+  async run(): Promise<string> {
     let released = false;
     setHandler(release, () => {
       released = true;
@@ -95,7 +95,7 @@ export const scenarioRetries = defineWorkflow({
   title: 'Retries an activity',
   description:
     'Runs an activity that always throws, backing off a minute between attempts. Stays running with its attempt count climbing.',
-  async start(): Promise<unknown> {
+  async run(): Promise<unknown> {
     return retrying.scenario_fail();
   },
 });

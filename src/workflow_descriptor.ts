@@ -19,10 +19,10 @@
  *
  * ## What it costs
  *
- * It mutates the `start` function it is handed, which is worth being explicit about. The
+ * It mutates the `run` function it is handed, which is worth being explicit about. The
  * property is non-enumerable, so it does not appear in `Object.keys`, spreads, or
  * `JSON.stringify`, and the descriptor is frozen so a reader cannot alter what other
- * readers see. `start` is handed back unchanged in every way an author can observe: same
+ * readers see. `run` is handed back unchanged in every way an author can observe: same
  * reference, same signature, still directly callable in a unit test.
  *
  * That last property is the point of the whole shape. `startWorker({workflows: {greeter}})`
@@ -87,10 +87,12 @@ export interface WorkflowDefinition<
   /**
    * The workflow itself, taking the props described above as one object.
    *
-   * Named `start` rather than `run` or `fn` because it is what a reader of the
-   * *description* is looking at: the thing a form's button does.
+   * Named `run` rather than `start` because `start` is taken, and taken by the
+   * opposite side: `client.start` and `service.start` *dispatch* a workflow from
+   * outside, and this is the body that then runs. Two meanings of one word
+   * across one API is worse than a word that is merely less evocative.
    */
-  start: S;
+  run: S;
 }
 
 /**
@@ -108,13 +110,13 @@ export interface WorkflowDefinition<
  *     },
  *     required: ['customerId'],
  *   },
- *   async start(props: {customerId: string; locale?: string}) {
+ *   async run(props: {customerId: string; locale?: string}) {
  *     return act.greet(props.customerId);
  *   },
  * });
  * ```
  *
- * **Returns `start` itself**, so nothing downstream changes:
+ * **Returns `run` itself**, so nothing downstream changes:
  * `startWorker({workflows: {greeter}})` registers it under `greeter`, the engine invokes
  * it exactly as it invokes any other workflow function, and a unit test still calls it
  * directly. The description rides along on a non-enumerable property and is invisible to
@@ -127,9 +129,9 @@ export interface WorkflowDefinition<
  * literal, and the props sit next to the signature that consumes them — and it means
  * there is no argument order to get backwards.
  *
- * ## The props type is written once, in `start`
+ * ## The props type is written once, in `run`
  *
- * TypeScript infers it from the method, so the object literal in `start(props: {...})` is
+ * TypeScript infers it from the method, so the object literal in `run(props: {...})` is
  * the only place the shape is written as a type. The `props` JSON Schema beside it is the
  * *runtime* description, and the two are related by convention rather than by the
  * compiler.
@@ -141,8 +143,8 @@ export interface WorkflowDefinition<
 export function defineWorkflow<S extends AnyWorkflowFn>(
   definition: WorkflowDefinition<S>,
 ): S {
-  const {start, ...descriptor} = definition;
-  Object.defineProperty(start, DESCRIPTOR, {
+  const {run, ...descriptor} = definition;
+  Object.defineProperty(run, DESCRIPTOR, {
     // Copied and frozen: the caller's object stays theirs to keep mutating if they
     // insist, and every reader sees the same thing regardless.
     value: Object.freeze({...descriptor}),
@@ -150,7 +152,7 @@ export function defineWorkflow<S extends AnyWorkflowFn>(
     configurable: true,
     writable: false,
   });
-  return start;
+  return run;
 }
 
 /**

@@ -17,15 +17,15 @@ import {defineWorkflow} from '../../src/workflow';
 import {workflowDescriptor} from '../../src/workflow_descriptor';
 
 describe('defineWorkflow', () => {
-  it('returns the start function itself', () => {
-    const start = async (): Promise<string> => 'hi';
-    expect(defineWorkflow({title: 'Greeter', start})).toBe(start);
+  it('returns the run function itself', () => {
+    const run = async (): Promise<string> => 'hi';
+    expect(defineWorkflow({title: 'Greeter', run})).toBe(run);
   });
 
   it('leaves it callable, with its props and result intact', async () => {
     const greet = defineWorkflow({
       title: 'Greeter',
-      async start(props: {name: string}) {
+      async run(props: {name: string}) {
         return `hello ${props.name}`;
       },
     });
@@ -46,7 +46,7 @@ describe('defineWorkflow', () => {
       title: 'Greet a customer',
       description: 'Sends the welcome email.',
       props,
-      async start() {
+      async run() {
         return 'x';
       },
     });
@@ -63,7 +63,7 @@ describe('defineWorkflow', () => {
   it('keeps start out of the descriptor', () => {
     const fn = defineWorkflow({
       title: 'Greeter',
-      async start() {
+      async run() {
         return 'x';
       },
     });
@@ -79,7 +79,7 @@ describe('defineWorkflow', () => {
   it('adds nothing enumerable', () => {
     const fn = defineWorkflow({
       title: 'Greeter',
-      async start() {
+      async run() {
         return 'x';
       },
     });
@@ -92,7 +92,7 @@ describe('defineWorkflow', () => {
   it('freezes the descriptor, so one reader cannot alter another’s', () => {
     const fn = defineWorkflow({
       title: 'Greeter',
-      async start() {
+      async run() {
         return 'x';
       },
     });
@@ -123,7 +123,7 @@ describe('defineWorkflow', () => {
   it('accepts a description with only some fields', () => {
     const fn = defineWorkflow({
       description: 'No title, just this.',
-      async start() {
+      async run() {
         return 'x';
       },
     });
@@ -136,7 +136,7 @@ describe('defineWorkflow', () => {
   it('accepts a workflow with no props at all', () => {
     const fn = defineWorkflow({
       title: 'Takes nothing',
-      async start() {
+      async run() {
         return 'x';
       },
     });
@@ -162,7 +162,7 @@ describe('a described workflow on a runtime', () => {
         properties: {name: {type: 'string'}},
         required: ['name'],
       },
-      async start(props: {name: string}) {
+      async run(props: {name: string}) {
         return `hello ${props.name}`;
       },
     });
@@ -181,7 +181,7 @@ describe('a described workflow on a runtime', () => {
     const workflows = {
       described: defineWorkflow({
         title: 'Described',
-        async start() {
+        async run() {
           return 'x';
         },
       }),
