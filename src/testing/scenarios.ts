@@ -31,14 +31,17 @@
  */
 
 import type {WorkflowFn} from '../core';
-import {isStuck, type RemoteWorkflowService} from '../protocol';
+import {
+  isStuck,
+  type RemoteWorkflowService,
+  type WorkflowDescriptor,
+} from '../protocol';
 import {
   createWorkflowRegistry,
   createWorkflowWorker,
   runWorkflowWorker,
   startWorkflowReporter,
 } from '../worker';
-import {workflowDescriptor} from '../workflow_descriptor';
 import * as scenarioWorkflowModule from './scenarios.workflow';
 
 /** Every state the harness can produce. Adding one is adding a case here. */
@@ -96,6 +99,19 @@ export interface ScenarioDefinition {
  * **deliberately not registered** — see the `stuck` scenario, and the note at the
  * foot of `scenarios.workflow.ts`. Its absence is what produces the state.
  */
+/**
+ * What a scenario workflow says about itself, or nothing when it says nothing.
+ *
+ * The fixtures carry their descriptions as data rather than on the functions —
+ * `scenarios.workflow.ts` explains why — so this is the lookup both the harness
+ * and the split-manifest seed report through.
+ */
+export function describedAs(name: string): WorkflowDescriptor {
+  const described: Record<string, WorkflowDescriptor> =
+    scenarioWorkflowModule.SCENARIO_DESCRIPTORS;
+  return described[name] ?? {};
+}
+
 export const SCENARIO_WORKFLOWS = {
   completes: 'scenarioCompletes',
   fails: 'scenarioFails',
@@ -274,16 +290,16 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
       );
       const reporter = startWorkflowReporter(
         context.service,
-        workflows.map(([name, fn]) =>
+        workflows.map(([name]) =>
           name === SCENARIO_WORKFLOWS.completes
             ? {
                 name,
-                ...(workflowDescriptor(fn) ?? {}),
+                ...describedAs(name),
                 title: 'Completes immediately (previous release)',
                 description:
                   'The same workflow as the live binary describes, worded differently — which is what makes the fleet disagree.',
               }
-            : {name, ...(workflowDescriptor(fn) ?? {})},
+            : {name, ...describedAs(name)},
         ),
         {identity: SPLIT_MANIFEST_IDENTITY, taskQueue: context.queue},
       );

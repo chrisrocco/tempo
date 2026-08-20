@@ -78,7 +78,7 @@ describe('FileHistoryStore', () => {
     const dir = await tmpDir();
     try {
       const store1 = await FileHistoryStore.open(dir);
-      await store1.create('greeter-4', 'greeter', []);
+      await store1.create('greeter-4', 'greeter', {});
       await store1.delete('greeter-4');
       expect(await store1.get('greeter-4')).toBeUndefined();
       await store1.close();
@@ -99,7 +99,7 @@ describe('FileHistoryStore', () => {
     const dir = await tmpDir();
     try {
       const store1 = await FileHistoryStore.open(dir);
-      await store1.create('wf-done', 'wf', []);
+      await store1.create('wf-done', 'wf', {});
       await store1.setStatus('wf-done', 'completed', {result: 1});
       await store1.close();
 
@@ -115,7 +115,7 @@ describe('FileHistoryStore', () => {
     const dir = await tmpDir();
     try {
       const store1 = await FileHistoryStore.open(dir);
-      await store1.create('wf-1', 'w', []);
+      await store1.create('wf-1', 'w', {});
       await store1.recordTaskFailure('wf-1', 'nondeterminism at seq 0');
       await store1.recordTaskFailure('wf-1', 'nondeterminism at seq 0');
       await store1.close();
@@ -134,7 +134,7 @@ describe('FileHistoryStore', () => {
     const dir = await tmpDir();
     try {
       const store1 = await FileHistoryStore.open(dir);
-      await store1.create('wf-1', 'w', []);
+      await store1.create('wf-1', 'w', {});
       await store1.recordTaskFailure('wf-1', 'boom');
       await store1.clearTaskFailures('wf-1');
       await store1.close();
@@ -205,8 +205,74 @@ describe('file store — a data directory from before props', () => {
     await fs.writeFile(path.join(exec, 'events.jsonl'), '');
 
     await expectAsync(FileHistoryStore.open(dir)).toBeRejectedWithError(
-      /older format[\s\S]*no migration/,
+      // It has to name the *data* directory, which is what the reader is told
+      // to delete. The offending record lives one level down, and naming only
+      // that sends someone to delete a subdirectory — which clears this record
+      // and stops the next boot on the next one.
+      new RegExp(
+        `older format[\\s\\S]*no migration — delete ${dir}[^\\n]*--data-dir`,
+      ),
     );
+
+    await fs.rm(dir, {recursive: true, force: true});
+  });
+
+  it('does not leave the dir locked when it refuses it', async () => {
+    // The lock is taken before the load, so a refusal would otherwise outlive
+    // the failed open and the *next* attempt would report `is locked` — burying
+    // the reason under a complaint about the wreckage. The guard exists to be
+    // read, so it has to survive being read twice.
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-oldfmt-'));
+    const exec = path.join(dir, 'executions', 'old');
+    await fs.mkdir(exec, {recursive: true});
+    await fs.writeFile(
+      path.join(exec, 'meta.json'),
+      JSON.stringify({
+        workflowId: 'old',
+        runId: 0,
+        name: 'charge',
+        args: [],
+        status: 'running',
+      }),
+    );
+    await fs.writeFile(path.join(exec, 'events.jsonl'), '');
+
+    await expectAsync(FileHistoryStore.open(dir)).toBeRejected();
+    await expectAsync(FileHistoryStore.open(dir)).toBeRejectedWithError(
+      /older format/,
+    );
+
+    await fs.rm(dir, {recursive: true, force: true});
+  });
+
+  it('opens clean once the directory is gone, which is the documented fix', async () => {
+    // The instruction the guard gives, carried out literally: delete the data
+    // dir and start again. `open` recreates it, so nothing has to be
+    // provisioned first — and the id the old record held is free, because the
+    // claim lived in the record that went with it.
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-oldfmt-'));
+    const exec = path.join(dir, 'executions', 'old');
+    await fs.mkdir(exec, {recursive: true});
+    await fs.writeFile(
+      path.join(exec, 'meta.json'),
+      JSON.stringify({
+        workflowId: 'old',
+        runId: 0,
+        name: 'charge',
+        args: [],
+        status: 'running',
+      }),
+    );
+    await fs.writeFile(path.join(exec, 'events.jsonl'), '');
+    await expectAsync(FileHistoryStore.open(dir)).toBeRejected();
+
+    await fs.rm(dir, {recursive: true, force: true});
+
+    const store = await FileHistoryStore.open(dir);
+    expect(await store.list()).toEqual([]);
+    await store.create('old', 'charge', {amount: 100});
+    expect((await store.get('old'))?.props).toEqual({amount: 100});
+    await store.close();
 
     await fs.rm(dir, {recursive: true, force: true});
   });

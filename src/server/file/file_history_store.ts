@@ -8,7 +8,7 @@
  *   lock                       — single-writer guard (this process's pid)
  *   deleted.json               — {highestDeletedSuffix}; see `HistoryStore.delete`
  *   executions/<enc-id>/
- *     meta.json                — {workflowId, runId, name, args, status, result, failure}
+ *     meta.json                — {workflowId, runId, name, props, status, result, failure}
  *     events.jsonl             — the history, one JSON event per line (append-only)
  *
  * The event-sourced history maps almost 1:1 onto an append-only log: `append` is
@@ -56,12 +56,17 @@ import {VersionConflictError, trailingIdSuffix} from '../ports/history_store';
  * ever written — the only evidence a dir predates this is the shape of what is
  * in it. New dirs are written with `props` and never match.
  */
-function assertReadableFormat(meta: PersistedMeta, dir: string): void {
+function assertReadableFormat(
+  meta: PersistedMeta,
+  recordDir: string,
+  dataDir: string,
+): void {
   if (!('args' in meta)) return;
   throw new Error(
-    `${dir} was written by an older format: an execution's arguments are stored ` +
-      `as \`props\` (one object) and this record still has \`args\` (a list). ` +
-      `There is no migration — delete the data directory, or point --data-dir at a new one.`,
+    `${dataDir} was written by an older format: an execution's arguments are ` +
+      `stored as \`props\` (one object) and ${recordDir} still has \`args\` (a list). ` +
+      `There is no migration — delete ${dataDir}, or point --data-dir at a new ` +
+      `one. Deleting the one record is not enough: the next boot stops on the next.`,
   );
 }
 
@@ -167,12 +172,25 @@ export class FileHistoryStore implements HistoryStore {
     return this.dir;
   }
 
-  /** Open (or create) a data dir: acquire the single-writer lock, then load state. */
+  /**
+   * Open (or create) a data dir: acquire the single-writer lock, then load state.
+   *
+   * The lock is released if loading throws. It is taken before the load and so
+   * would otherwise outlive a failed open, and the next attempt would report
+   * `data dir … is locked` — burying the reason the first one failed under a
+   * complaint about the wreckage it left. `assertReadableFormat` is exactly such
+   * a failure, and its whole job is to be read.
+   */
   static async open(dir: string): Promise<FileHistoryStore> {
     await fs.mkdir(dir, {recursive: true});
     await acquireLock(dir);
     const store = new FileHistoryStore(dir);
-    await store.load();
+    try {
+      await store.load();
+    } catch (e) {
+      await fs.rm(path.join(dir, 'lock'), {force: true});
+      throw e;
+    }
     return store;
   }
 
@@ -500,7 +518,7 @@ export class FileHistoryStore implements HistoryStore {
         .catch(() => null);
       if (metaRaw === null) continue;
       const meta = JSON.parse(metaRaw) as PersistedMeta;
-      assertReadableFormat(meta, d);
+      assertReadableFormat(meta, d, this.dir);
       const eventsRaw = await fs
         .readFile(path.join(d, 'events.jsonl'), 'utf8')
         .catch(() => '');
