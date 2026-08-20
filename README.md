@@ -213,8 +213,11 @@ import * as Tempo from 'workflow-engine/workflow';
 import * as payments from '../activities/payments';
 const act = Tempo.proxyActivities(payments, { retry: { maximumAttempts: 3 } });
 
-export const order = Tempo.createWorkflow('order', async (id: string) => {
-  await act.charge(id);
+export const order = Tempo.createWorkflow({
+  key: 'order',
+  async run({ id }: { id: string }) {
+    await act.charge(id);
+  },
 });
 
 // worker.ts — bundle this, run it twice, once per --role

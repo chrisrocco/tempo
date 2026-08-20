@@ -17,9 +17,12 @@
  * ```ts
  * import * as Tempo from 'workflow-engine/workflow';
  *
- * const charge = Tempo.createWorkflow('charge', async (id: string) => {
- *   await Tempo.sleep(1000);
- *   return acts.capture(id);
+ * const charge = Tempo.createWorkflow({
+ *   key: 'charge',
+ *   async run({id}: {id: string}) {
+ *     await Tempo.sleep(1000);
+ *     return acts.capture(id);
+ *   },
  * });
  * ```
  *
@@ -131,12 +134,12 @@ export {
   type WorkflowInfo,
 } from './core/workflow_api';
 
+export type {AnyWorkflowFn} from './workflow_descriptor';
 export {
-  defineWorkflow,
-  type AnyWorkflowFn,
-  type WorkflowDefinition,
-} from './workflow_descriptor';
-export {createWorkflow, type WorkflowRef} from './workflow_registry';
+  createWorkflow,
+  type WorkflowRef,
+  type WorkflowRegistration,
+} from './workflow_registry';
 
 // author-facing option types (erased at runtime; safe on the deterministic surface)
 export type {

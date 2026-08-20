@@ -27,9 +27,8 @@
  * parent's history and it would half-work until it didn't. So the reference
  * wraps `executeChild` (and `startChild`, via `.detached()`), the *registry* holds
  * the real function for the engine to invoke, and a unit test that wants the
- * body calls `.impl` — the one deliberate departure from `defineWorkflow`'s
- * "returns `start` itself" contract, and the reason this is a new export rather
- * than a change to that one.
+ * body calls `.impl`, which is the same function the author wrote: the
+ * descriptor rides on it, and nothing about it changed.
  *
  * ## The name is the author's now
  *
@@ -37,7 +36,7 @@
  * chosen at the entrypoint. A reference usable at a call site has to know its
  * wire name at *definition* time, and `fn.name` is not a candidate — workers
  * ship as bundled artifacts, and minification renames functions silently. So
- * the name is the first argument, which also means two modules that never see
+ * the author writes it as `key`, which also means two modules that never see
  * each other can claim one name. That conflict is **recorded, not thrown**:
  * these calls run at module load, where a throw fires mid-evaluation and
  * crashes the process on import instead of reporting anything actionable
@@ -67,11 +66,8 @@ import {
   type ChildHandle,
   type ChildOptions,
 } from './core';
-import {
-  defineWorkflow,
-  type AnyWorkflowFn,
-  type WorkflowDefinition,
-} from './workflow_descriptor';
+import {describeWorkflow, type AnyWorkflowFn} from './workflow_descriptor';
+import type {WorkflowDescriptor} from './protocol';
 
 /** Any callable. `any[]` rest params are required for assignability — see `core/workflow_api`. */
 type AnyFn = (...args: any[]) => unknown;
@@ -121,9 +117,9 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
    * including one already finished, whose result returns immediately), a
    * `taskQueue`, a `parentClosePolicy` for the case where the parent closes
    * mid-await. `executeChild`, typed; the direct call above is this with
-   * defaults. Args are a tuple rather than spread because a trailing options
-   * object after variadic typed args would be indistinguishable from the last
-   * argument.
+   * defaults. Props and options are two parameters rather than one object
+   * because the props are the workflow's own and the options are the engine's,
+   * and merging them would let a workflow shadow `taskQueue`.
    */
   execute(
     props?: Parameters<F>[0],
@@ -149,24 +145,58 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
 }
 
 /**
- * Define a workflow under `name`, register it, and return the dispatching
- * reference — see the fileoverview for why the reference is not the function.
+ * A workflow's whole declaration: its key, its body, and what it says about
+ * itself.
  *
- * Takes either the bare function or the `defineWorkflow` literal, so a
- * described workflow stays one object with its props beside its signature; the
- * descriptor rides on `.impl` and reaches the catalogue through the same
- * `workflowDescriptor` read as before.
+ * One object rather than `(key, definition)` because the key is a property of
+ * the workflow like the rest of them, and a positional first argument made the
+ * described and undescribed forms read as two different APIs — one a pair, one a
+ * literal. There is also no argument order to get backwards.
+ */
+export interface WorkflowRegistration<
+  F extends AnyWorkflowFn,
+> extends WorkflowDescriptor {
+  /**
+   * The wire name: what `client.start` takes, what a task is routed by, and what
+   * a second `createWorkflow` claiming it collides with.
+   *
+   * Written here rather than derived from the export name because a reference
+   * has to know its name at *definition* time, and `fn.name` is not a candidate
+   * — workers ship as bundled artifacts and minification renames functions
+   * silently.
+   */
+  key: string;
+  /**
+   * The workflow itself, taking the props described above as one object.
+   *
+   * Named `run` rather than `start` because `start` is taken, and taken by the
+   * opposite side: `client.start` and `service.start` *dispatch* a workflow from
+   * outside, and this is the body that then runs. Two meanings of one word
+   * across one API is worse than a word that is merely less evocative.
+   */
+  run: F;
+}
+
+/**
+ * Define a workflow, register it, and return the dispatching reference — see the
+ * fileoverview for why the reference is not the function.
  *
- * Registering the **same** function under a name twice is a no-op — a module
- * genuinely can evaluate twice. A *different* function under a taken name is
+ * The descriptor rides on `.impl` and reaches the catalogue through the same
+ * `workflowDescriptor` read as before, so a workflow that describes itself and
+ * one that does not are the same call with more fields.
+ *
+ * Registering the **same** function under a key twice is a no-op — a module
+ * genuinely can evaluate twice. A *different* function under a taken key is
  * recorded for `startWorker` to refuse, never thrown here (fileoverview).
  */
 export function createWorkflow<F extends AnyWorkflowFn>(
-  name: string,
-  definition: F | WorkflowDefinition<F>,
+  registration: WorkflowRegistration<F>,
 ): WorkflowRef<F> {
-  const impl =
-    typeof definition === 'function' ? definition : defineWorkflow(definition);
+  const {key: name, run, ...descriptor} = registration;
+  // Unconditional: this is the only thing that writes a descriptor, so there is
+  // never an existing one to overwrite. An empty one reads as "not described"
+  // everywhere it is consumed.
+  const impl = describeWorkflow(run, descriptor);
 
   const existing = registered.get(name);
   if (existing && existing !== impl) conflicted.add(name);
@@ -219,7 +249,7 @@ function asDispatchError(e: unknown, name: string): unknown {
     return e;
   return new Error(
     `${name} is a workflow reference: calling it dispatches a child workflow, which only works inside another workflow. ` +
-      `From application code, start it through a client (client.start('${name}', args)); ` +
+      `From application code, start it through a client (client.start('${name}', props)); ` +
       `from a unit test, run the body directly with .impl(...).`,
   );
 }
