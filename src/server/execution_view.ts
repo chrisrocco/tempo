@@ -15,14 +15,11 @@
  * mattered most — while an operator is trying to work out why an execution is
  * stuck.
  *
- * One input arrives from outside that rule rather than breaking it: the live
- * checkpoints attempts have reported through `heartbeat()`. They are not derived,
- * because history holds no record of them by design, and not stored, because they
- * describe an attempt a worker is holding *right now* — a restart abandons every
- * such attempt, so a persisted checkpoint would outlive the work it describes and
- * report progress on something nobody is running. They are therefore passed in per
- * call, and the default — none — is the honest answer for a caller with no live
- * server to ask, which is what makes this still a pure function of its arguments.
+ * One input is neither derived nor stored: the live checkpoints in-flight
+ * attempts have reported. They are passed in per call because history holds no
+ * record of them and they must not be persisted — `ServerCore.activityCheckpoints`
+ * owns that reasoning. Defaulting to none keeps this a pure function of its
+ * arguments, and is the honest answer for a caller with no live server to ask.
  *
  * The projection is deliberately not the record itself. `ExecutionRecord` carries
  * a `version` that only means something to the optimistic CAS, and a `failure`
@@ -142,10 +139,9 @@ export function describeExecution(
         // entry is only written once an attempt fails, and cleared the moment
         // the activity settles.
         const retry = rec.activityAttempts[e.seq];
-        // Absent while the activity waits out a backoff, and correctly so: the
-        // attempt that reported it has already failed, and carrying its last
-        // checkpoint into the gap would describe the run that is over as though
-        // it were the one about to start.
+        // Absent while the activity waits out a backoff: the attempt that
+        // reported it is over, and carrying it into the gap would describe the
+        // run that failed as though it were the one about to start.
         const live = checkpoints[e.seq];
         return {
           seq: e.seq,

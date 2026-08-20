@@ -1,7 +1,8 @@
 /**
  * @fileoverview
  * What an activity can reach while it runs. Today that is one thing: `heartbeat`,
- * the way a long attempt tells the server it is still alive.
+ * the way a long attempt tells the server it is still alive and, optionally,
+ * where it has got to.
  *
  * Carried through `AsyncLocalStorage` rather than passed as an argument, for the
  * same reason the workflow context is (see `core/context`): an activity stays an
@@ -18,33 +19,24 @@
  * Calls are **throttled** here rather than at the server: an agent looping over
  * a hundred documents will call this a hundred times, and the server only needs
  * to hear often enough to keep the deadline from firing. Beats inside the window
- * are dropped outright rather than buffered, and what makes that safe is the
- * contract on `heartbeat` below — every beat carries the whole checkpoint, so
- * any one of them is enough and losing a subset costs precision, never
- * correctness.
+ * are dropped rather than buffered, which is safe only because of the contract on
+ * `heartbeat` below: losing a subset of complete checkpoints costs precision,
+ * never correctness.
  *
- * Three other shapes were considered once beats could carry a payload, because
- * carrying one makes the throttle look reopenable. Each was rejected:
+ * Three shapes were rejected once beats could carry a payload:
  *
- * - **Coalescing** — buffer the latest payload, flush it on a trailing edge.
- *   Bounds staleness by the interval rather than by the caller's next call,
- *   which differs only for a burst followed by a long gap. Under the checkpoint
- *   contract the value left behind there is still a *valid* checkpoint, merely
- *   an older one, so this buys freshness for the price of a timer, its
- *   cancellation, and a rule about what a pending send means when the attempt
- *   ends. `PendingActivityView.checkpointAt` answers the same complaint — a
- *   stale value that is visibly stale misleads nobody — for a field instead of
- *   a state machine.
- * - **No throttle at all**, documented as a sharp edge. It adds a failure mode
- *   and removes none: a caller beating too rarely still times out, while one
- *   beating per row opens an unbounded number of fire-and-forget requests
- *   (`worker/worker_loops` voids them and swallows their errors), exhausting
- *   sockets in the activity's own process before the server notices. Silent,
- *   diffuse, and found under exactly the load the feature exists for.
- * - **A debounce.** A different function, and a bug here rather than a variant:
- *   a debounce fires after a quiet period, so an activity beating in a tight
- *   loop resets the timer forever, never sends, and is abandoned for silence
- *   while working hardest. The more diligently it reports, the sooner it dies.
+ * - **Coalescing** — buffer the latest, flush on a trailing edge. Bounds
+ *   staleness by the interval rather than by the caller's next call, which
+ *   differs only after a burst then a long gap — where the value left behind is
+ *   still a valid checkpoint, merely older. `PendingActivityView.checkpointAt`
+ *   answers the same complaint with a field rather than a timer.
+ * - **No throttle**, as a documented sharp edge. Adds a failure mode and removes
+ *   none: beating too rarely still times out, while beating per row opens
+ *   unbounded fire-and-forget requests (`worker/worker_loops` voids them and
+ *   swallows their errors) and exhausts sockets before the server notices.
+ * - **A debounce** — a different function, and a bug here. It fires after a quiet
+ *   period, so an activity beating in a tight loop never sends and is abandoned
+ *   for silence while working hardest.
  */
 
 import {AsyncLocalStorage} from 'node:async_hooks';
@@ -74,11 +66,10 @@ const DEFAULT_THROTTLE_MS = 5_000;
  * throwing: an activity function should stay callable directly from a unit test
  * without a running engine.
  *
- * **`checkpoint` must be the complete checkpoint, never a delta.** It lands in a
- * single slot that the next beat overwrites (`PendingActivityView.checkpoint`),
- * and only a sample of beats is sent at all, so whichever one survives has to
- * stand alone — everything the next attempt would need to resume, and
- * everything a reader needs to make sense of the attempt, in every call:
+ * **`checkpoint` must be complete every time, never a delta.** It lands in one
+ * slot that the next beat overwrites (`PendingActivityView.checkpoint`), and only
+ * a sample of beats is sent, so whichever survives has to stand alone —
+ * everything the next attempt would need to resume, in every call:
  *
  * ```ts
  * const jobId = await sql.submit(query);
@@ -92,8 +83,7 @@ const DEFAULT_THROTTLE_MS = 5_000;
  *
  * Reporting `{jobId}` once and `{pct}` thereafter loses the handle at the first
  * overwrite, and with it the retry's only way to re-attach to a query already
- * running — which is the failure this contract exists to prevent, and it costs
- * hours rather than precision.
+ * running.
  */
 export function heartbeat(checkpoint?: unknown): void {
   als.getStore()?.beat(checkpoint);

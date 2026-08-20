@@ -471,11 +471,9 @@ export interface ServerCore {
   /**
    * What each of `workflowId`'s in-flight attempts last reported, keyed by seq.
    *
-   * Live state, and the one input to `describeExecution` that history cannot
-   * supply — which is why the projection takes it as an argument rather than
-   * deriving it. Deliberately **not** durable: it describes an attempt held by a
-   * worker, and a restart abandons every such attempt, so persisting it would
-   * mean answering `describe` with the progress of work nobody is doing.
+   * Live state, and the one input to `describeExecution` history cannot supply.
+   * Deliberately **not** durable: a restart abandons every attempt, so a
+   * persisted checkpoint would outlive the work it describes.
    */
   activityCheckpoints(workflowId: string): ActivityCheckpoints;
 }
@@ -529,12 +527,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
-  // The checkpoint rides on the lease rather than in a map of its own so that it is
-  // cleaned up by construction: an attempt's checkpoint is meaningless once the
-  // attempt is over, and every path that ends one — completion, either deadline,
-  // a reset — already deletes the lease. A parallel map would need each of those
-  // to remember it, and the one that forgot would leave `describe` reporting the
-  // progress of an attempt nobody is running.
+  // The checkpoint rides on the lease so it is cleaned up by construction: every
+  // path that ends an attempt already deletes the lease. A parallel map would
+  // need each of them to remember, and the one that forgot would leave `describe`
+  // reporting an attempt nobody is running.
   const activityLeases = new Map<
     TaskToken,
     {
@@ -1825,17 +1821,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowId: task.workflowId,
       seq: task.seq,
     });
-    // A new attempt supersedes whatever the last one reported: that checkpoint
-    // describes work now being redone, and reporting it against the attempt just
-    // started would credit this one with the dead one's progress.
-    //
-    // Needed because a lease can end a fourth way, without passing any of the
-    // paths that delete it. When the queue expires a lease and redelivers, the
-    // superseded entry stays in this map — `completeActivityTask` says why, and
-    // relies on it: a late completion from the abandoned worker is still accepted
-    // there, deduped downstream rather than dropped. So the stale *lease* has a
-    // job to do and must stay; only its checkpoint is now false, and only that is
-    // cleared here.
+    // A new attempt supersedes the last one's checkpoint, which now describes
+    // work being redone. This is the one path that ends an attempt without
+    // deleting its lease — the queue expiring it and redelivering — and the stale
+    // lease must stay: `completeActivityTask` relies on it to accept a late
+    // completion from the abandoned worker. So only the checkpoint is cleared.
     for (const [token, lease] of activityLeases)
       if (
         token !== task.token &&
@@ -1881,11 +1871,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const timeoutMs = task.options.heartbeatTimeoutMs;
     if (timeoutMs !== undefined && timeoutMs > 0)
       armAttemptTimer(task, 'heartbeat', timeoutMs);
-    // Overwritten, never accumulated — one slot per attempt. `undefined` leaves
-    // the previous checkpoint standing rather than clearing it: a beat sent
-    // purely for liveness is not a statement that the attempt has forgotten
-    // where it was, and clearing on it would make an author's choice to call
-    // `heartbeat()` bare in one branch destroy what the others reported.
+    // One slot, overwritten. A bare `heartbeat()` leaves the last checkpoint
+    // standing rather than clearing it: reporting liveness is not a statement
+    // that the attempt forgot where it was.
     if (checkpoint !== undefined)
       lease.checkpoint = {checkpoint, at: Date.now()};
     log('activity.heartbeat', {
@@ -1896,11 +1884,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
 
   /**
-   * The live checkpoints for `workflowId`'s attempts in flight, keyed by seq.
-   *
-   * Walks the leases rather than keeping a per-execution index: the number of
-   * attempts out with workers at any moment is small, and a second structure
-   * would be a second thing to keep in step with the first.
+   * Walks the leases rather than keeping a per-execution index: few attempts are
+   * ever out at once, and a second structure is a second thing to keep in step.
    */
   function activityCheckpoints(workflowId: string): ActivityCheckpoints {
     const out: ActivityCheckpoints = {};

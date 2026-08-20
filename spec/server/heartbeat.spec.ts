@@ -197,11 +197,9 @@ describe('heartbeats for an attempt the server gave up on', () => {
 });
 
 /**
- * A checkpoint is a **register, not a log**: one slot per attempt, overwritten by
- * the next beat and thrown away with the attempt. Nothing here is a history
- * event, so none of it survives the attempt that reported it — which is the point,
- * because it describes work a worker is holding rather than something that
- * happened to the execution.
+ * A register, not a log: one slot per attempt, overwritten by the next beat and
+ * thrown away with the attempt. Nothing here is a history event, so none of it
+ * outlives the attempt that reported it.
  */
 describe('a checkpoint reported with a heartbeat', () => {
   async function pending(core: ServerCore, historyStore: MemoryHistoryStore) {
@@ -251,11 +249,6 @@ describe('a checkpoint reported with a heartbeat', () => {
     expect((await pending(core, historyStore)).checkpoint).toEqual({pct: 90});
   });
 
-  /**
-   * An author who calls `heartbeat()` bare in one branch and with a checkpoint in
-   * another is reporting liveness, not amnesia. Clearing here would let the bare
-   * branch destroy what every other branch reported.
-   */
   it('is left standing by a later heartbeat that carries nothing', async () => {
     const options: ActivityOptions = {heartbeatTimeoutMs: 200};
     const {core, activityTaskQueue, historyStore} = coreWith(5000);
@@ -284,11 +277,8 @@ describe('a checkpoint reported with a heartbeat', () => {
     expect(core.activityCheckpoints('wf')).toEqual({});
   });
 
-  /**
-   * The case a parallel map would get wrong. An abandoned attempt's checkpoint
-   * must go with it, or `describe` reports the progress of work nobody is doing —
-   * the wrong report about a dead thing this repo keeps finding.
-   */
+  // The case a parallel map would get wrong: an abandoned attempt's checkpoint
+  // must go with it, or `describe` reports work nobody is doing.
   it('is discarded when the attempt is abandoned for going quiet', async () => {
     const options: ActivityOptions = {heartbeatTimeoutMs: 30};
     const {core, activityTaskQueue, historyStore} = coreWith(5000);
@@ -317,11 +307,9 @@ describe('a checkpoint reported with a heartbeat', () => {
 });
 
 /**
- * The fourth way an attempt can end. With neither timeout set, the queue lease is
- * all that bounds it, and expiry redelivers without passing any path that deletes
- * the lease — `completeActivityTask` explains why the stale entry stays. Its
- * checkpoint must not stay with it, or a dead attempt's progress is reported as
- * the live one's.
+ * The fourth way an attempt can end: with neither timeout set, the queue lease
+ * bounds it, and expiry redelivers without deleting the lease. The stale entry
+ * stays on purpose (`completeActivityTask` says why); its checkpoint must not.
  */
 describe('a checkpoint superseded by redelivery', () => {
   it('is not reported against the attempt that replaced it', async () => {
@@ -353,11 +341,8 @@ describe('a checkpoint superseded by redelivery', () => {
     expect(core.activityCheckpoints('wf')[0]!.checkpoint).toEqual({pct: 5});
   });
 
-  /**
-   * The stale lease itself must survive, because a late completion from the
-   * abandoned worker is still accepted — at-least-once means that work really
-   * ran, and the first outcome to arrive is the one recorded.
-   */
+  // The stale lease itself must survive: that work really ran, so a late
+  // completion from the abandoned worker is still accepted.
   it('leaves the abandoned attempt still able to report its result', async () => {
     const {core, activityTaskQueue, historyStore} = coreWith(40);
     await seed(historyStore, {});

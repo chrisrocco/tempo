@@ -162,11 +162,8 @@ describe('local runtime — activities', () => {
 });
 
 describe('local runtime — activity progress', () => {
-  /**
-   * The reason a long activity can be watched at all. A query that runs for
-   * hours reports where it has got to, and `describe` — the same call a
-   * dashboard makes — hands that back while the attempt is still in flight.
-   */
+  // The headline: `describe` — the call a dashboard makes — hands back where a
+  // long activity has got to, while the attempt is still in flight.
   it('reports the checkpoint a running activity last heartbeated', async () => {
     let release = (): void => {};
     const blocked = new Promise<void>((r) => {

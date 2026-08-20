@@ -119,12 +119,8 @@ describe('heartbeat from inside an activity', () => {
     expect(sent).toEqual([{jobId: 'q-8823', pct: 40}]);
   });
 
-  /**
-   * The throttle drops a beat outright rather than buffering its payload, which
-   * is safe only because every beat carries the whole checkpoint: the one that
-   * does get through stands alone. An author reporting a delta would lose it
-   * here, which is why `heartbeat` states the contract rather than implying it.
-   */
+  // Dropped outright rather than buffered — safe only because the one that gets
+  // through is complete. An author reporting a delta would lose it here.
   it('drops a beat inside the window along with its checkpoint', async () => {
     const sent: unknown[] = [];
     const registry = createActivityRegistry();
