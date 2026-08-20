@@ -167,6 +167,7 @@ import type {
   WorkflowTaskResult,
 } from '../protocol';
 import {ANY_TASK_QUEUE} from '../protocol';
+import type {ActivityCheckpoints} from './execution_view';
 import {completedSeqs, pendingWork} from './pending_work';
 import {
   createWorkerRegistry,
@@ -462,8 +463,21 @@ export interface ServerCore {
   /**
    * The attempt behind `token` is still alive: renew its lease and reset its
    * silence deadline. Ignored once the server has given up on that attempt.
+   *
+   * `checkpoint` replaces this attempt's checkpoint, readable back through
+   * `activityCheckpoints`. Omitting it leaves the previous one standing.
    */
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
+  /**
+   * What each of `workflowId`'s in-flight attempts last reported, keyed by seq.
+   *
+   * Live state, and the one input to `describeExecution` that history cannot
+   * supply — which is why the projection takes it as an argument rather than
+   * deriving it. Deliberately **not** durable: it describes an attempt held by a
+   * worker, and a restart abandons every such attempt, so persisting it would
+   * mean answering `describe` with the progress of work nobody is doing.
+   */
+  activityCheckpoints(workflowId: string): ActivityCheckpoints;
 }
 
 export function createServerCore(deps: ServerCoreDeps): ServerCore {
@@ -515,9 +529,19 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
+  // The checkpoint rides on the lease rather than in a map of its own so that it is
+  // cleaned up by construction: an attempt's checkpoint is meaningless once the
+  // attempt is over, and every path that ends one — completion, either deadline,
+  // a reset — already deletes the lease. A parallel map would need each of those
+  // to remember it, and the one that forgot would leave `describe` reporting the
+  // progress of an attempt nobody is running.
   const activityLeases = new Map<
     TaskToken,
-    {workflowId: string; seq: number}
+    {
+      workflowId: string;
+      seq: number;
+      checkpoint?: {checkpoint: unknown; at: number};
+    }
   >();
   // `polledAt` exists purely so a completion can report how long the task was out
   // with a worker — the task-latency number Phase 7 wants to aggregate.
@@ -1825,7 +1849,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     return task;
   }
 
-  async function heartbeatActivityTask(token: TaskToken): Promise<void> {
+  async function heartbeatActivityTask(
+    token: TaskToken,
+    checkpoint?: unknown,
+  ): Promise<void> {
     const lease = activityLeases.get(token);
     const task = heartbeatTasks.get(token);
     // Silence is the only signal the server has, so a heartbeat for an attempt
@@ -1836,11 +1863,33 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const timeoutMs = task.options.heartbeatTimeoutMs;
     if (timeoutMs !== undefined && timeoutMs > 0)
       armAttemptTimer(task, 'heartbeat', timeoutMs);
+    // Overwritten, never accumulated — one slot per attempt. `undefined` leaves
+    // the previous checkpoint standing rather than clearing it: a beat sent
+    // purely for liveness is not a statement that the attempt has forgotten
+    // where it was, and clearing on it would make an author's choice to call
+    // `heartbeat()` bare in one branch destroy what the others reported.
+    if (checkpoint !== undefined)
+      lease.checkpoint = {checkpoint, at: Date.now()};
     log('activity.heartbeat', {
       workflowId: lease.workflowId,
       seq: lease.seq,
       name: task.name,
     });
+  }
+
+  /**
+   * The live checkpoints for `workflowId`'s attempts in flight, keyed by seq.
+   *
+   * Walks the leases rather than keeping a per-execution index: the number of
+   * attempts out with workers at any moment is small, and a second structure
+   * would be a second thing to keep in step with the first.
+   */
+  function activityCheckpoints(workflowId: string): ActivityCheckpoints {
+    const out: ActivityCheckpoints = {};
+    for (const lease of activityLeases.values())
+      if (lease.workflowId === workflowId && lease.checkpoint)
+        out[lease.seq] = lease.checkpoint;
+    return out;
   }
 
   async function completeActivityTask(
@@ -1883,5 +1932,6 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     pollActivityTask,
     completeActivityTask,
     heartbeatActivityTask,
+    activityCheckpoints,
   };
 }

@@ -16,6 +16,7 @@
  */
 
 import {createLocalRuntime} from '../../src';
+import {heartbeat} from '../../src/activity';
 import {
   CancelledFailure,
   condition,
@@ -157,6 +158,55 @@ describe('local runtime — activities', () => {
     await expectAsync(rt.start('missing').result()).toBeRejectedWithError(
       /no activity does-not-exist/,
     );
+  });
+});
+
+describe('local runtime — activity progress', () => {
+  /**
+   * The reason a long activity can be watched at all. A query that runs for
+   * hours reports where it has got to, and `describe` — the same call a
+   * dashboard makes — hands that back while the attempt is still in flight.
+   */
+  it('reports the checkpoint a running activity last heartbeated', async () => {
+    let release = (): void => {};
+    const blocked = new Promise<void>((r) => {
+      release = r;
+    });
+    const rt = createLocalRuntime()
+      .registerActivity('scan', async () => {
+        heartbeat({jobId: 'q-8823', pct: 40});
+        await blocked;
+        return 'scanned';
+      })
+      .registerWorkflow('scanner', async () => runActivity<string>('scan'));
+
+    const handle = rt.start<string>('scanner');
+    await wait(20); // the attempt starts and beats
+
+    const detail = await handle.describe();
+    expect(detail!.pending.activities[0].checkpoint).toEqual({
+      jobId: 'q-8823',
+      pct: 40,
+    });
+    expect(detail!.pending.activities[0].checkpointAt).toBeDefined();
+
+    release();
+    await expectAsync(handle.result()).toBeResolvedTo('scanned');
+  });
+
+  it('stops reporting a checkpoint once the activity settles', async () => {
+    const rt = createLocalRuntime()
+      .registerActivity('scan', async () => {
+        heartbeat({pct: 99});
+        return 'scanned';
+      })
+      .registerWorkflow('scanner', async () => runActivity<string>('scan'));
+
+    const handle = rt.start<string>('scanner');
+    await expectAsync(handle.result()).toBeResolvedTo('scanned');
+
+    const detail = await handle.describe();
+    expect(detail!.pending.activities).toEqual([]);
   });
 });
 

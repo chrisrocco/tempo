@@ -121,6 +121,15 @@ happen today (a poison task, a hung activity) present identically as silence.
   that the process is alive. Calls are throttled worker-side, so a loop body is a
   fine place to put one. Activity code reaches it through a new
   [`src/activity.ts`](src/activity.ts) entrypoint.
+- ~~**Activity checkpoints**~~ — **landed**. A beat may carry one, and it surfaces
+  on `PendingActivityView` as `checkpoint` + `checkpointAt`, so a UI polling
+  `describe` can watch a query that runs for hours. A register rather than a log:
+  one slot per attempt, overwritten by the next beat, discarded with the attempt,
+  and never a history event — which is affordable only because beats are unbounded
+  per attempt, unlike the retries `activityRetryScheduled` records. The payload
+  must be complete every time, since only a sample of beats is sent; the contract
+  and the three shapes rejected for the throttle are in
+  [`src/worker/activity_context.ts`](src/worker/activity_context.ts).
 - **Structured lifecycle log**, replacing ad-hoc stderr writes — no new dependency,
   and it is the source Phase 7 aggregates.
 

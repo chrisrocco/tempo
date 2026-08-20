@@ -17,7 +17,9 @@ import {
   MemoryTaskQueue,
   MemoryTimerService,
   MemoryWorkflowTaskQueue,
+  type ServerCore,
   createServerCore,
+  describeExecution,
 } from '../../src/server';
 
 function wait(ms: number): Promise<void> {
@@ -191,5 +193,125 @@ describe('heartbeats for an attempt the server gave up on', () => {
     await expectAsync(
       core.heartbeatActivityTask('act-never-issued'),
     ).toBeResolved();
+  });
+});
+
+/**
+ * A checkpoint is a **register, not a log**: one slot per attempt, overwritten by
+ * the next beat and thrown away with the attempt. Nothing here is a history
+ * event, so none of it survives the attempt that reported it — which is the point,
+ * because it describes work a worker is holding rather than something that
+ * happened to the execution.
+ */
+describe('a checkpoint reported with a heartbeat', () => {
+  async function pending(core: ServerCore, historyStore: MemoryHistoryStore) {
+    const rec = await historyStore.get('wf');
+    return describeExecution(rec!, {}, core.activityCheckpoints('wf')).pending
+      .activities[0];
+  }
+
+  it('surfaces on the pending activity, with the time it arrived', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const before = Date.now();
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {jobId: 'q-8823', pct: 40});
+
+    const activity = await pending(core, historyStore);
+    expect(activity.checkpoint).toEqual({jobId: 'q-8823', pct: 40});
+    expect(activity.checkpointAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it('reports nothing until the attempt has said something', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    await core.pollActivityTask();
+
+    const activity = await pending(core, historyStore);
+    expect(activity.checkpoint).toBeUndefined();
+    expect(activity.checkpointAt).toBeUndefined();
+  });
+
+  it('replaces the previous checkpoint rather than accumulating', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {pct: 10});
+    await core.heartbeatActivityTask(task!.token, {pct: 90});
+
+    expect((await pending(core, historyStore)).checkpoint).toEqual({pct: 90});
+  });
+
+  /**
+   * An author who calls `heartbeat()` bare in one branch and with a checkpoint in
+   * another is reporting liveness, not amnesia. Clearing here would let the bare
+   * branch destroy what every other branch reported.
+   */
+  it('is left standing by a later heartbeat that carries nothing', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {jobId: 'q-8823'});
+    await core.heartbeatActivityTask(task!.token);
+
+    expect((await pending(core, historyStore)).checkpoint).toEqual({
+      jobId: 'q-8823',
+    });
+  });
+
+  it('is discarded when the attempt completes', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {pct: 99});
+    await core.completeActivityTask(task!.token, {ok: true, result: 'rows'});
+
+    expect(core.activityCheckpoints('wf')).toEqual({});
+  });
+
+  /**
+   * The case a parallel map would get wrong. An abandoned attempt's checkpoint
+   * must go with it, or `describe` reports the progress of work nobody is doing —
+   * the wrong report about a dead thing this repo keeps finding.
+   */
+  it('is discarded when the attempt is abandoned for going quiet', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 30};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {pct: 40});
+    await wait(100); // the worker dies mid-query
+
+    expect(core.activityCheckpoints('wf')).toEqual({});
+  });
+
+  it('is ignored from an attempt the server already gave up on', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 30};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await wait(80); // abandoned
+    await core.heartbeatActivityTask(task!.token, {pct: 40}); // still going
+
+    expect(core.activityCheckpoints('wf')).toEqual({});
   });
 });

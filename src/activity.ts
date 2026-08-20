@@ -10,7 +10,8 @@
  * The separation is the point rather than tidiness. `heartbeat()` exported from
  * the host entrypoint would invite calling it from a workflow, where it is
  * meaningless — workflow code is replayed, and a heartbeat is a statement about
- * wall-clock liveness. Keeping it here says which side of the determinism
+ * wall-clock liveness, its checkpoint a statement about work already done.
+ * Neither survives being replayed. Keeping it here says which side of the determinism
  * boundary it belongs to, the same way `workflow.ts` says what a workflow may
  * reach.
  *

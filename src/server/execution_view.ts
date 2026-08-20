@@ -15,6 +15,15 @@
  * mattered most — while an operator is trying to work out why an execution is
  * stuck.
  *
+ * One input arrives from outside that rule rather than breaking it: the live
+ * checkpoints attempts have reported through `heartbeat()`. They are not derived,
+ * because history holds no record of them by design, and not stored, because they
+ * describe an attempt a worker is holding *right now* — a restart abandons every
+ * such attempt, so a persisted checkpoint would outlive the work it describes and
+ * report progress on something nobody is running. They are therefore passed in per
+ * call, and the default — none — is the honest answer for a caller with no live
+ * server to ask, which is what makes this still a pure function of its arguments.
+ *
  * The projection is deliberately not the record itself. `ExecutionRecord` carries
  * a `version` that only means something to the optimistic CAS, and a `failure`
  * that is an arbitrary thrown value and need not survive JSON. Both are dropped;
@@ -74,9 +83,19 @@ function historyWindow(
   return {offset: Math.max(0, Math.min(offset, total)), limit};
 }
 
+/**
+ * What each in-flight attempt last reported, keyed by the `scheduleActivity`
+ * seq. `ServerCore.activityCheckpoints` is where it comes from.
+ */
+export type ActivityCheckpoints = Record<
+  number,
+  {checkpoint: unknown; at: number}
+>;
+
 export function describeExecution(
   rec: ExecutionRecord,
   options: DescribeOptions = {},
+  checkpoints: ActivityCheckpoints = {},
 ): ExecutionDetail {
   const {offset, limit} = historyWindow(rec.history.length, options);
   // Derived from the WHOLE history, never the page. What an execution is
@@ -123,6 +142,11 @@ export function describeExecution(
         // entry is only written once an attempt fails, and cleared the moment
         // the activity settles.
         const retry = rec.activityAttempts[e.seq];
+        // Absent while the activity waits out a backoff, and correctly so: the
+        // attempt that reported it has already failed, and carrying its last
+        // checkpoint into the gap would describe the run that is over as though
+        // it were the one about to start.
+        const live = checkpoints[e.seq];
         return {
           seq: e.seq,
           name: e.name,
@@ -134,6 +158,9 @@ export function describeExecution(
           ...(retry?.nextAttemptAt === undefined
             ? {}
             : {nextAttemptAt: retry.nextAttemptAt}),
+          ...(live === undefined
+            ? {}
+            : {checkpoint: live.checkpoint, checkpointAt: live.at}),
         };
       }),
       timers: pending.timers.map((e) => ({seq: e.seq, fireAt: e.fireAt})),

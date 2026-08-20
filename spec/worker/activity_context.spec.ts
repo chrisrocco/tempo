@@ -104,6 +104,63 @@ describe('heartbeat from inside an activity', () => {
     expect(sends).toBe(2);
   });
 
+  it('carries a checkpoint through to the send', async () => {
+    const sent: unknown[] = [];
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat({jobId: 'q-8823', pct: 40});
+      return 'done';
+    });
+
+    await createActivityWorker(registry).runTask(task(), (checkpoint) =>
+      sent.push(checkpoint),
+    );
+
+    expect(sent).toEqual([{jobId: 'q-8823', pct: 40}]);
+  });
+
+  /**
+   * The throttle drops a beat outright rather than buffering its payload, which
+   * is safe only because every beat carries the whole checkpoint: the one that
+   * does get through stands alone. An author reporting a delta would lose it
+   * here, which is why `heartbeat` states the contract rather than implying it.
+   */
+  it('drops a beat inside the window along with its checkpoint', async () => {
+    const sent: unknown[] = [];
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat({pct: 10});
+      heartbeat({pct: 20});
+      heartbeat({pct: 30});
+      return 'done';
+    });
+
+    await createActivityWorker(registry).runTask(
+      task({heartbeatTimeoutMs: 10_000}),
+      (checkpoint) => sent.push(checkpoint),
+    );
+
+    expect(sent).toEqual([{pct: 10}]); // the first survives, and it is complete
+  });
+
+  it('sends the checkpoint current at the moment the window reopens', async () => {
+    const sent: unknown[] = [];
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat({pct: 10});
+      await wait(40);
+      heartbeat({pct: 90});
+      return 'done';
+    });
+
+    await createActivityWorker(registry).runTask(
+      task({heartbeatTimeoutMs: 40}),
+      (checkpoint) => sent.push(checkpoint),
+    );
+
+    expect(sent).toEqual([{pct: 10}, {pct: 90}]);
+  });
+
   it('does nothing when an activity function is called outside the engine', () => {
     // Directly, as a unit test would — no worker, no context, no throw.
     expect(() => heartbeat()).not.toThrow();

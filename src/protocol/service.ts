@@ -462,6 +462,34 @@ export interface PendingActivityView {
    * reader must treat it as "not between attempts" rather than as "due now".
    */
   nextAttemptAt?: number;
+  /**
+   * The most recent checkpoint the running attempt reported, via `heartbeat()`.
+   *
+   * A **register, not a log**: each beat overwrites the last, and the throttle in
+   * `worker/activity_context` means only a sample of them are sent at all. Both
+   * are safe only because of the contract stated on `heartbeat()` — every beat
+   * carries the *whole* checkpoint — so any single one is enough to read or
+   * resume from. A consumer that treats this as a stream of progress events will
+   * silently miss most of them; that is what the `activityStarted` family in
+   * history is for.
+   *
+   * Absent until the attempt beats, and gone the moment it settles. This is live
+   * state about an attempt in flight rather than a fact about the execution: an
+   * activity waiting out a backoff has none, because the attempt that reported
+   * it is over, and no attempt's checkpoint survives a server restart.
+   */
+  checkpoint?: unknown;
+  /**
+   * When `checkpoint` arrived, epoch ms.
+   *
+   * The field that makes a sampled value honest, which is why it is not optional
+   * decoration alongside one. Sends are throttled, so a checkpoint is routinely
+   * older than the work it describes — and with no timestamp beside it, one an
+   * activity managed to send just before wedging is indistinguishable from what
+   * it is doing now. That is precisely the reading an operator opens a stuck
+   * execution to get right.
+   */
+  checkpointAt?: number;
 }
 
 /**
@@ -1065,10 +1093,16 @@ export interface WorkflowService {
    * Report that this attempt is still alive. Renews the task's lease so it is not
    * redelivered, and resets the `heartbeatTimeoutMs` deadline if one is set.
    *
+   * `checkpoint`, when given, replaces whatever this attempt last reported and
+   * surfaces on `PendingActivityView.checkpoint`. Last write wins, and no history
+   * event is written: see that field for why a register is the right shape, and
+   * `heartbeat` in `worker/activity_context` for the contract on the payload
+   * that makes overwriting safe.
+   *
    * A no-op for an attempt the server has already given up on — the worker finds
    * out when it reports a result and the completion is dropped, not here.
    */
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
 }
 
 /**

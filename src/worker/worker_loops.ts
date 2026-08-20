@@ -310,8 +310,10 @@ export function runActivityWorker(
     // One attempt per delivery; the lease redelivers on failure/crash
     // (at-least-once), unless the attempt heartbeats to keep its claim.
     return async () => {
-      const result = await worker.runTask(task, () => {
-        void service.heartbeatActivityTask(task.token).catch(() => {});
+      const result = await worker.runTask(task, (checkpoint) => {
+        void service
+          .heartbeatActivityTask(task.token, checkpoint)
+          .catch(() => {});
       });
       await service.completeActivityTask(task.token, result);
     };

@@ -69,7 +69,7 @@ export type RpcRequest =
       result: WorkflowTaskResult;
     }
   | {method: 'failWorkflowTask'; token: TaskToken; reason: string}
-  | {method: 'heartbeatActivityTask'; token: TaskToken}
+  | {method: 'heartbeatActivityTask'; token: TaskToken; checkpoint?: unknown}
   | {
       method: 'pollActivityTask';
       taskQueue?: string;
