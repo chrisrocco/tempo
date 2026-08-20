@@ -884,12 +884,12 @@ export type QueueLiveness = Omit<
  * this repo reading `QueueWorkers` gets the verdict rather than reimplementing
  * it, and reimplementing it is how "served" quietly comes to mean two things.
  *
- * **A busy worker would otherwise look like an absent one.** The activity loop
- * is sequential: it awaits the activity it claimed before polling again, so a
- * worker running a single 60-second activity stops polling for 60 seconds and
- * its queue goes stale. That is distinguishable — a worker holding a live
- * lease is reported `busy` (see `WorkerInfo`), and a busy worker serves its
- * queue however long it has been since it last asked for more.
+ * **Recency alone cannot tell a busy worker from an absent one.** The activity
+ * loop is sequential: it awaits the activity it claimed before polling again, so
+ * a worker running a single 60-second activity stops polling for 60 seconds and
+ * its queue goes stale. Hence the second input — a worker holding a live lease is
+ * reported `busy` (see `WorkerInfo`), and a busy worker serves its queue however
+ * long it has been since it last asked for more.
  *
  * The recency test remains for the idle case, which is the common one: a worker
  * with nothing to do holds no lease and is known only by polling.
@@ -934,12 +934,12 @@ export function isQueueServed(
  *
  * ## Never a reason to refuse
  *
- * `false` is a **report**, not a veto. `spec/integration/distributed.spec.ts` settles
- * this: an unregistered name used to fail an execution on the reading that it was a
- * typo, and that was wrong, because once tasks route by queue it far more often means
- * a deploy still rolling — *"failing fast would trade a recoverable state for an
- * unrecoverable one"*. What a manifest adds is the ability to say which of the two it
- * is, not permission to act on the answer.
+ * `false` is a **report**, not a veto. Failing an execution on it — on the reading
+ * that an unregistered name is a typo — trades a recoverable state for an
+ * unrecoverable one: once tasks route by queue, an unregistered name far more often
+ * means a deploy still rolling. What a manifest adds is the ability to say which of
+ * the two it is, not permission to act on the answer.
+ * `spec/integration/distributed.spec.ts` holds the case.
  */
 export function isNameServed(
   queues: readonly QueueLiveness[],

@@ -9,11 +9,10 @@
  * launcher writes `--listen` is a deployment that starts and serves nobody.
  *
  * That is why `SERVER_FLAG`, `WORKER_FLAG`, and `formatFlag` are exported from
- * `src/index.ts` rather than kept internal. They used to be shared with a
- * deployment module in this tree that rendered the unit files itself; with that
- * module gone (see `README.md`), the only way the two sides can still share one
- * spelling is for the vocabulary to be part of the published surface. A launcher
- * that imports these constants cannot drift from the processes that read them.
+ * `src/index.ts` rather than kept internal. The launcher is written outside this
+ * repo (see `README.md`), so the only way the two sides can share one spelling is
+ * for the vocabulary to be part of the published surface. A launcher that imports
+ * these constants cannot drift from the processes that read them.
  *
  * This reads a handful of named values from a command line something else wrote.
  * It is not a command-line parser: no positionals, no `--` separator, no notion
@@ -22,17 +21,17 @@
  *
  * ## Why flags and not environment variables
  *
- * These values used to be `HOST`, `PORT`, `DATA_DIR`, `TEMPO_SERVER_URL`,
- * `TEMPO_TASK_QUEUE`, and `TEMPO_ROLE`. **An environment variable is inherited
- * and a flag is not**, and every failure that mattered here came from the
- * inheritance: a `TEMPO_SERVER_URL` exported in a shell, or picked up by a worker
+ * The alternative is the environment — `HOST`, `PORT`, `DATA_DIR`,
+ * `TEMPO_SERVER_URL`, `TEMPO_TASK_QUEUE`, `TEMPO_ROLE`. **An environment variable
+ * is inherited and a flag is not**, and the inheritance is where the failures
+ * come from: a `TEMPO_SERVER_URL` exported in a shell, or picked up by a worker
  * spawned from a test, points a process at the wrong server while it still prints
  * its readiness line and looks healthy to its supervisor.
  *
  * The second reason is that the launch site becomes the deployment's
  * configuration — whatever shows a service's command line (`systemctl cat`, a pod
  * spec, a process listing) shows what it was started with, in one place. An
- * environment file shared between the server and the workers had two sources of
+ * environment file shared between the server and the workers has two sources of
  * truth for the port and no way to keep them in step.
  *
  * The cost, recorded because it is the reason someone might come back here: a

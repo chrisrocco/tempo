@@ -4,9 +4,9 @@
  * process's working directory.
  *
  * Specs reach outside themselves for two things — the sources a checker reads,
- * and the entrypoints a process test spawns — and both used to be written as
- * `path.resolve('bin/tempo.ts')`, which silently means "relative to wherever
- * `npm test` happened to be run". That held because npm scripts run from the
+ * and the entrypoints a process test spawns. Written as
+ * `path.resolve('bin/tempo.ts')`, both silently mean "relative to wherever
+ * `npm test` happened to be run". That holds because npm scripts run from the
  * package root, and it is the assumption a build system has no reason to
  * preserve: Bazel runs an action in a sandbox with a working directory it
  * chooses, and every one of those paths resolves to nothing.

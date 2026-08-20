@@ -107,11 +107,10 @@ export interface WorkerRegistry {
    * Returns `ObservedQueue`, not `QueueWorkers`: what a table of polls can say
    * is strictly less than what the server reports, and the difference is not
    * cosmetic. `busy` needs the lease tables and backlog needs the task queues;
-   * neither is knowable here. This used to return the wire type with
-   * `busy: false` filled in — a conservative placeholder, but still a row
-   * asserting something it had not observed. Saying it in the type instead makes
-   * the gap impossible to read past, and it is `server_core.listQueues` that
-   * closes it.
+   * neither is knowable here. Returning the wire type with `busy: false` filled
+   * in would be a conservative placeholder, and still a row asserting something
+   * it had not observed. Saying the gap in the type makes it impossible to read
+   * past, and it is `server_core.listQueues` that closes it.
    */
   queues(): ObservedQueue[];
   /**

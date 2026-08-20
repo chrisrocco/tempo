@@ -4,9 +4,9 @@
  *
  * The cases worth pinning are the ones where being lenient loses data silently:
  * a flag given without a value, and a numeric flag given something that is not a
- * number. Both used to be environment variables, where the same mistakes were
- * indistinguishable from "unset" — and "unset" for `--data-dir` means a server
- * that keeps its history in memory and loses it on the next restart.
+ * number. As environment variables both mistakes are indistinguishable from
+ * "unset" — and "unset" for `--data-dir` means a server that keeps its history in
+ * memory and loses it on the next restart.
  */
 
 import 'jasmine';

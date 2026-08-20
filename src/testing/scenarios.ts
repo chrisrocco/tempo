@@ -265,10 +265,9 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
       //
       // Really running is not flavor. The catalogue only counts a report while
       // the worker behind it vouches for it on its polls (`isReportCurrent`),
-      // so a bare `reportWorkflows` under a made-up identity — which is what
-      // this seed used to do — would surface a conflict that evaporated
-      // `QUEUE_STALE_MS` later, mid-way through whatever the dashboard
-      // developer was building against it.
+      // so a bare `reportWorkflows` under a made-up identity would surface a
+      // conflict that evaporates `QUEUE_STALE_MS` later, mid-way through
+      // whatever the dashboard developer is building against it.
       const workflows = Object.entries(scenarioWorkflowModule).filter(
         (entry): entry is [string, WorkflowFn] =>
           typeof entry[1] === 'function',

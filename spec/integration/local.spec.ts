@@ -506,7 +506,7 @@ describe('local runtime — child workflows', () => {
 describe('local runtime — parent close policy', () => {
   /**
    * The default, and the leak it closes: a child started to serve its parent is
-   * garbage the moment the parent is gone, and nothing used to stop it.
+   * garbage the moment the parent is gone, and nothing else stops it.
    */
   it('terminates a child when its parent closes', async () => {
     const rt = createLocalRuntime()

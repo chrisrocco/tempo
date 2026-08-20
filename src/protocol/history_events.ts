@@ -293,24 +293,16 @@ export interface ChildStartedEvent extends HistoryEventBase {
 
 /**
  * Marker: a cancel has been requested for a detached child. Same role as the
- * markers above — it records the dispatch so replay does not re-request — and it
- * is the one command that used to have none.
- *
- * The omission was defensible on its own terms: a cancel's real durable record is
- * the `cancelRequested` event on the *child*, and `requestCancel` short-circuits
- * on finding one, so a re-dispatched cancel is idempotent rather than a second
- * cancellation. That reasoning is about **safety**, and it holds. What it does not
- * give is **observability**: replay decides what to emit by asking whether history
- * holds this seq (see `core/workflow_api`), and a command that leaves no trace
- * cannot answer. Without this event a `cancelChild` reached mid-batch was dropped
- * silently and forever — the wedge of issue #39, in the one place the fix for it
- * could not reach (issue #50).
+ * markers above — it records the dispatch so replay does not re-request. It is
+ * the command whose marker looks skippable, because a cancel's durable record
+ * already exists on the *child*; `server_core`'s header owns why that is not
+ * enough, and why every command leaves a marker here instead.
  *
  * Written **after** the cancel is dispatched, as `childStarted` is. Nothing
  * re-drives a cancel on restart, so replay re-emitting the command is its only
  * recovery, and a marker written first is precisely what would suppress it.
- * `server_core`'s header owns that argument and is honest about how much of the
- * marker-ordering split is actually forced.
+ * `server_core`'s header owns that argument too, and is honest about how much of
+ * the marker-ordering split is actually forced.
  */
 export interface ChildCancelRequestedEvent extends HistoryEventBase {
   type: 'childCancelRequested';

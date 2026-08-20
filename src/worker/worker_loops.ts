@@ -6,10 +6,10 @@
  * A deployable worker (`startWorker`) runs these against a RemoteService.
  *
  * Failures are **reported and backed off**, never swallowed. A worker that cannot
- * reach its server is the single most likely deployment fault, and it is
- * otherwise invisible: a loop that caught everything, retried on the 5ms idle
- * interval and printed nothing would leave a misconfigured worker looking
- * healthy to its supervisor while doing no work and hammering a dead endpoint.
+ * reach its server is the single most likely deployment fault, and swallowing it
+ * makes that fault invisible: a loop that catches everything, retries on the 5ms
+ * idle interval and prints nothing leaves a misconfigured worker looking healthy
+ * to its supervisor while doing no work and hammering a dead endpoint.
  */
 
 import * as os from 'node:os';

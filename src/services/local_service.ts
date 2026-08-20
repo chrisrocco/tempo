@@ -2,8 +2,8 @@
  * @fileoverview
  * LocalService: the whole server in-process. It composes `server_core` with the
  * in-memory ports and runs the two worker poll loops in-proc — a workflow-worker
- * loop that drains the workflow-task queue (replacing the old `pump`+`kick`) and
- * an activity-worker loop that drains the activity-task queue. Distributed mode
+ * loop that drains the workflow-task queue and an activity-worker loop that
+ * drains the activity-task queue. Distributed mode
  * runs those same loops in separate processes against `RemoteService`.
  *
  * ## The loops go through the worker-facing seam, deliberately
@@ -298,8 +298,8 @@ export function createLocalService(
         throw new Error(`no execution ${workflowId}`);
       // Voided: the settle is reported through `onSettled` above, which is what
       // makes this work for a terminate the *server* initiated as well as one a
-      // client asked for. This used to patch the mirror and the waiter by hand
-      // here, which only ever covered the client's half.
+      // client asked for. Patching the mirror and the waiter by hand here would
+      // cover only the client's half.
       void core.terminate(workflowId, reason);
     },
     reset(workflowId, keep) {

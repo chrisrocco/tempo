@@ -2,10 +2,10 @@
  * @fileoverview
  * The worker poll loops: how they fail, and how many tasks they run at once.
  *
- * The failure half came first — a worker that cannot reach its server must say
- * so and back off, rather than retry silently at the idle interval. That is the
- * fault that used to be invisible: the process stayed "active" under its
- * supervisor while doing no work at all.
+ * The failure half: a worker that cannot reach its server must say so and back
+ * off, rather than retry silently at the idle interval. That is the fault a
+ * silent retry makes invisible — the process stays "active" under its supervisor
+ * while doing no work at all.
  *
  * The concurrency half pins the properties a wider loop must not lose. The one
  * that matters most is negative and easy to regress: **the loop never claims a

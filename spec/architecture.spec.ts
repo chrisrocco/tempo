@@ -67,12 +67,11 @@ describe('architecture — layering', () => {
   });
 
   /**
-   * The direction that used to be unenforceable. `poller` and `signal_stream`
-   * lived in `core/` and were reached through the same relative imports as the
-   * engine, and same-layer imports are not checked — so `replay.ts` importing a
-   * helper built *on* replay would have passed. Splitting the layer is what
-   * turns "the engine does not depend on the patterns" from a convention into a
-   * rule.
+   * The direction the layer split exists to make enforceable. With `poller` and
+   * `signal_stream` inside `core/`, they are reached through the same relative
+   * imports as the engine, and same-layer imports are not checked — so `replay.ts`
+   * importing a helper built *on* replay would pass. The split is what turns "the
+   * engine does not depend on the patterns" from a convention into a rule.
    */
   it('rejects the engine depending on the patterns built from it', () => {
     const violations = checkBoundaries([
@@ -270,9 +269,9 @@ describe('architecture — the author entrypoint', () => {
    * The exemption that makes the documented typing pattern expressible.
    * `proxyActivities<typeof activities>` needs the activities module's shape inside
    * the workflow module, and `import type * as` is the only way to get it without a
-   * runtime edge. This checker used to reject it, so following the advice in
-   * `examples/greeter.ts` failed `npm run lint` and a properly-named workflow module
-   * could not be typed at all.
+   * runtime edge. Without the exemption, following the advice in
+   * `examples/greeter.ts` fails `npm run lint` and a properly-named workflow module
+   * cannot be typed at all.
    */
   it('allows a type-only import, which is erased and cannot run', () => {
     const violations = checkBoundaries([
@@ -465,8 +464,8 @@ describe('architecture — dependencies', () => {
    * get wrong in a way that looks like success — a bug that returns no
    * violations passes the case above too, because the repo declares no runtime
    * dependency to find. So the claim is pinned from the other side: anything at
-   * all in `dependencies` is refused, and `lit` in particular, which is what
-   * this package carried for a browser it no longer ships.
+   * all in `dependencies` is refused, and `lit` in particular, as the browser
+   * dependency a dashboard in this tree would reintroduce.
    */
   it('refuses any runtime dependency, lit included', () => {
     const violations = checkDependencies({
