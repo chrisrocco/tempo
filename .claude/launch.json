@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tmp-dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "tmp-dashboard", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}
