@@ -17,7 +17,7 @@
  * ```ts
  * import * as Tempo from 'workflow-engine/workflow';
  *
- * const charge = Tempo.createWorkflow('charge', async (id: string) => {
+ * const charge = Tempo.createWorkflow('charge', async ({id}: {id: string}) => {
  *   await Tempo.sleep(1000);
  *   return acts.capture(id);
  * });

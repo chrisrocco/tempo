@@ -130,7 +130,7 @@ export interface WorkflowDefinition<
  * ## The props type is written once, in `start`
  *
  * TypeScript infers it from the method, so the object literal in `start(props: {...})` is
- * the only place the shape is written as a type. The `props` array beside it is the
+ * the only place the shape is written as a type. The `props` JSON Schema beside it is the
  * *runtime* description, and the two are related by convention rather than by the
  * compiler.
  *

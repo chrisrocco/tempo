@@ -121,9 +121,9 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
    * including one already finished, whose result returns immediately), a
    * `taskQueue`, a `parentClosePolicy` for the case where the parent closes
    * mid-await. `executeChild`, typed; the direct call above is this with
-   * defaults. Args are a tuple rather than spread because a trailing options
-   * object after variadic typed args would be indistinguishable from the last
-   * argument.
+   * defaults. Props and options are two parameters rather than one object
+   * because the props are the workflow's own and the options are the engine's,
+   * and merging them would let a workflow shadow `taskQueue`.
    */
   execute(
     props?: Parameters<F>[0],
@@ -219,7 +219,7 @@ function asDispatchError(e: unknown, name: string): unknown {
     return e;
   return new Error(
     `${name} is a workflow reference: calling it dispatches a child workflow, which only works inside another workflow. ` +
-      `From application code, start it through a client (client.start('${name}', args)); ` +
+      `From application code, start it through a client (client.start('${name}', props)); ` +
       `from a unit test, run the body directly with .impl(...).`,
   );
 }
