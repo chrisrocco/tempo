@@ -374,19 +374,6 @@ operation, so **the suite being green is the definition of done.** Run it on
 connector PRs and nightly: the nightly is also your drift monitor — a service
 team's breaking change turns a test red before it surprises a workflow.
 
-## Authoring checklist
-
-1. `client.ts` — raw transport; map HTTP/RPC failures into the error taxonomy.
-   The only file that knows the wire.
-2. `schemas.ts` — shapes with `t`, descriptions included.
-3. `connector.ts` — every operation gets a kind, a description, and (commands)
-   an idempotency story. Can't make it natural? Declare `unsafe` honestly and
-   say why.
-4. `fixtures.ts` — provision/destroy/sweep. If you cannot provision a
-   namespaced, sweepable resource, stop and raise it: that is a design gap.
-5. Live spec — one `s.query`/`s.command`/`s.trigger` per operation until
-   `runLivePlan` returns no failures.
-
 ## Deferred, deliberately
 
 - **Keyed idempotency** — a derived key for commands that are not naturally
@@ -396,6 +383,215 @@ team's breaking change turns a test red before it surprises a workflow.
 - **Push transport** — webhooks feeding watcher streams.
 - **Golden persistence and `stub()`** — live-run recordings exist in-memory
   (`plan.recordings()`); the checked-in-goldens fast tier is not built yet.
+
+## Authoring a new connector
+
+This section is the operating manual: follow it top to bottom and the result is
+a connector indistinguishable in style from every existing one. It is written
+to be executable by an agent — each step says what to do and how to know it is
+done — and the consistency rules at the end are requirements, not suggestions.
+**Definition of done: `runLivePlan` returns zero failures, and every rule below
+holds.** Before writing anything, read one existing connector end to end
+(`spec/connectors/support/tracker.ts` and its fixtures/spec are the in-repo
+reference) — new connectors are written by resemblance, not invention.
+
+### The folder
+
+One directory per connector, named after the service, lowercase, singular.
+The file set is fixed; every connector has exactly these files, so "where does
+X go" always has one answer:
+
+```
+connectors/
+  registry.ts              every connector, by name — feeds the catalogue
+  tracker/
+    connector.ts           the definition — the only file with ideas in it
+    client.ts              raw transport; the only file that knows the wire
+    schemas.ts             t shapes shared by operations and tests
+    fixtures.ts            provision/destroy/sweep for live certification
+    tracker.live.spec.ts   the certification registrations
+    README.md              service owner, quirks, fixture notes (short)
+```
+
+### Step 1 — Scout the service
+
+Before any code, answer two questions about the service; the answers decide
+what kind of connector is even possible.
+
+1. **Do creates have a dedupe identity?** An `externalId`-style field the
+   service upserts on. Without it, creation commands cannot be `'natural'` and
+   must ship `'unsafe'` (one attempt). If missing, file the ask with the
+   service team now — it is the single highest-value change they can make.
+2. **Is there an ordered event feed?** Events with a stable, strictly
+   increasing id. Without it there are no trustworthy triggers. Same ask.
+
+Also collect: base URL and auth env vars, the operations workflows actually
+need (start narrow — operations are cheap to add, expensive to remove), and
+what disposable container the service offers for test fixtures.
+
+**Done when:** you can name the dedupe identity (or its absence), the event
+feed (or its absence), and the fixture container.
+
+### Step 2 — `client.ts`
+
+Raw transport only: base URL and auth from the config object (never
+`process.env`), one function per wire call, and the single mapping from
+transport failures to the error taxonomy. No schemas, no validation, no retry,
+no sleep — the engine owns retry, and validation belongs to the definition.
+
+```ts
+// The whole error policy of the connector, in one place:
+// 400 invalid · 401/403 denied · 404 notFound · 409 conflict
+// 429/503 unavailable · other 5xx upstream
+function mapError(status: number, body: string): ConnectorError { … }
+```
+
+**Done when:** every exported function either returns parsed JSON or throws a
+`ConnectorError`, and no other file in the folder mentions a status code.
+
+### Step 3 — `schemas.ts`
+
+Shapes with `t`, exported for reuse by the definition and the tests. Rules
+that keep schemas consistent everywhere:
+
+- **`description` on every object field** — the dashboard renders it as field
+  help. Sentence case, ends with a period, says what a human filling a form
+  needs (`'The issue key, e.g. OPS-1.'`), not what the code does.
+- **JSON-safe outputs only.** Timestamps are ISO strings
+  (`t.string({format: 'date-time'})`), never `Date`s — outputs live in
+  workflow history and are replayed. The harness's round-trip check enforces
+  this; write it correctly the first time.
+- **Model what workflows read, not everything the service returns.** `t.object`
+  strips undeclared keys, so omitting a field is safe; declaring one you don't
+  need is maintenance.
+- Reuse shapes — a `Status` enum declared once, imported everywhere. Never
+  redeclare a shape inline that `schemas.ts` already exports.
+
+**Done when:** the definition and the live spec import every shape from here.
+
+### Step 4 — `connector.ts`
+
+One `defineConnector` value, groups in this order: `config`/`context`, then
+`queries`, `commands`, `triggers`. Get `ops<Ctx>()` at the top so handlers
+infer a typed context. Then one operation at a time:
+
+**For every operation:** a `description` (one sentence, present tense, says
+what it does and any contract worth knowing: `'Create an issue. Upserts on
+externalId: same id, same issue.'`), an `input`/`output` from `schemas.ts` or
+inline `t`, and a handler that is **thin** — one client call, plus only the
+logic its idempotency story requires.
+
+**Choosing the kind:** reads state with no observable side effect → query
+(name `get…`/`list…`/`search…`/`count…`; list queries take a bounded
+`limit: t.defaulted(t.integer({min: 1, max: N}), d)` — results ride history).
+Changes state → command (imperative verb). A fact to react to → trigger
+(past-tense event name).
+
+**For every command, pick its idempotency story — in this order:**
+
+1. **Delegation**: the service dedupes on an identity the input carries. Make
+   that field **required** in the input schema so no caller can opt out, and
+   say so in the description.
+2. **Convergence**: the contract is an end state. Catch `conflict`, check
+   whether the target state already holds, return success if it does:
+   ```ts
+   try {
+     return await rpc.issues.transition(issueKey, to);
+   } catch (e) {
+     if (e instanceof ConnectorError && e.kind === 'conflict') {
+       const issue = await rpc.issues.get(issueKey);
+       if (issue.status === to) return issue; // a retry after success
+     }
+     throw e;
+   }
+   ```
+   (Converge on the conflict — never check-then-act up front; that races.)
+3. **Naturally repeatable**: upsert, set, delete, cancel.
+4. **None of the above** → `idempotency: 'unsafe'` with an `unsafeBecause`
+   naming the consequence and the fix
+   (`'Comments have no identity; a retry would post a duplicate.'`). Unsafe is
+   honest, never a workaround to avoid thinking.
+
+**For every trigger:** `eventId` must be stable per event and strictly
+increasing in feed order — it is the cursor. Give it a `filter` schema of
+optional fields the service can apply server-side. If the feed cannot provide
+an ordered id, do not ship the trigger; file the ask instead.
+
+**Done when:** the file typechecks, every operation has a kind, a description,
+and (commands) an idempotency declaration.
+
+### Step 5 — `fixtures.ts`
+
+Answer the connector's one testing question — _what is your disposable
+container?_ — and implement the three-function protocol:
+
+- `provision(ns)`: create the container, tagged with a sweepable marker that
+  embeds `ns` (label, name prefix — whatever the service can filter by later).
+- `destroy(ns)`: remove it. Best effort; failures here are expected sometimes.
+- `sweep(olderThanMs)`: find and remove leaked containers older than the
+  cutoff **by the marker**. This is the guarantee; `destroy` is the polite
+  case.
+
+**If the service offers no provisionable, sweepable container, stop and raise
+it** — that is a design gap to resolve with the service team, not a testing
+chore to work around.
+
+**Done when:** two suite runs can execute concurrently against production
+without touching each other's resources.
+
+### Step 6 — the live spec
+
+`planLiveSuite(connector, fixtures, (s) => {…})` with one registration per
+operation: `s.query` for every query (stage the world, return the input),
+`s.command` for every **natural** command (`act` uses `ctx.key` as the
+business identity — the harness fires it twice; `probe` counts effects
+attributable to that key and must find exactly 1), `s.trigger` for every
+trigger (`cause` the event via commands, `expect` says which event is yours).
+Do **not** write a double-fire for unsafe commands — the harness refuses it;
+their flag is their certification. Mint every identity from `ctx.uniqueId()`
+or `ctx.key`, and touch only resources under `fx` — never fixed production
+ids.
+
+Run `runLivePlan` until it returns `[]`. The generated coverage case fails
+naming anything you skipped, so there is no silent partial credit.
+
+**Done when:** zero failures, from a clean environment, twice in a row.
+
+### Step 7 — register and review
+
+Add the connector to `registry.ts`, then render `catalogue([…])` and read it
+as a user: every operation listed, descriptions that make sense in a form,
+unsafe commands flagged with reasons you would accept from someone else.
+Finish the folder's `README.md`: the owning team, auth env vars, the fixture
+container, and any service quirks the next author needs.
+
+### Consistency rules
+
+The invariants reviewers hold every connector to. When an existing connector
+and this list disagree, this list wins — fix the connector.
+
+- **Naming.** Folder and connector `name`: the service, lowercase, singular.
+  Operations: `camelCase`; queries prefixed `get`/`list`/`search`/`count`;
+  commands start with an imperative verb; triggers are past-tense facts
+  (`issueTransitioned`, never `onIssueTransition`).
+- **One wire, one file.** Only `client.ts` imports transport or knows a status
+  code. Only `context()` sees config values. `process.env` appears nowhere.
+- **Handlers are thin.** One client call plus idempotency logic. No retries,
+  no sleeps, no logging, no cross-connector imports — composition happens in
+  workflows, or in a custom activity via `direct()`.
+- **Errors speak the taxonomy.** Only `ConnectorError`, only the seven kinds,
+  mapped in `client.ts`. Never catch-and-swallow in a handler except the
+  convergence pattern.
+- **Every description is written for the dashboard**, not for the code review.
+- **Defaults are the norm.** Override per-operation `options` only with a
+  comment saying why; an override without a reason is a bug.
+- **Size.** `connector.ts` past ~400 lines splits into `operations/*.ts`, one
+  definition per file, composed in `connector.ts` — nothing else moves.
+- **Tests touch only what they minted.** Identities come from
+  `ctx.uniqueId()`/`ctx.key`; targets live under `fx`; fixtures are sweepable
+  by marker or they do not pass review.
+
+---
 
 Design history and rationale live in the Connector Contract RFC; the in-repo
 ground truth is `spec/connectors/` — every claim above runs in CI.
