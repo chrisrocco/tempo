@@ -76,10 +76,9 @@ on npm and makes no stability promises — clone it, read it, run it.
   poller child that signals its parent one event at a time, assembled from
   `pollForever`, `signalWorkflow`, and `signalStream`. Schemas are authored
   with `t`, a small first-party builder sized to what JSON Schema can render
-  (`t.object`, `t.enum`, `t.defaulted`, descriptions everywhere), on a
-  validator port with a one-call adapter for any
-  [Standard Schema](https://standardschema.dev) vendor (Zod, Valibot, ArkType)
-  and no dependency on one — see [`src/connectors/`](src/connectors/index.ts)
+  (`t.object`, `t.enum`, `t.defaulted`, descriptions everywhere) — no schema
+  dependency, built on an internal validator port — see
+  [`src/connectors/`](src/connectors/index.ts)
 
 The same workflow code runs four ways, with no changes:
 

@@ -2,31 +2,29 @@
  * @fileoverview
  * ★ SCHEMA — an internally-owned library, deliberately held at arm's length.
  *
- * Speaking schema without naming a vendor, through a **validator port**
- * (`port.ts`): one interface this repo owns, with `validate`, an optional
- * `toJsonSchema`, and type inference carried on the generic parameters. Around
- * it: `t` (`builder.ts`) — the first-party builder and the default authoring
- * surface, implemented natively on the port and sized to what JSON Schema can
- * render; `standard()` — the adapter door, wrapping any Standard Schema vendor
- * (Zod ≥3.24, Valibot ≥1.0, ArkType ≥2) as a port for teams that want one;
- * `runSchema` to run a validation and flatten failures into one message; and
+ * A complete schema library, owned outright: `t` (`builder.ts`) is the
+ * authoring surface — validation, JSON Schema rendering, and type inference in
+ * one small vocabulary sized to what a dashboard can render — built on a
+ * **validator port** (`port.ts`), one interface this repo owns. Around them:
+ * `runSchema` to run a validation and flatten failures into one message, and
  * `strictProblems` to check a raw value for keys a rendered JSON Schema does
  * not declare. That is the whole surface, and none of it knows this repo
  * exists: no engine vocabulary, no workflows, no connectors. The test for any
  * change here is the same as `walltime/`'s: "would this API make sense
  * published on its own?"
  *
- * ## Ports over protocols, deliberately
+ * ## All the way in-house, deliberately — with the revisit seam kept
  *
- * An earlier shape put Standard Schema at the foundation — operations took
- * `~standard` values directly, and JSON Schema came from a global per-vendor
- * emitter registry. The port inverts that: the repo defines what it needs
- * (validate, render, infer), vendors are adapted *in* at the edge, a
- * hand-rolled validator implements the port directly with no spec at all
- * (`spec/support/mini_schema.ts` is the reference), and rendering is a method
- * on the value instead of ambient registry state. Standard Schema remains
- * vendored (`standard_schema.ts`) because the adapter needs its types — but it
- * is one door, not the house.
+ * This decision has moved twice, each time toward owning more. First Standard
+ * Schema was the foundation, with a global per-vendor emitter registry for
+ * JSON Schema. Then the port replaced the registry and Standard Schema became
+ * one adapter (`standard()`) beside the first-party builder. Now the adapter
+ * and the vendored spec are gone too: if the repo is building a schema
+ * library, it builds it all the way, and `t` is the one authoring surface.
+ * The port is what keeps that reversible — an external vendor, should one ever
+ * earn its place, returns as an adapter onto this interface the way a new
+ * store would arrive behind `server/ports/`, with nothing downstream
+ * changing.
  *
  * ## The contract, and where it is enforced
  *
@@ -58,7 +56,5 @@ export {
   type TOptional,
   type TSchema,
 } from './builder';
-export {standard} from './standard';
-export type {StandardSchemaV1} from './standard_schema';
 export {runSchema, type Validated} from './validate';
 export {strictProblems} from './strict';

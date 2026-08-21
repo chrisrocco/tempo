@@ -17,8 +17,10 @@
  * documentation first.
  *
  * A shape this vocabulary cannot express is a shape the dashboard cannot
- * render — reach for `standard()` and a full vendor when an operation truly
- * needs one, and its schema simply lists unrendered.
+ * render — which is the prompt to grow the vocabulary deliberately, one
+ * keyword at a time, not to reach for a vendor. (If a full vendor ever earns
+ * its place, it returns as an adapter on the port; the seam is kept for
+ * exactly that revisit.)
  *
  * ## Semantics
  *

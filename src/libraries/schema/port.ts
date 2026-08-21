@@ -21,11 +21,13 @@
  *   a phantom — never assigned, never read — that exists so both parameters
  *   stay structurally inferable.
  *
- * Vendors do not implement this port; adapters wrap them. `standard.ts` adapts
- * any Standard Schema vendor (Zod, Valibot, ArkType) in one call, and a
- * hand-rolled validator implements the port directly —
- * `spec/support/mini_schema.ts` is the reference for that path. Either way,
- * everything downstream of this file speaks only the port.
+ * The first-party builder (`builder.ts`) implements this port natively and is
+ * the authoring surface. The port stays a separate interface rather than being
+ * folded into the builder because it is the revisit seam: an external schema
+ * vendor, should one ever earn its place, arrives as an adapter onto this
+ * interface — the way `server/ports/` would admit a new store — with nothing
+ * downstream changing. Everything downstream of this file speaks only the
+ * port.
  */
 
 import type {JsonSchema} from './json_schema';
