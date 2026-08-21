@@ -40,9 +40,11 @@
 import * as scenarioActivities from './scenario_activities';
 import {
   background,
+  byCursor,
   condition,
   executeChild,
   patched,
+  pollForever,
   proxyActivities,
   setHandler,
   signalStream,
@@ -363,6 +365,33 @@ export async function scenarioBugfixAgent(props: {
 }
 
 /**
+ * A poller in its natural habitat: `pollForever` + `byCursor` over a stream,
+ * relaying each new item by claiming a child with a domain-derived id.
+ *
+ * This is the fixture for the engine's signature move. Watch it and three
+ * things happen that no other scenario shows: `runId` climbs — the loop
+ * continues-as-new every time the cursor moves, so history is shed as fast as
+ * it grows; the carryover cursor (`pollForever.state`) advances in `describe`;
+ * and `scenario-feed-item-<n>` executions accumulate, each claimed by an
+ * explicit id so a replayed cycle starts no second child. `startFrom: 'new'`
+ * is on display too: the first cycle baselines the feed and reports nothing.
+ */
+export async function scenarioFeedWatcher(): Promise<never> {
+  return pollForever({
+    everyMs: 2000,
+    differ: byCursor((item: {id: number; title: string}) => item.id),
+    poll: (after) => settling.scenario_poll_feed(after),
+    startFrom: 'new',
+    onAdded: (item) => {
+      startChild('scenarioCompletes', {
+        props: {value: `processed ${item.title}`},
+        workflowId: `scenario-feed-item-${item.id}`,
+      });
+    },
+  });
+}
+
+/**
  * The deploy switch behind `scenarioDiverges` — mutable host state a workflow
  * reads, which is precisely the determinism violation being modeled. A real
  * fleet does this by rolling a new binary; a fixture in one process does it by
@@ -500,6 +529,11 @@ export const SCENARIO_DESCRIPTORS: Record<
     title: 'Watchdog',
     description:
       'Parks until cancelled — the dead-man switch the bug-fix agent stands down once CI is green.',
+  },
+  scenarioFeedWatcher: {
+    title: 'Watches a feed',
+    description:
+      'pollForever over a byCursor stream: rolls its history over each time the cursor moves, carries the cursor in carryover, and claims a scenario-feed-item child per new submission.',
   },
   scenarioDiverges: {
     title: 'Diverges after a deploy',

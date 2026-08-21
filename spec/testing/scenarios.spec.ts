@@ -42,6 +42,7 @@ describe('the scenario harness', () => {
         'bugfix-agent',
         'schedules',
         'divergence',
+        'poller',
         'retrying',
         'stuck',
         'unserved-queue',
@@ -280,6 +281,57 @@ describe('the scenario harness', () => {
     expect(wedged?.taskFailures).toBeGreaterThan(0);
     expect(unclaimed?.taskFailures).toBe(0);
   });
+
+  /**
+   * The engine's signature move, live: the poller rolls over per cursor move,
+   * so `runId` climbs while history stays small, the carryover cursor
+   * advances, and each new feed item claims exactly one child. Timing-driven —
+   * the feed drips on its own clock — so the assertions poll with deadlines
+   * rather than asserting an instant.
+   */
+  it('rolls the feed-watcher over as the cursor moves, claiming a child per item', async () => {
+    const handle = server.client.getHandle(SCENARIO_IDS.feedWatcher);
+    const until = async (
+      label: string,
+      predicate: () => Promise<boolean>,
+    ): Promise<void> => {
+      const deadline = Date.now() + 25_000;
+      while (Date.now() < deadline) {
+        if (await predicate()) return;
+        await wait(200);
+      }
+      throw new Error(`timed out waiting for: ${label}`);
+    };
+
+    // The child first, not the rollover: the baseline cycle rolls over too
+    // (adopting the seeded flag is a state change), so `runId >= 1` alone
+    // does not prove an item was ever processed.
+    await until('a feed item is processed into a completed child', async () => {
+      const items = await server.client.list({
+        workflowIdPrefix: 'scenario-feed-item-',
+      });
+      return items.executions.some((e) => e.status === 'completed');
+    });
+    await until('the cursor rollover lands', async () => {
+      const detail = await handle.describe();
+      return (
+        (detail?.runId ?? 0) >= 1 &&
+        detail?.carryover?.['pollForever.state'] !== undefined
+      );
+    });
+
+    const detail = (await handle.describe())!;
+    // Rollover is the point: the cursor is being carried, and history is
+    // being shed rather than accumulating a record per cycle forever.
+    expect(detail.status).toBe('running');
+    expect(detail.historyLength).toBeLessThan(30);
+
+    // And it keeps going: the run number is a counter that keeps counting.
+    const seen = detail.runId;
+    await until('another rollover', async () => {
+      return ((await handle.describe())?.runId ?? 0) > seen;
+    });
+  }, 60_000);
 
   it('serves an execution wedged on nondeterminism, naming the disagreement', async () => {
     const detail = await server.client

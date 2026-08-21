@@ -53,6 +53,7 @@ export type ScenarioName =
   | 'bugfix-agent'
   | 'schedules'
   | 'divergence'
+  | 'poller'
   | 'retrying'
   | 'stuck'
   | 'unserved-queue'
@@ -128,6 +129,7 @@ export const SCENARIO_WORKFLOWS = {
   awaitsApproval: 'scenarioAwaitsApproval',
   bugfixAgent: 'scenarioBugfixAgent',
   diverges: 'scenarioDiverges',
+  feedWatcher: 'scenarioFeedWatcher',
   researcher: 'scenarioResearcher',
   reviewer: 'scenarioReviewer',
   ciWatcher: 'scenarioCiWatcher',
@@ -169,6 +171,7 @@ export const SCENARIO_IDS = {
   awaitingApproval: 'scenario-awaiting-approval',
   bugfixAgent: 'scenario-bugfix-agent',
   diverged: 'scenario-diverged',
+  feedWatcher: 'scenario-feed-watcher',
   heartbeatSchedule: 'scenario-heartbeat-report',
   pausedSchedule: 'scenario-quarterly-cleanup',
   retrying: 'scenario-retrying',
@@ -380,6 +383,27 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
           );
         },
       );
+    },
+  },
+
+  poller: {
+    summary:
+      'A pollForever feed-watcher: runId climbs as it rolls over per cursor move, and each new item claims a child.',
+    async seed(context) {
+      context.service.start(SCENARIO_WORKFLOWS.feedWatcher, undefined, {
+        workflowId: SCENARIO_IDS.feedWatcher,
+        taskQueue: context.queue,
+      });
+
+      // The baseline cycle, not the first rollover: `startFrom: 'new'` writes
+      // its seeded flag on the very first task, and waiting for that keeps
+      // seeding fast while the interesting motion — the cursor advancing, the
+      // run rolling over — happens on its own while the sandbox is watched.
+      // The spec is what pins the rollover itself, on its own clock.
+      await context.until('the watcher has baselined the feed', async () => {
+        const detail = await describeOf(context, SCENARIO_IDS.feedWatcher);
+        return detail?.carryover?.['pollForever.seeded'] === true;
+      });
     },
   },
 

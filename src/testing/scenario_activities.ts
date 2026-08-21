@@ -121,3 +121,28 @@ export function scenario_set_ramp(pct: number): number {
 export function scenario_cleanup(): string {
   return 'feature flag removed, branch deleted';
 }
+
+// ── the feed the poller watches ──────────────────────────────────────────
+
+/** One item surfaces this often. Slow enough not to flood the runs view. */
+const FEED_PERIOD_MS = 6000;
+/** The feed began when the process did — ids are small and human-readable. */
+const FEED_EPOCH = Date.now();
+
+/**
+ * A fake stream with an increasing key: item N exists once N feed periods
+ * have passed. Host state and the wall clock, which is fine *here* — this is
+ * an activity, and reaching the outside world is what activities are for. The
+ * `after` cursor comes from the poller's differ, so the source filters at the
+ * origin the way `byCursor.query` intends.
+ */
+export function scenario_poll_feed(
+  after?: number,
+): {id: number; title: string}[] {
+  const latest = Math.floor((Date.now() - FEED_EPOCH) / FEED_PERIOD_MS);
+  const from = Math.max((after ?? 0) + 1, latest - 4); // never a giant backlog
+  const items = [];
+  for (let id = from; id <= latest; id++)
+    items.push({id, title: `submission #${id}`});
+  return items;
+}
