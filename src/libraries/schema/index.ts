@@ -5,13 +5,16 @@
  * Speaking schema without naming a vendor, through a **validator port**
  * (`port.ts`): one interface this repo owns, with `validate`, an optional
  * `toJsonSchema`, and type inference carried on the generic parameters. Around
- * it: `runSchema` to run a validation and flatten failures into one message,
- * `strictProblems` to check a raw value for keys an emitted JSON Schema does
- * not declare, and `standard()` — the one adapter, wrapping any Standard
- * Schema vendor (Zod ≥3.24, Valibot ≥1.0, ArkType ≥2) as a port. That is the
- * whole surface, and none of it knows this repo exists: no engine vocabulary,
- * no workflows, no connectors. The test for any change here is the same as
- * `walltime/`'s: "would this API make sense published on its own?"
+ * it: `t` (`builder.ts`) — the first-party builder and the default authoring
+ * surface, implemented natively on the port and sized to what JSON Schema can
+ * render; `standard()` — the adapter door, wrapping any Standard Schema vendor
+ * (Zod ≥3.24, Valibot ≥1.0, ArkType ≥2) as a port for teams that want one;
+ * `runSchema` to run a validation and flatten failures into one message; and
+ * `strictProblems` to check a raw value for keys a rendered JSON Schema does
+ * not declare. That is the whole surface, and none of it knows this repo
+ * exists: no engine vocabulary, no workflows, no connectors. The test for any
+ * change here is the same as `walltime/`'s: "would this API make sense
+ * published on its own?"
  *
  * ## Ports over protocols, deliberately
  *
@@ -47,6 +50,14 @@ export type {
   SchemaResult,
 } from './port';
 export type {JsonSchema} from './json_schema';
+export {
+  t,
+  type InOf,
+  type OutOf,
+  type TDefaulted,
+  type TOptional,
+  type TSchema,
+} from './builder';
 export {standard} from './standard';
 export type {StandardSchemaV1} from './standard_schema';
 export {runSchema, type Validated} from './validate';

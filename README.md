@@ -74,9 +74,10 @@ on npm and makes no stability promises — clone it, read it, run it.
   story), and triggers, and derive the typed workflow proxy, the worker
   registration, a JSON-Schema catalogue for dashboards, and **watchers** — a
   poller child that signals its parent one event at a time, assembled from
-  `pollForever`, `signalWorkflow`, and `signalStream`. Schemas plug in
-  through a small validator port — validate, optional `toJsonSchema`, inferred
-  types — with a one-call adapter for any
+  `pollForever`, `signalWorkflow`, and `signalStream`. Schemas are authored
+  with `t`, a small first-party builder sized to what JSON Schema can render
+  (`t.object`, `t.enum`, `t.defaulted`, descriptions everywhere), on a
+  validator port with a one-call adapter for any
   [Standard Schema](https://standardschema.dev) vendor (Zod, Valibot, ArkType)
   and no dependency on one — see [`src/connectors/`](src/connectors/index.ts)
 

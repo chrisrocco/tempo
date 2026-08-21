@@ -9,38 +9,34 @@
  * engine only enters via the framework when a workflow calls `tracker.use()`.
  */
 
-import {defineConnector, ops, ConnectorError} from '../../../src/connectors';
 import {
-  arr,
-  lit,
-  nul,
-  num,
-  obj,
-  opt,
-  str,
-  type Infer,
-} from '../../support/mini_schema';
+  defineConnector,
+  ops,
+  t,
+  ConnectorError,
+  type InferOutput,
+} from '../../../src/connectors';
 
 /* ---------------------------- shapes ------------------------------------- */
 
-const Status = lit('open', 'in_progress', 'resolved', 'closed');
-export const Issue = obj({
-  key: str(),
-  projectKey: str(),
-  summary: str(),
+const Status = t.enum('open', 'in_progress', 'resolved', 'closed');
+export const Issue = t.object({
+  key: t.string({description: 'The issue key, e.g. OPS-1.'}),
+  projectKey: t.string(),
+  summary: t.string(),
   status: Status,
-  labels: arr(str()),
-  externalId: nul(str()),
+  labels: t.array(t.string()),
+  externalId: t.nullable(t.string()),
 });
-export type IssueT = Infer<typeof Issue>;
+export type IssueT = InferOutput<typeof Issue>;
 
-export const IssueTransitioned = obj({
-  seq: num(),
-  issueKey: str(),
+export const IssueTransitioned = t.object({
+  seq: t.integer({description: "Monotonic — the watcher's cursor."}),
+  issueKey: t.string(),
   from: Status,
   to: Status,
 });
-export type IssueTransitionedT = Infer<typeof IssueTransitioned>;
+export type IssueTransitionedT = InferOutput<typeof IssueTransitioned>;
 
 /* ----------------------- the fake Tracker service ------------------------ */
 
@@ -128,13 +124,13 @@ export const tracker = defineConnector({
   title: 'Tracker',
   description:
     'Issues, transitions, and comments from the internal Tracker service.',
-  config: obj({}), // the fake needs no credentials; a real one declares env keys here
+  config: t.object({}), // the fake needs no credentials; a real one declares env keys here
   context: () => ({svc: fakeTracker}),
 
   queries: {
     getIssue: query({
       description: 'Fetch one issue by key.',
-      input: obj({issueKey: str()}),
+      input: t.object({issueKey: t.string()}),
       output: Issue,
       handler: ({issueKey}, {svc}) => {
         const issue = svc.issues.get(issueKey);
@@ -146,8 +142,8 @@ export const tracker = defineConnector({
 
     searchIssues: query({
       description: 'List issues in a project.',
-      input: obj({projectKey: str(), status: opt(Status)}),
-      output: arr(Issue),
+      input: t.object({projectKey: t.string(), status: t.optional(Status)}),
+      output: t.array(Issue),
       handler: ({projectKey, status}, {svc}) =>
         [...svc.issues.values()].filter(
           (i) =>
@@ -162,11 +158,13 @@ export const tracker = defineConnector({
       description:
         'Create an issue. Upserts on externalId: same id, same issue.',
       idempotency: 'natural',
-      input: obj({
-        projectKey: str(),
-        summary: str(),
-        labels: opt(arr(str())),
-        externalId: str(), // required: the caller names the business identity
+      input: t.object({
+        projectKey: t.string(),
+        summary: t.string(),
+        // Optional for callers, present for handlers: In !== Out, carried by
+        // the port and filled by the builder.
+        labels: t.defaulted(t.array(t.string()), []),
+        externalId: t.string(), // required: the caller names the business identity
       }),
       output: Issue,
       handler: (input, {svc}) => {
@@ -177,7 +175,7 @@ export const tracker = defineConnector({
           projectKey: input.projectKey,
           summary: input.summary,
           status: 'open',
-          labels: input.labels ?? [],
+          labels: input.labels,
           externalId: input.externalId,
         };
         svc.issues.set(issue.key, issue);
@@ -189,7 +187,7 @@ export const tracker = defineConnector({
       description:
         'Move an issue to a status. Converges: already there is success.',
       idempotency: 'natural',
-      input: obj({issueKey: str(), to: Status}),
+      input: t.object({issueKey: t.string(), to: Status}),
       output: Issue,
       handler: ({issueKey, to}, {svc}) => {
         const issue = svc.issues.get(issueKey);
@@ -207,8 +205,8 @@ export const tracker = defineConnector({
       unsafeBecause:
         'Comments have no identity; a retry would post a duplicate. ' +
         'Revisit when keyed idempotency lands.',
-      input: obj({issueKey: str(), body: str()}),
-      output: obj({commentId: str()}),
+      input: t.object({issueKey: t.string(), body: t.string()}),
+      output: t.object({commentId: t.string()}),
       handler: ({issueKey}, {svc}) => {
         if (!svc.issues.has(issueKey)) {
           throw new ConnectorError('notFound', `no issue ${issueKey}`);
@@ -223,7 +221,10 @@ export const tracker = defineConnector({
       description: 'An issue changed status.',
       event: IssueTransitioned,
       eventId: (e) => e.seq,
-      filter: obj({issueKey: opt(str()), to: opt(Status)}),
+      filter: t.object({
+        issueKey: t.optional(t.string()),
+        to: t.optional(Status),
+      }),
       poll: ({cursor, filter}, {svc}) =>
         svc.events.filter(
           (e) =>

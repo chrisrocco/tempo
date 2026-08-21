@@ -25,8 +25,10 @@
  * Zod even if it wanted to — and it doesn't want to. Operations accept the
  * schema library's **validator port** (see `src/libraries/schema/index.ts` for
  * its contract): validate, optional `toJsonSchema`, inference on the generic
- * parameters. `standard()` adapts any Standard Schema vendor in one call, and
- * the pieces are re-exported here so a connector author needs one import root.
+ * parameters. `t` is the first-party builder — the default authoring surface,
+ * rendering natively — and `standard()` adapts any Standard Schema vendor in
+ * one call for teams that would rather write Zod. Both are re-exported here so
+ * a connector author needs one import root.
  * The same decoupling move `protocol/workflow_descriptor.ts` made for workflow
  * metadata, applied to validation.
  */
@@ -34,6 +36,7 @@
 export {
   standard,
   strictProblems,
+  t,
   type InferInput,
   type InferOutput,
   type JsonSchema,

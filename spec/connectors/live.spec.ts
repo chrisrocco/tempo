@@ -28,9 +28,9 @@ import {
   ops,
   planLiveSuite,
   runLivePlan,
+  t,
   type LiveFixtures,
 } from '../../src/connectors';
-import {num, obj, str} from '../support/mini_schema';
 import {fakeTracker, tracker} from './support/tracker';
 import {
   FIXTURE_LABEL,
@@ -181,13 +181,13 @@ describe('connectors live harness — each certification catches its failure', (
     const leaky = defineConnector({
       name: 'leaky',
       description: 'Declares {id}; returns more.',
-      config: obj({}),
+      config: t.object({}),
       context: () => ({}),
       queries: {
         getThing: query({
           description: 'Fetch the thing.',
-          input: obj({}),
-          output: obj({id: str()}),
+          input: t.object({}),
+          output: t.object({id: t.string()}),
           handler: () => ({id: 'thing-1', debug: 'oops'}) as never,
         }),
       },
@@ -208,14 +208,14 @@ describe('connectors live harness — each certification catches its failure', (
     const pinger = defineConnector({
       name: 'pinger',
       description: 'Claims natural; is not.',
-      config: obj({}),
+      config: t.object({}),
       context: () => ({}),
       commands: {
         sendPing: command({
           description: 'Send a ping.',
           idempotency: 'natural', // the lie the harness exists to catch
-          input: obj({key: str()}),
-          output: obj({sent: num()}),
+          input: t.object({key: t.string()}),
+          output: t.object({sent: t.number()}),
           handler: ({key}) => {
             pings.push(key);
             return {sent: pings.length};
@@ -244,14 +244,14 @@ describe('connectors live harness — each certification catches its failure', (
     const noisy = defineConnector({
       name: 'noisy',
       description: 'An event feed that ignores cursors.',
-      config: obj({}),
+      config: t.object({}),
       context: () => ({}),
       commands: {
         emit: command({
           description: 'Emit an event.',
           idempotency: 'natural',
-          input: obj({what: str()}),
-          output: obj({seq: num()}),
+          input: t.object({what: t.string()}),
+          output: t.object({seq: t.number()}),
           handler: ({what}) => {
             const seq = events.length + 1;
             events.push({seq, what});
@@ -262,7 +262,7 @@ describe('connectors live harness — each certification catches its failure', (
       triggers: {
         thingHappened: trigger({
           description: 'Something happened.',
-          event: obj({seq: num(), what: str()}),
+          event: t.object({seq: t.number(), what: t.string()}),
           eventId: (event) => event.seq,
           poll: () => [...events], // the bug: `cursor` is never read
         }),

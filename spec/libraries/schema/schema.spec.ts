@@ -2,29 +2,29 @@
  * @fileoverview
  * The schema library's surface: the validator port run through `runSchema`,
  * and `standard()` — the one adapter — wrapping a hand-built Standard Schema
- * vendor. The `mini` reference vendor (`spec/support/mini_schema.ts`)
- * implements the port natively with no spec at all, which is the library's
- * claim made executable: the port is the contract, and Standard Schema is one
- * door in, not the house.
+ * vendor. The first-party builder (`builder.ts`, covered in depth by
+ * `builder.spec.ts`) implements the port natively with no spec at all, which
+ * is the library's claim made executable: the port is the contract, and
+ * Standard Schema is one door in, not the house.
  */
 
 import {
   runSchema,
   standard,
+  t,
   type Schema,
   type StandardSchemaV1,
 } from '../../../src/libraries/schema';
-import {num, obj, str} from '../../support/mini_schema';
 
 describe('schema — runSchema over the validator port', () => {
-  const issue = obj({key: str(), votes: num()});
+  const issue = t.object({key: t.string(), votes: t.number()});
 
   it('returns the vendor-parsed value on success', async () => {
     const result = await runSchema(issue, {key: 'OPS-1', votes: 3, extra: 1});
     expect(result.ok).toBe(true);
     if (result.ok) {
-      // The mini vendor strips undeclared keys, and runSchema hands back
-      // whatever the vendor produced — tolerance is the vendor's decision.
+      // The builder strips undeclared keys, and runSchema hands back
+      // whatever the port produced — tolerance is the schema's decision.
       expect(result.value).toEqual({key: 'OPS-1', votes: 3});
     }
   });
@@ -94,7 +94,7 @@ describe('schema — the standard() adapter', () => {
 
 describe('schema — the port implemented natively', () => {
   it('renders through the port method, no adapter and no vendor involved', () => {
-    const emitted = obj({key: str()}).toJsonSchema();
+    const emitted = t.object({key: t.string()}).toJsonSchema();
     expect(emitted['properties']).toEqual({key: {type: 'string'}});
     expect(emitted['required']).toEqual(['key']);
   });
