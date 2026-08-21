@@ -2,9 +2,7 @@
  * @fileoverview
  * The client: turns the flat `WorkflowService` surface into ergonomic handles
  * (start -> a handle with result()/status()/signal()). Written once against the
- * service seam, so it is identical for local and remote. The `SignalDef`
- * convenience (accepting a defined signal or a bare name) lives here rather than
- * in `protocol`, keeping the wire contract free of any `core` dependency.
+ * service seam, so it is identical for local and remote.
  *
  * ## It covers the whole client-facing surface, deliberately
  *
@@ -53,7 +51,6 @@
  * The day the author-facing question gets an answer, this moves.
  */
 
-import type {SignalDef} from '../core';
 import type {
   DescribeOptions,
   ExecutionDetail,
@@ -81,7 +78,7 @@ export interface WorkflowHandle<T = unknown> {
    * is this execution doing". `undefined` for an id the server has never seen.
    */
   describe(options?: DescribeOptions): Promise<ExecutionDetail | undefined>;
-  signal(signalDef: SignalDef | string, payload?: unknown): void;
+  signal(name: string, payload?: unknown): void;
   /**
    * Ask the workflow to unwind. Cooperative: it is delivered through replay, so
    * the workflow catches `CancelledFailure` and can clean up — and so it cannot
@@ -200,12 +197,7 @@ export function createClient(service: WorkflowService): Client {
       result: () => service.getResult(workflowId) as Promise<T>,
       status: () => service.getStatus(workflowId),
       describe: (options) => service.describeExecution(workflowId, options),
-      signal: (signalDef, payload) =>
-        service.signal(
-          workflowId,
-          typeof signalDef === 'string' ? signalDef : signalDef.name,
-          payload,
-        ),
+      signal: (name, payload) => service.signal(workflowId, name, payload),
       cancel: () => service.cancel(workflowId),
       terminate: (reason = 'terminated by operator') =>
         service.terminate(workflowId, reason),

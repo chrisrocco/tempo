@@ -23,12 +23,7 @@ import {
   runWorkflowWorker,
   type WorkerLoop,
 } from '../../src/worker';
-import {
-  condition,
-  defineSignal,
-  runActivity,
-  setHandler,
-} from '../../src/workflow';
+import {condition, runActivity, setHandler} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -115,7 +110,7 @@ describe('distributed — client + workers over RPC', () => {
     try {
       h.registerWorkflow('waiter', async () => {
         let go = false;
-        setHandler(defineSignal('go'), () => {
+        setHandler('go', () => {
           go = true;
         });
         await condition(() => go);

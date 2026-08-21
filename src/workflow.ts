@@ -116,12 +116,7 @@ export {
   type Branch,
   type StreamOptions,
 } from './patterns/signal_stream';
-export {
-  clearHandler,
-  defineSignal,
-  setHandler,
-  type SignalDef,
-} from './core/signals';
+export {clearHandler, setHandler} from './core/signals';
 export {
   continueAsNew,
   deprecatePatch,

@@ -55,7 +55,6 @@ import {
   background,
   condition,
   continueAsNew,
-  defineSignal,
   getCarryover,
   proxyActivities,
   setCarryover,
@@ -86,10 +85,10 @@ const STATUS_KEY = 'schedule';
  */
 const RECENT_LIMIT = 20;
 
-export const pauseSchedule = defineSignal('pauseSchedule');
-export const resumeSchedule = defineSignal('resumeSchedule');
-export const triggerSchedule = defineSignal('triggerSchedule');
-export const updateSchedule = defineSignal('updateSchedule');
+export const pauseSchedule = 'pauseSchedule';
+export const resumeSchedule = 'resumeSchedule';
+export const triggerSchedule = 'triggerSchedule';
+export const updateSchedule = 'updateSchedule';
 
 /** The initial status of a schedule nobody has run yet. */
 function initialStatus(definition: ScheduleDefinition): ScheduleStatus {

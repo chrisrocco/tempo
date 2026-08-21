@@ -549,10 +549,9 @@ function checkAuthorEntrypoint(
  * ## Value imports only
  *
  * A statement-level `import type` is erased: the emitted JavaScript names no
- * module, so no bundler follows it. That is what lets `client/client.ts` name
- * `SignalDef` from `core/` and `remote_service.ts` name a dozen protocol types
- * without either of them pulling anything into a browser build. The same
- * exemption, and the same reasoning, as `checkAuthorEntrypoint`.
+ * module, so no bundler follows it. That is what lets `remote_service.ts` name
+ * a dozen protocol types without pulling anything into a browser build. The
+ * same exemption, and the same reasoning, as `checkAuthorEntrypoint`.
  */
 function checkBrowserSafety(files: SourceFile[]): Violation[] {
   const byPath = new Map(files.map((file) => [file.path, file]));
