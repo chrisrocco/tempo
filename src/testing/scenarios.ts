@@ -42,6 +42,7 @@ import {
   runWorkflowWorker,
   startWorkflowReporter,
 } from '../worker';
+import {createScheduleClient} from '../schedule';
 import * as scenarioWorkflowModule from './scenarios.workflow';
 
 /** Every state the harness can produce. Adding one is adding a case here. */
@@ -50,6 +51,9 @@ export type ScenarioName =
   | 'parked'
   | 'awaiting-approval'
   | 'bugfix-agent'
+  | 'schedules'
+  | 'divergence'
+  | 'poller'
   | 'retrying'
   | 'stuck'
   | 'unserved-queue'
@@ -124,6 +128,8 @@ export const SCENARIO_WORKFLOWS = {
   parks: 'scenarioParks',
   awaitsApproval: 'scenarioAwaitsApproval',
   bugfixAgent: 'scenarioBugfixAgent',
+  diverges: 'scenarioDiverges',
+  feedWatcher: 'scenarioFeedWatcher',
   researcher: 'scenarioResearcher',
   reviewer: 'scenarioReviewer',
   ciWatcher: 'scenarioCiWatcher',
@@ -164,6 +170,10 @@ export const SCENARIO_IDS = {
   parked: 'scenario-parked',
   awaitingApproval: 'scenario-awaiting-approval',
   bugfixAgent: 'scenario-bugfix-agent',
+  diverged: 'scenario-diverged',
+  feedWatcher: 'scenario-feed-watcher',
+  heartbeatSchedule: 'scenario-heartbeat-report',
+  pausedSchedule: 'scenario-quarterly-cleanup',
   retrying: 'scenario-retrying',
   stuck: 'scenario-stuck',
   unserved: 'scenario-unserved',
@@ -289,6 +299,110 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
             (parked.awaiting as {signal?: unknown} | undefined)?.signal ===
             'intake',
         );
+      });
+    },
+  },
+
+  schedules: {
+    summary:
+      'Two schedules: one firing every fifteen seconds, one paused — so the schedules view has both states to show.',
+    async seed(context) {
+      // Through the schedule client rather than a raw start: the fixture must
+      // be a schedule exactly as a consumer would make one — validated,
+      // normalized, and runnable by the `scheduleWorkflows` the harness
+      // registers alongside its scenario workflows.
+      const schedules = createScheduleClient(context.service);
+      await schedules.create(SCENARIO_IDS.heartbeatSchedule, {
+        spec: {type: 'interval', everyMs: 15_000},
+        target: {
+          name: SCENARIO_WORKFLOWS.completes,
+          props: {value: 'heartbeat report delivered'},
+          taskQueue: context.queue,
+        },
+      });
+      // Paused, which is the state worth having on a wall: a paused schedule
+      // parks with *nothing* pending and nothing arriving — deliberately
+      // indistinguishable from wedged in every view that cannot see the
+      // parked condition (see `ConditionParkedEvent`).
+      await schedules.create(SCENARIO_IDS.pausedSchedule, {
+        spec: {type: 'interval', everyMs: 6 * 60 * 60 * 1000},
+        target: {
+          name: SCENARIO_WORKFLOWS.completes,
+          props: {value: 'quarterly cleanup swept'},
+          taskQueue: context.queue,
+        },
+        paused: true,
+      });
+
+      await context.until('both schedules are describable', async () => {
+        const [heartbeat, paused] = await Promise.all([
+          schedules.describe(SCENARIO_IDS.heartbeatSchedule),
+          schedules.describe(SCENARIO_IDS.pausedSchedule),
+        ]);
+        return (
+          heartbeat?.definition !== undefined &&
+          paused?.definition !== undefined
+        );
+      });
+    },
+  },
+
+  divergence: {
+    summary:
+      'An execution wedged on NondeterminismError — its history no longer matches the deployed code. `reset` is the recovery.',
+    async seed(context) {
+      // The switch is reset first, so reseeding in one process replays the
+      // same story: v1 runs, "the deploy" lands, v2 diverges.
+      scenarioWorkflowModule.DEPLOYED.version = 1;
+      context.service.start(SCENARIO_WORKFLOWS.diverges, undefined, {
+        workflowId: SCENARIO_IDS.diverged,
+        taskQueue: context.queue,
+      });
+      await context.until('the v1 run has parked on its timer', async () => {
+        const detail = await describeOf(context, SCENARIO_IDS.diverged);
+        return (
+          detail?.history.some((event) => event.type === 'timerStarted') ??
+          false
+        );
+      });
+
+      // The deploy: the code the workers run changes under a live execution.
+      // The signal is only the wake-up — any activation replays from the top,
+      // and the replay is what disagrees with history.
+      scenarioWorkflowModule.DEPLOYED.version = 2;
+      context.service.signal(SCENARIO_IDS.diverged, 'wake');
+
+      await context.until(
+        'the execution wedges on nondeterminism',
+        async () => {
+          const detail = await describeOf(context, SCENARIO_IDS.diverged);
+          return (
+            detail !== undefined &&
+            isStuck(detail) &&
+            (detail.lastTaskFailure ?? '').includes('nondeterminism')
+          );
+        },
+      );
+    },
+  },
+
+  poller: {
+    summary:
+      'A pollForever feed-watcher: runId climbs as it rolls over per cursor move, and each new item claims a child.',
+    async seed(context) {
+      context.service.start(SCENARIO_WORKFLOWS.feedWatcher, undefined, {
+        workflowId: SCENARIO_IDS.feedWatcher,
+        taskQueue: context.queue,
+      });
+
+      // The baseline cycle, not the first rollover: `startFrom: 'new'` writes
+      // its seeded flag on the very first task, and waiting for that keeps
+      // seeding fast while the interesting motion — the cursor advancing, the
+      // run rolling over — happens on its own while the sandbox is watched.
+      // The spec is what pins the rollover itself, on its own clock.
+      await context.until('the watcher has baselined the feed', async () => {
+        const detail = await describeOf(context, SCENARIO_IDS.feedWatcher);
+        return detail?.carryover?.['pollForever.seeded'] === true;
       });
     },
   },

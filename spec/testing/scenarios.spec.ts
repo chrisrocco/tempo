@@ -40,6 +40,9 @@ describe('the scenario harness', () => {
         'parked',
         'awaiting-approval',
         'bugfix-agent',
+        'schedules',
+        'divergence',
+        'poller',
         'retrying',
         'stuck',
         'unserved-queue',
@@ -278,6 +281,155 @@ describe('the scenario harness', () => {
     expect(wedged?.taskFailures).toBeGreaterThan(0);
     expect(unclaimed?.taskFailures).toBe(0);
   });
+
+  /**
+   * The engine's signature move, live: the poller rolls over per cursor move,
+   * so `runId` climbs while history stays small, the carryover cursor
+   * advances, and each new feed item claims exactly one child. Timing-driven —
+   * the feed drips on its own clock — so the assertions poll with deadlines
+   * rather than asserting an instant.
+   */
+  it('rolls the feed-watcher over as the cursor moves, claiming a child per item', async () => {
+    const handle = server.client.getHandle(SCENARIO_IDS.feedWatcher);
+    const until = async (
+      label: string,
+      predicate: () => Promise<boolean>,
+    ): Promise<void> => {
+      const deadline = Date.now() + 25_000;
+      while (Date.now() < deadline) {
+        if (await predicate()) return;
+        await wait(200);
+      }
+      throw new Error(`timed out waiting for: ${label}`);
+    };
+
+    // The child first, not the rollover: the baseline cycle rolls over too
+    // (adopting the seeded flag is a state change), so `runId >= 1` alone
+    // does not prove an item was ever processed.
+    await until('a feed item is processed into a completed child', async () => {
+      const items = await server.client.list({
+        workflowIdPrefix: 'scenario-feed-item-',
+      });
+      return items.executions.some((e) => e.status === 'completed');
+    });
+    await until('the cursor rollover lands', async () => {
+      const detail = await handle.describe();
+      return (
+        (detail?.runId ?? 0) >= 1 &&
+        detail?.carryover?.['pollForever.state'] !== undefined
+      );
+    });
+
+    const detail = (await handle.describe())!;
+    // Rollover is the point: the cursor is being carried, and history is
+    // being shed rather than accumulating a record per cycle forever.
+    expect(detail.status).toBe('running');
+    expect(detail.historyLength).toBeLessThan(30);
+
+    // And it keeps going: the run number is a counter that keeps counting.
+    const seen = detail.runId;
+    await until('another rollover', async () => {
+      return ((await handle.describe())?.runId ?? 0) > seen;
+    });
+  }, 60_000);
+
+  it('serves an execution wedged on nondeterminism, naming the disagreement', async () => {
+    const detail = await server.client
+      .getHandle(SCENARIO_IDS.diverged)
+      .describe();
+
+    expect(detail?.status).toBe('running');
+    expect(detail && isStuck(detail)).toBe(true);
+    // The error names both sides — what history holds and what the code did —
+    // which is the whole diagnosis an operator gets to act on.
+    expect(detail?.lastTaskFailure).toContain('nondeterminism at seq 0');
+    expect(detail?.lastTaskFailure).toContain('timer');
+  });
+
+  /**
+   * The recovery `reset` exists for, driven the way a dashboard would drive
+   * it: rewind to before the event the deployed code cannot replay, and the
+   * same workers that wedged it complete it. This settles `scenario-diverged`;
+   * nothing after this spec reads it.
+   */
+  it('recovers a diverged execution with a reset', async () => {
+    server.client.reset(SCENARIO_IDS.diverged, 0);
+
+    const handle = server.client.getHandle<string>(SCENARIO_IDS.diverged);
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if ((await handle.describe())?.status === 'completed') break;
+      await wait(100);
+    }
+
+    const detail = await handle.describe();
+    expect(detail?.status).toBe('completed');
+    expect(detail?.result).toBe('v2 report sent — no wait');
+    // Recovered means recovered: the failure counter was cleared with the
+    // history that caused it.
+    expect(detail?.taskFailures).toBe(0);
+  }, 20_000);
+
+  it('serves both schedule states: one live, one paused', async () => {
+    // A schedule is one execution of the `scheduler` workflow whose props are
+    // the definition in force — which is exactly how a dashboard reads them.
+    const [heartbeat, paused] = await Promise.all([
+      server.client.getHandle(SCENARIO_IDS.heartbeatSchedule).describe(),
+      server.client.getHandle(SCENARIO_IDS.pausedSchedule).describe(),
+    ]);
+
+    expect(heartbeat?.status).toBe('running');
+    expect(heartbeat?.name).toBe('scheduler');
+    const heartbeatDef = heartbeat?.props as {
+      spec?: {everyMs?: number};
+      paused?: boolean;
+    };
+    expect(heartbeatDef.spec?.everyMs).toBe(15_000);
+
+    expect(paused?.status).toBe('running');
+    expect((paused?.props as {paused?: boolean}).paused).toBe(true);
+  });
+
+  it('reports the scheduler in its manifest, so isNameServed answers yes', async () => {
+    // Registered is not enough: `isNameServed` reads what workers *report*, and
+    // a harness that ran the scheduler without reporting it would warn every
+    // schedule creation about a worker that exists — a state no
+    // correctly-configured deployment produces.
+    const workflows = await server.client.workflows();
+    const scheduler = workflows.find(
+      (workflow) => workflow.name === 'scheduler',
+    );
+
+    expect(scheduler).toBeDefined();
+    expect(scheduler?.taskQueues).toContain(server.taskQueue);
+  });
+
+  it('runs what a schedule fires — a trigger produces a completed run', async () => {
+    // Triggered rather than waiting out a boundary, because triggers work even
+    // on a paused schedule and are immediate — the deterministic way to prove
+    // the harness's workers really serve the scheduler and its firings. The
+    // fired run's id is `<scheduleId>-<ordinal>`, so a prefix query finds it.
+    server.client
+      .getHandle(SCENARIO_IDS.pausedSchedule)
+      .signal('triggerSchedule');
+
+    const deadline = Date.now() + 15_000;
+    let fired;
+    while (Date.now() < deadline) {
+      const page = await server.client.list({
+        workflowIdPrefix: `${SCENARIO_IDS.pausedSchedule}-`,
+      });
+      fired = page.executions.find(
+        (execution) => execution.status === 'completed',
+      );
+      if (fired !== undefined) break;
+      await wait(100);
+    }
+    expect(fired).toBeDefined();
+
+    const run = await server.client.getHandle(fired!.workflowId).describe();
+    expect(run?.result).toBe('quarterly cleanup swept');
+  }, 20_000);
 
   it('serves an activity between retry attempts', async () => {
     const groups = await server.client.counts();

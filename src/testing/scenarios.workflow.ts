@@ -40,9 +40,11 @@
 import * as scenarioActivities from './scenario_activities';
 import {
   background,
+  byCursor,
   condition,
   executeChild,
   patched,
+  pollForever,
   proxyActivities,
   setHandler,
   signalStream,
@@ -363,6 +365,63 @@ export async function scenarioBugfixAgent(props: {
 }
 
 /**
+ * A poller in its natural habitat: `pollForever` + `byCursor` over a stream,
+ * relaying each new item by claiming a child with a domain-derived id.
+ *
+ * This is the fixture for the engine's signature move. Watch it and three
+ * things happen that no other scenario shows: `runId` climbs — the loop
+ * continues-as-new every time the cursor moves, so history is shed as fast as
+ * it grows; the carryover cursor (`pollForever.state`) advances in `describe`;
+ * and `scenario-feed-item-<n>` executions accumulate, each claimed by an
+ * explicit id so a replayed cycle starts no second child. `startFrom: 'new'`
+ * is on display too: the first cycle baselines the feed and reports nothing.
+ */
+export async function scenarioFeedWatcher(): Promise<never> {
+  return pollForever({
+    everyMs: 2000,
+    differ: byCursor((item: {id: number; title: string}) => item.id),
+    poll: (after) => settling.scenario_poll_feed(after),
+    startFrom: 'new',
+    onAdded: (item) => {
+      startChild('scenarioCompletes', {
+        props: {value: `processed ${item.title}`},
+        workflowId: `scenario-feed-item-${item.id}`,
+      });
+    },
+  });
+}
+
+/**
+ * The deploy switch behind `scenarioDiverges` — mutable host state a workflow
+ * reads, which is precisely the determinism violation being modeled. A real
+ * fleet does this by rolling a new binary; a fixture in one process does it by
+ * flipping this object between tasks. Nothing else here may imitate it: every
+ * other scenario workflow is honestly deterministic, and this one is
+ * deliberately, instructively not.
+ */
+export const DEPLOYED = {version: 1};
+
+/**
+ * Wedges on `NondeterminismError` once the "deploy" lands.
+ *
+ * Version 1 parks on an hour-long timer, so history's seq 0 is a
+ * `timerStarted` marker. Version 2 skips the wait and reaches for an activity
+ * first — so the next replay issues `scheduleActivity` at seq 0, history
+ * disagrees, and the task fails with the one error `reset` exists to fix.
+ * The retry loop keeps failing identically, which is what makes it a fixture:
+ * running, `taskFailures` climbing, unrecoverable by anything but a rewind.
+ */
+export async function scenarioDiverges(): Promise<string> {
+  if (DEPLOYED.version === 1) {
+    await sleep(60 * 60 * 1000);
+    return 'v1 report sent, an hour late';
+  }
+  return settling.scenario_succeed(
+    'v2 report sent — no wait',
+  ) as Promise<string>;
+}
+
+/**
  * Parks on `waitForApproval`, which is `scenarioParks` with the affordance the
  * approval pattern adds: the parked state carries `{kind: 'approval', signal,
  * detail}`, so a dashboard can render what is being asked and knows where to
@@ -470,6 +529,16 @@ export const SCENARIO_DESCRIPTORS: Record<
     title: 'Watchdog',
     description:
       'Parks until cancelled — the dead-man switch the bug-fix agent stands down once CI is green.',
+  },
+  scenarioFeedWatcher: {
+    title: 'Watches a feed',
+    description:
+      'pollForever over a byCursor stream: rolls its history over each time the cursor moves, carries the cursor in carryover, and claims a scenario-feed-item child per new submission.',
+  },
+  scenarioDiverges: {
+    title: 'Diverges after a deploy',
+    description:
+      'Version 1 parked on a timer; version 2 reaches for an activity first. The replay disagrees with history, the task fails with NondeterminismError forever, and `reset` is the recovery.',
   },
 } as const;
 
