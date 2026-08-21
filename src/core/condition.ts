@@ -28,12 +28,30 @@
  * (see apply_event); and calling `condition` after cancellation rejects at once.
  */
 
-import type {ParkedCondition} from '../protocol';
+import {MAX_AWAITING_BYTES, type ParkedCondition} from '../protocol';
 import {captureSite, siteFrames} from './call_site';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
 
-export function condition(fn: () => boolean): Promise<void> {
+export interface ConditionOptions {
+  /**
+   * What this wait is for, as free-form JSON for whoever finds the execution
+   * parked here. Surfaces on the live parked state (`Client.describe()`) and on
+   * the `conditionParked` history event; the engine itself never reads it.
+   *
+   * Free-form is the design, not a gap: any convention a reader dispatches on —
+   * `kind: 'approval'`, a signal name a dashboard offers to send — belongs to
+   * the helper that declares it and the UI that honors it, so the engine stays
+   * out of the vocabulary business. Must survive JSON, and must fit
+   * `MAX_AWAITING_BYTES` — it is stored on every task the park survives.
+   */
+  awaiting?: unknown;
+}
+
+export function condition(
+  fn: () => boolean,
+  options?: ConditionOptions,
+): Promise<void> {
   const ctx = getContext();
   return new Promise<void>((resolve, reject) => {
     if (ctx.cancelled) {
@@ -52,6 +70,7 @@ export function condition(fn: () => boolean): Promise<void> {
       resolve,
       reject,
       site: captureSite(condition),
+      awaiting: options?.awaiting,
     });
   });
 }
@@ -70,14 +89,41 @@ export function parkedConditions(ctx: WorkflowContext): ParkedCondition[] {
   const parked: ParkedCondition[] = [];
   for (const [seq, blocked] of ctx.blockedConditions) {
     const workflow = siteFrames(blocked.site);
+    const site =
+      workflow === undefined || workflow.length === 0
+        ? undefined
+        : workflow.join('\n');
+    assertAwaitingFits(blocked.awaiting, site);
     parked.push({
       seq,
-      ...(workflow === undefined || workflow.length === 0
-        ? {}
-        : {site: workflow.join('\n')}),
+      ...(site === undefined ? {} : {site}),
+      ...(blocked.awaiting === undefined ? {} : {awaiting: blocked.awaiting}),
     });
   }
   return parked;
+}
+
+/**
+ * Refuse to report an `awaiting` that has outgrown the cap.
+ *
+ * Checked here rather than in `condition()` so the violation is a *task*
+ * failure, like `assertCarryoverFits`: thrown after replay, it is retried and
+ * surfaced rather than rejecting a promise workflow code might catch — so
+ * shipping a fix and rolling the workers recovers the execution. The check also
+ * inherits this function's cost profile for free: paid per condition still
+ * parked at task end, never on the fast path and never for an `awaiting`-less
+ * park.
+ */
+function assertAwaitingFits(awaiting: unknown, site: string | undefined): void {
+  if (awaiting === undefined) return;
+  const size = JSON.stringify(awaiting)?.length ?? 0;
+  if (size <= MAX_AWAITING_BYTES) return;
+  throw new Error(
+    `awaiting on the condition at ${site?.split('\n')[0] ?? '<unknown site>'} ` +
+      `is ${size} bytes, over the ${MAX_AWAITING_BYTES} limit. It is stored on ` +
+      `every task the park survives and stamped into history, so it must stay ` +
+      `a description — name what would release the wait, not the data it waits on.`,
+  );
 }
 
 // One pass over the parked conditions: resolve every one whose predicate now

@@ -52,6 +52,13 @@ interface BlockedCondition {
    * Absent outside V8, where the capture API does not exist.
    */
   site?: Error;
+  /**
+   * What the workflow declared it is waiting for, verbatim from the
+   * `condition()` call. Unlike `site` this is workflow-authored and therefore
+   * deterministic — but it is still only a diagnostic side-channel: never read
+   * by replay, never reaches a command, reported at task end and nowhere else.
+   */
+  awaiting?: unknown;
 }
 
 /**

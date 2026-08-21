@@ -144,6 +144,51 @@ describe('a parked condition in history', () => {
     expect(new Set(events.map((e) => e.condSeq)).size).toBe(2);
   });
 
+  it('stamps the declared awaiting on the park, and appends nothing while it survives', async () => {
+    // The live parked state forgets an answered wait; this is where "what was
+    // it waiting for" survives for the reader asking after the fact. And the
+    // stamp must inherit the transition rule: an awaiting is re-reported on
+    // every task the park survives, and must compare equal each time rather
+    // than reopening the span.
+    const store = new MemoryHistoryStore();
+    const rt = createLocalRuntime({historyStore: store}).registerWorkflow(
+      'gate',
+      async () => {
+        let ready = false;
+        let nudges = 0;
+        setHandler(go, () => {
+          ready = true;
+        });
+        setHandler(nudge, () => {
+          nudges += 1;
+        });
+        await condition(() => ready, {
+          awaiting: {kind: 'approval', signal: 'go'},
+        });
+        return `went after ${nudges}`;
+      },
+    );
+    const handle = rt.start<string>('gate', undefined, {workflowId: 'cp-6'});
+    await wait(120);
+    for (let i = 0; i < 3; i++) {
+      handle.signal('nudge');
+      await wait(20);
+    }
+    handle.signal('go');
+    await expectAsync(handle.result()).toBeResolvedTo('went after 3');
+
+    const events = parkEvents(await store.get('cp-6'));
+    // One span, not one per wake-up — same guarantee as an undeclared park.
+    expect(events.map((e) => e.type)).toEqual([
+      'conditionParked',
+      'conditionUnparked',
+    ]);
+    expect((events[0] as ConditionParkedEvent).awaiting).toEqual({
+      kind: 'approval',
+      signal: 'go',
+    });
+  });
+
   it('writes nothing at all for a workflow that never parks', async () => {
     // The common case. `recordParked`'s guard already skipped the store write for
     // it, and the events inherit that: most workflows pay nothing.
