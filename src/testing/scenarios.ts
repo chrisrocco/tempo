@@ -49,6 +49,7 @@ export type ScenarioName =
   | 'settled-mixed'
   | 'parked'
   | 'awaiting-approval'
+  | 'bugfix-agent'
   | 'retrying'
   | 'stuck'
   | 'unserved-queue'
@@ -122,6 +123,11 @@ export const SCENARIO_WORKFLOWS = {
   fails: 'scenarioFails',
   parks: 'scenarioParks',
   awaitsApproval: 'scenarioAwaitsApproval',
+  bugfixAgent: 'scenarioBugfixAgent',
+  researcher: 'scenarioResearcher',
+  reviewer: 'scenarioReviewer',
+  ciWatcher: 'scenarioCiWatcher',
+  watchdog: 'scenarioWatchdog',
   retries: 'scenarioRetries',
   undeployed: 'scenarioNotDeployedYet',
 } as const;
@@ -157,6 +163,7 @@ export const SCENARIO_IDS = {
   failed: 'scenario-failed',
   parked: 'scenario-parked',
   awaitingApproval: 'scenario-awaiting-approval',
+  bugfixAgent: 'scenario-bugfix-agent',
   retrying: 'scenario-retrying',
   stuck: 'scenario-stuck',
   unserved: 'scenario-unserved',
@@ -253,6 +260,36 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
           );
         },
       );
+    },
+  },
+
+  'bugfix-agent': {
+    summary:
+      'A long agentic bug-fix run with every event family on one timeline, parked at its intake approval.',
+    async seed(context) {
+      context.service.start(
+        SCENARIO_WORKFLOWS.bugfixAgent,
+        {bugId: 'BUG-4021'},
+        {
+          workflowId: SCENARIO_IDS.bugfixAgent,
+          taskQueue: context.queue,
+        },
+      );
+
+      // The intake gate specifically. By the time the agent parks there it has
+      // already been through the fetch, both researchers (one failed), and the
+      // flaky search's retry round — so a consumer that sees this state also
+      // holds a history with those events in it, which is the scenario's
+      // point. What happens next is interactive: approving intake drives it to
+      // the metrics gate, approving metrics completes it.
+      await context.until('the agent reaches its intake approval', async () => {
+        const detail = await describeOf(context, SCENARIO_IDS.bugfixAgent);
+        return (detail?.parked ?? []).some(
+          (parked) =>
+            (parked.awaiting as {signal?: unknown} | undefined)?.signal ===
+            'intake',
+        );
+      });
     },
   },
 

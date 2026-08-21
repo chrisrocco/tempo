@@ -26,6 +26,10 @@ import {SCENARIO_DESCRIPTORS} from '../../src/testing/scenarios.workflow';
 /** Generous: it stands up a server and waits for every state to be observable. */
 const SETUP_TIMEOUT_MS = 60_000;
 
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
 describe('the scenario harness', () => {
   let server: ScenarioServer;
 
@@ -35,6 +39,7 @@ describe('the scenario harness', () => {
         'settled-mixed',
         'parked',
         'awaiting-approval',
+        'bugfix-agent',
         'retrying',
         'stuck',
         'unserved-queue',
@@ -135,6 +140,115 @@ describe('the scenario harness', () => {
 
     expect(await handle.result()).toBe('approved by chris@example.com');
   });
+
+  it('seeds the agent parked at intake, with the journey so far in history', async () => {
+    const detail = await server.client
+      .getHandle(SCENARIO_IDS.bugfixAgent)
+      .describe();
+    const awaiting = detail?.parked[0]?.awaiting as
+      {kind?: unknown; signal?: unknown} | undefined;
+
+    expect(detail?.status).toBe('running');
+    expect(awaiting?.kind).toBe('approval');
+    expect(awaiting?.signal).toBe('intake');
+    // Reaching the gate proves the stages before it really ran: a tolerated
+    // child failure and a retried flaky activity are already in the record.
+    const types = new Set(detail?.history.map((event) => event.type));
+    for (const expected of [
+      'childCompleted',
+      'childFailed',
+      'activityFailed',
+      'activityRetryScheduled',
+    ])
+      expect(types.has(expected as never))
+        .withContext(`${expected} before intake`)
+        .toBe(true);
+  });
+
+  /**
+   * The scenario's whole point, driven the way a dashboard would drive it: two
+   * human approvals in, one history out with **every parent-side event family
+   * in it**. `cancelRequested` is the one family a completing run cannot hold,
+   * so it is asserted where it lives — the watchdog child the agent cancelled.
+   * This settles `scenario-bugfix-agent`; nothing after this spec reads it.
+   */
+  it('runs the whole arc on two approvals, with every event family in one history', async () => {
+    const handle = server.client.getHandle<string>(SCENARIO_IDS.bugfixAgent);
+    const parkedOn = async (signal: string): Promise<boolean> => {
+      const detail = await handle.describe();
+      return (detail?.parked ?? []).some(
+        (parked) =>
+          (parked.awaiting as {signal?: unknown} | undefined)?.signal ===
+          signal,
+      );
+    };
+    const until = async (
+      label: string,
+      predicate: () => Promise<boolean>,
+    ): Promise<void> => {
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        if (await predicate()) return;
+        await wait(100);
+      }
+      throw new Error(`timed out waiting for: ${label}`);
+    };
+
+    handle.signal('intake', {approved: true, approvedBy: 'triage'});
+    await until('the agent reaches the metrics gate', () =>
+      parkedOn('shipMetrics'),
+    );
+    handle.signal('shipMetrics', {approved: true, approvedBy: 'release'});
+    await until(
+      'the agent completes',
+      async () => (await handle.describe())?.status === 'completed',
+    );
+
+    const detail = (await handle.describe())!;
+    expect(detail.result).toContain('BUG-4021 fixed');
+    expect(detail.result).toContain('ramped to 100%');
+    const types = new Set(detail.history.map((event) => event.type));
+    for (const family of [
+      'activityScheduled',
+      'activityStarted',
+      'activityCompleted',
+      'activityFailed',
+      'activityRetryScheduled',
+      'timerStarted',
+      'timerFired',
+      'childStarted',
+      'childCompleted',
+      'childFailed',
+      'childCancelRequested',
+      'signal',
+      'workflowSignaled',
+      'workflowStarted',
+      'patchRecorded',
+      'conditionParked',
+      'conditionUnparked',
+    ])
+      expect(types.has(family as never))
+        .withContext(`history holds a ${family}`)
+        .toBe(true);
+
+    // The cancelled watchdog caught its cancellation and stood down — its
+    // history is where `cancelRequested` lives.
+    const watchdog = await server.client
+      .getHandle(`${SCENARIO_IDS.bugfixAgent}-watchdog`)
+      .describe();
+    expect(watchdog?.status).toBe('completed');
+    expect(watchdog?.result).toBe('stood down — CI settled first');
+    expect(
+      watchdog?.history.some((event) => event.type === 'cancelRequested'),
+    ).toBe(true);
+
+    // The launch announcement outlived the arc as its own execution.
+    const announcement = await server.client
+      .getHandle(`${SCENARIO_IDS.bugfixAgent}-announcement`)
+      .describe();
+    expect(announcement?.status).toBe('completed');
+    expect(announcement?.result).toContain('BUG-4021 fixed and launched');
+  }, 30_000);
 
   /**
    * Wedged, not failed — the distinction a listing cannot make from `status`
