@@ -6,7 +6,7 @@
  * framework refuses to depend on any one vendor's strictness switch.
  */
 
-import {strictProblems} from '../../src/connectors';
+import {strictProblems} from '../../src/schema';
 
 const issueSchema = {
   type: 'object',

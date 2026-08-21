@@ -12,7 +12,7 @@
  */
 
 import type {ActivityOptionsInput} from '../workflow';
-import type {StandardSchemaV1} from './standard_schema';
+import type {StandardSchemaV1} from '../schema';
 
 type Out<S extends StandardSchemaV1> = StandardSchemaV1.InferOutput<S>;
 

@@ -10,7 +10,16 @@
  */
 
 import {defineConnector, ops, ConnectorError} from '../../../src/connectors';
-import {arr, lit, nul, num, obj, opt, str, type Infer} from './mini_schema';
+import {
+  arr,
+  lit,
+  nul,
+  num,
+  obj,
+  opt,
+  str,
+  type Infer,
+} from '../../support/mini_schema';
 
 /* ---------------------------- shapes ------------------------------------- */
 

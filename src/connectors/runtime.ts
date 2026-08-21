@@ -11,7 +11,7 @@
  */
 
 import type {ConnectorSpec} from './definition';
-import {runSchema} from './validate';
+import {runSchema} from '../schema';
 
 let envSource: Record<string, string | undefined> = process.env;
 

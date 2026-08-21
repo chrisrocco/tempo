@@ -63,12 +63,25 @@ export interface Violation {
 }
 
 /**
+ * Layers that are **internal libraries**: engine-agnostic code the repo owns
+ * but deliberately treats like a third-party dependency. Being on this list is
+ * a contract with three enforced halves: the layer's `LAYER_IMPORTS` entry is
+ * `[]` (it knows nothing, not even Node); its `index.ts` fileoverview states
+ * the contract; and a seam spec built on `spec/support/library_seam.ts` pins
+ * every call site, which doubles as the removal instruction. The seam helper
+ * refuses a library that is not listed here, so creating one is a deliberate
+ * three-part act, not a directory that drifts into existence.
+ */
+export const INTERNAL_LIBRARIES: readonly string[] = ['walltime', 'schema'];
+
+/**
  * What each layer under `src/` is permitted to import. Absent from this map means
  * "unrestricted" — the entrypoints compose everything by design.
  */
 const LAYER_IMPORTS: Record<string, readonly string[]> = {
   protocol: [],
   walltime: [],
+  schema: [],
   core: ['protocol', 'walltime'],
   patterns: ['protocol', 'core'],
   schedule: ['protocol', 'walltime'],
@@ -76,16 +89,16 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
   worker: ['protocol', 'core'],
   client: ['protocol', 'core'],
   services: ['protocol', 'core', 'server', 'worker'],
-  // `workflow_descriptor` is a top-level module rather than a directory, but
-  // `layerOf` reads the first path segment under `src/` either way, so importing
-  // one from inside a layer has to be declared like a layer. `tempo.ts` reaches
-  // the same module unchecked, being top-level itself — which is the asymmetry
-  // this entry pays for, not a second kind of dependency.
   // Everything connectors/ builds on — proxyActivities, createWorkflow,
   // pollForever, signalStream — is re-exported by the author entrypoint, so the
-  // layer declares exactly that one dependency and the entrypoint stays the
-  // single account of what connector machinery may reach.
-  connectors: ['workflow'],
+  // layer declares that dependency plus the schema/ internal library, and the
+  // entrypoint stays the single account of what connector machinery may reach.
+  connectors: ['workflow', 'schema'],
+  // `workflow_descriptor` (below) is a top-level module rather than a directory,
+  // but `layerOf` reads the first path segment under `src/` either way, so
+  // importing one from inside a layer has to be declared like a layer.
+  // `tempo.ts` reaches the same module unchecked, being top-level itself — which
+  // is the asymmetry that entry pays for, not a second kind of dependency.
   testing: [
     'protocol',
     'core',
@@ -108,6 +121,8 @@ const LAYER_RATIONALE: Record<string, string> = {
     'protocol/ is pure data with no dependencies — it is what lets core and server share types without depending on each other',
   walltime:
     'walltime/ is an internally-owned library — duration strings and wall-clock rules — treated like a third-party dependency the repo happens to host: it knows nothing about the engine and imports nothing, so it stays removable by deleting the directory and the call sites spec/walltime/seam.spec.ts names',
+  schema:
+    'schema/ is an internally-owned library — Standard Schema validation, structural JSON Schema with vendor emitters, strict conformance — treated like a third-party dependency: it knows nothing about the engine and imports nothing, so it stays removable by deleting the directory and the call sites spec/schema/seam.spec.ts names',
   core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/ and walltime/ (whose deterministic half it uses) — and never patterns/, which is built on top of it',
   patterns:
     'patterns/ is workflow-authoring helpers built from the primitives core/ exports; it depends on core/, never the reverse',

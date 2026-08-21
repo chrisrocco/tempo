@@ -55,8 +55,7 @@ import type {
 } from './definition';
 import {ConnectorError, type ConnectorErrorEnvelope} from './errors';
 import {resolveContext} from './runtime';
-import type {StandardSchemaV1} from './standard_schema';
-import {runSchema} from './validate';
+import {runSchema, type StandardSchemaV1} from '../schema';
 
 /** What every operation activity returns: JSON-safe, lives in history. */
 export type WireResult<T> =

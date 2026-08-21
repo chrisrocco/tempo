@@ -56,11 +56,13 @@ import type {
   ConnectorSpec,
 } from './definition';
 import {ConnectorError} from './errors';
-import {emitJsonSchema} from './json_schema';
+import {
+  emitJsonSchema,
+  runSchema,
+  strictProblems,
+  type StandardSchemaV1,
+} from '../schema';
 import {resolveContext} from './runtime';
-import type {StandardSchemaV1} from './standard_schema';
-import {strictProblems} from './strict';
-import {runSchema} from './validate';
 
 type In<S extends StandardSchemaV1> = StandardSchemaV1.InferInput<S>;
 type Out<S extends StandardSchemaV1> = StandardSchemaV1.InferOutput<S>;

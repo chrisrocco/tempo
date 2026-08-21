@@ -30,7 +30,7 @@ import {
   runLivePlan,
   type LiveFixtures,
 } from '../../src/connectors';
-import {num, obj, str} from './support/mini_schema';
+import {num, obj, str} from '../support/mini_schema';
 import {fakeTracker, tracker} from './support/tracker';
 import {
   FIXTURE_LABEL,

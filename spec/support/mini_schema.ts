@@ -12,11 +12,11 @@
  * ```
  */
 
-import type {StandardSchemaV1} from '../../../src/connectors/standard_schema';
 import {
   registerSchemaEmitter,
   type JsonSchema,
-} from '../../../src/connectors/json_schema';
+  type StandardSchemaV1,
+} from '../../src/schema';
 
 export interface MiniSchema<T> extends StandardSchemaV1<T, T> {
   readonly jsonSchema: JsonSchema;

@@ -19,24 +19,25 @@
  * boundary declaration (it may import nothing but `workflow.ts`) is what makes
  * that safe to say.
  *
- * ## No schema library, deliberately
+ * ## No schema vendor, deliberately
  *
  * This repo carries zero runtime dependencies, so the framework could not adopt
  * Zod even if it wanted to — and it doesn't want to. Operations accept any
- * Standard Schema (`standard_schema.ts`, the vendored `~standard` interface Zod,
- * Valibot and ArkType all implement), and catalogue rendering goes through a
- * per-vendor emitter registry (`json_schema.ts`) the consumer wires in one line.
- * The same decoupling move `protocol/workflow_descriptor.ts` made for workflow
- * metadata, applied to validation.
+ * Standard Schema, validated and emitted through the `schema/` internal library
+ * (see `src/schema/index.ts` for its contract), whose pieces are re-exported
+ * here so a connector author needs one import root. The same decoupling move
+ * `protocol/workflow_descriptor.ts` made for workflow metadata, applied to
+ * validation.
  */
 
-export type {StandardSchemaV1} from './standard_schema';
 export {
   emitJsonSchema,
   registerSchemaEmitter,
+  strictProblems,
   type JsonSchema,
   type SchemaEmitter,
-} from './json_schema';
+  type StandardSchemaV1,
+} from '../schema';
 export {
   ConnectorError,
   type ConnectorErrorEnvelope,
@@ -67,7 +68,6 @@ export {
   type WireResult,
 } from './connector';
 export {catalogue, type CatalogueEntry} from './catalogue';
-export {strictProblems} from './strict';
 export {
   planLiveSuite,
   runLivePlan,
