@@ -40,6 +40,7 @@ describe('the scenario harness', () => {
         'parked',
         'awaiting-approval',
         'bugfix-agent',
+        'schedules',
         'retrying',
         'stuck',
         'unserved-queue',
@@ -278,6 +279,67 @@ describe('the scenario harness', () => {
     expect(wedged?.taskFailures).toBeGreaterThan(0);
     expect(unclaimed?.taskFailures).toBe(0);
   });
+
+  it('serves both schedule states: one live, one paused', async () => {
+    // A schedule is one execution of the `scheduler` workflow whose props are
+    // the definition in force — which is exactly how a dashboard reads them.
+    const [heartbeat, paused] = await Promise.all([
+      server.client.getHandle(SCENARIO_IDS.heartbeatSchedule).describe(),
+      server.client.getHandle(SCENARIO_IDS.pausedSchedule).describe(),
+    ]);
+
+    expect(heartbeat?.status).toBe('running');
+    expect(heartbeat?.name).toBe('scheduler');
+    const heartbeatDef = heartbeat?.props as {
+      spec?: {everyMs?: number};
+      paused?: boolean;
+    };
+    expect(heartbeatDef.spec?.everyMs).toBe(15_000);
+
+    expect(paused?.status).toBe('running');
+    expect((paused?.props as {paused?: boolean}).paused).toBe(true);
+  });
+
+  it('reports the scheduler in its manifest, so isNameServed answers yes', async () => {
+    // Registered is not enough: `isNameServed` reads what workers *report*, and
+    // a harness that ran the scheduler without reporting it would warn every
+    // schedule creation about a worker that exists — a state no
+    // correctly-configured deployment produces.
+    const workflows = await server.client.workflows();
+    const scheduler = workflows.find(
+      (workflow) => workflow.name === 'scheduler',
+    );
+
+    expect(scheduler).toBeDefined();
+    expect(scheduler?.taskQueues).toContain(server.taskQueue);
+  });
+
+  it('runs what a schedule fires — a trigger produces a completed run', async () => {
+    // Triggered rather than waiting out a boundary, because triggers work even
+    // on a paused schedule and are immediate — the deterministic way to prove
+    // the harness's workers really serve the scheduler and its firings. The
+    // fired run's id is `<scheduleId>-<ordinal>`, so a prefix query finds it.
+    server.client
+      .getHandle(SCENARIO_IDS.pausedSchedule)
+      .signal('triggerSchedule');
+
+    const deadline = Date.now() + 15_000;
+    let fired;
+    while (Date.now() < deadline) {
+      const page = await server.client.list({
+        workflowIdPrefix: `${SCENARIO_IDS.pausedSchedule}-`,
+      });
+      fired = page.executions.find(
+        (execution) => execution.status === 'completed',
+      );
+      if (fired !== undefined) break;
+      await wait(100);
+    }
+    expect(fired).toBeDefined();
+
+    const run = await server.client.getHandle(fired!.workflowId).describe();
+    expect(run?.result).toBe('quarterly cleanup swept');
+  }, 20_000);
 
   it('serves an activity between retry attempts', async () => {
     const groups = await server.client.counts();

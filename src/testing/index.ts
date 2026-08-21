@@ -67,6 +67,7 @@ import {
   createServerHost,
   resolveEndpoint,
 } from '../services';
+import {nextFire, scheduleWorkflows} from '../schedule/worker';
 import * as scenarioActivities from './scenario_activities';
 import * as scenarioWorkflows from './scenarios.workflow';
 import {
@@ -193,7 +194,20 @@ export async function startScenario(
   // which is half of what a dashboard developer came here for.
   const reporter = startWorkflowReporter(
     service,
-    workflows.map(([name]) => ({name, ...describedAs(name)})),
+    [
+      ...workflows.map(([name]) => ({name, ...describedAs(name)})),
+      // The scheduler is in the manifest, not only the registry: `isNameServed`
+      // answers from what workers *report*, so leaving it out makes creating a
+      // schedule against this harness warn "no worker runs scheduler" about a
+      // worker that does — a state no correctly-configured deployment produces,
+      // which is the one thing this harness must not fake.
+      ...Object.keys(scheduleWorkflows).map((name) => ({
+        name,
+        title: 'Scheduler',
+        description:
+          'Runs schedules — each schedule is one execution of this workflow, addressed by its schedule id.',
+      })),
+    ],
     {identity: 'scenario-harness', taskQueue: SCENARIO_QUEUE},
   );
 
@@ -202,6 +216,14 @@ export async function startScenario(
   const activityRegistry = createActivityRegistry();
   for (const [name, fn] of Object.entries(scenarioActivities))
     activityRegistry.set(name, fn as ActivityFn);
+  // The schedule machinery, registered the way a consumer's worker binary
+  // would register it. Unconditional rather than per-scenario: a dashboard
+  // developed against this harness has a "create schedule" affordance, and a
+  // fixture where creating one silently wedges — no worker registers
+  // `scheduler` — is a state no deployment with schedules produces.
+  for (const [name, fn] of Object.entries(scheduleWorkflows))
+    workflowRegistry.set(name, fn as WorkflowFn);
+  activityRegistry.set('nextFire', nextFire as unknown as ActivityFn);
 
   const loops: WorkerLoop[] = [
     runWorkflowWorker(service, createWorkflowWorker(workflowRegistry), {

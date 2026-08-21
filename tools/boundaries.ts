@@ -88,6 +88,12 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
     'services',
     'worker',
     'workflow_descriptor',
+    // The harness registers `scheduleWorkflows` and seeds schedules through the
+    // schedule client, because a schedule is a state a dashboard has to render
+    // and the catalogue's rule is that a state it cannot produce is a state no
+    // dashboard should claim to handle. Same seam discipline as everything
+    // else here: the client half, never `server/`.
+    'schedule',
   ],
 };
 

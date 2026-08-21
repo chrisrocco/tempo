@@ -42,6 +42,7 @@ import {
   runWorkflowWorker,
   startWorkflowReporter,
 } from '../worker';
+import {createScheduleClient} from '../schedule';
 import * as scenarioWorkflowModule from './scenarios.workflow';
 
 /** Every state the harness can produce. Adding one is adding a case here. */
@@ -50,6 +51,7 @@ export type ScenarioName =
   | 'parked'
   | 'awaiting-approval'
   | 'bugfix-agent'
+  | 'schedules'
   | 'retrying'
   | 'stuck'
   | 'unserved-queue'
@@ -164,6 +166,8 @@ export const SCENARIO_IDS = {
   parked: 'scenario-parked',
   awaitingApproval: 'scenario-awaiting-approval',
   bugfixAgent: 'scenario-bugfix-agent',
+  heartbeatSchedule: 'scenario-heartbeat-report',
+  pausedSchedule: 'scenario-quarterly-cleanup',
   retrying: 'scenario-retrying',
   stuck: 'scenario-stuck',
   unserved: 'scenario-unserved',
@@ -288,6 +292,50 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
           (parked) =>
             (parked.awaiting as {signal?: unknown} | undefined)?.signal ===
             'intake',
+        );
+      });
+    },
+  },
+
+  schedules: {
+    summary:
+      'Two schedules: one firing every fifteen seconds, one paused — so the schedules view has both states to show.',
+    async seed(context) {
+      // Through the schedule client rather than a raw start: the fixture must
+      // be a schedule exactly as a consumer would make one — validated,
+      // normalized, and runnable by the `scheduleWorkflows` the harness
+      // registers alongside its scenario workflows.
+      const schedules = createScheduleClient(context.service);
+      await schedules.create(SCENARIO_IDS.heartbeatSchedule, {
+        spec: {type: 'interval', everyMs: 15_000},
+        target: {
+          name: SCENARIO_WORKFLOWS.completes,
+          props: {value: 'heartbeat report delivered'},
+          taskQueue: context.queue,
+        },
+      });
+      // Paused, which is the state worth having on a wall: a paused schedule
+      // parks with *nothing* pending and nothing arriving — deliberately
+      // indistinguishable from wedged in every view that cannot see the
+      // parked condition (see `ConditionParkedEvent`).
+      await schedules.create(SCENARIO_IDS.pausedSchedule, {
+        spec: {type: 'interval', everyMs: 6 * 60 * 60 * 1000},
+        target: {
+          name: SCENARIO_WORKFLOWS.completes,
+          props: {value: 'quarterly cleanup swept'},
+          taskQueue: context.queue,
+        },
+        paused: true,
+      });
+
+      await context.until('both schedules are describable', async () => {
+        const [heartbeat, paused] = await Promise.all([
+          schedules.describe(SCENARIO_IDS.heartbeatSchedule),
+          schedules.describe(SCENARIO_IDS.pausedSchedule),
+        ]);
+        return (
+          heartbeat?.definition !== undefined &&
+          paused?.definition !== undefined
         );
       });
     },
