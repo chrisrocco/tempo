@@ -8,6 +8,7 @@
     "./client": "./src/remote_client.ts",
     "./protocol": "./src/protocol/index.ts",
     "./workflow": "./src/workflow.ts",
+    "./connectors": "./src/connectors/index.ts",
     "./activity": "./src/activity.ts",
     "./schedule": "./src/schedule/index.ts",
     "./schedule/worker": "./src/schedule/worker.ts",

@@ -81,6 +81,11 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
   // one from inside a layer has to be declared like a layer. `tempo.ts` reaches
   // the same module unchecked, being top-level itself — which is the asymmetry
   // this entry pays for, not a second kind of dependency.
+  // Everything connectors/ builds on — proxyActivities, createWorkflow,
+  // pollForever, signalStream — is re-exported by the author entrypoint, so the
+  // layer declares exactly that one dependency and the entrypoint stays the
+  // single account of what connector machinery may reach.
+  connectors: ['workflow'],
   testing: [
     'protocol',
     'core',
@@ -117,6 +122,8 @@ const LAYER_RATIONALE: Record<string, string> = {
     'services/ composes server/ and worker/ behind the WorkflowService seam',
   testing:
     'testing/ composes a server and its workers into named fixture states, so it reaches almost everything — but not server/ directly, because a fixture that reached past the service seam could build a state no deployment can reach, which is the one thing a shared fixture must not do',
+  connectors:
+    'connectors/ is service-wrapping machinery built for workflow authors, so it may import only workflow.ts — the same deterministic surface its consumers use. Needing anything the author entrypoint does not re-export would mean a connector concept the author surface cannot express, which is a gap to fix there, not a dependency to add here',
 };
 
 /** Constructs that make replay irreproducible, so they cannot appear on the deterministic side. */

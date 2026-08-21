@@ -69,6 +69,14 @@ on npm and makes no stability promises — clone it, read it, run it.
 - **Task queues** — route work to a pool of workers, so several applications
   can share one server; activities and children inherit their execution's
   queue
+- **Connectors** (experimental) — `workflow-engine/connectors`: define a
+  service wrapper once as queries, commands (each with a declared idempotency
+  story), and triggers, and derive the typed workflow proxy, the worker
+  registration, a JSON-Schema catalogue for dashboards, and **watchers** — a
+  poller child that signals its parent one event at a time, assembled from
+  `pollForever`, `signalWorkflow`, and `signalStream`. Takes any
+  [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType) without
+  depending on one — see [`src/connectors/`](src/connectors/index.ts)
 
 The same workflow code runs four ways, with no changes:
 
