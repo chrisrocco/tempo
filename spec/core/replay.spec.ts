@@ -12,7 +12,6 @@
 
 import {
   createContext,
-  defineSignal,
   NondeterminismError,
   replay,
   runActivity,
@@ -206,7 +205,7 @@ describe('core replay — command suppression', () => {
  * for the same reason. Nothing throws; the execution simply parks forever.
  */
 describe('core replay — new work reached while history remains', () => {
-  const ping = defineSignal('ping');
+  const ping = 'ping';
 
   it('emits a command the workflow reaches before the batch is exhausted', async () => {
     // The completion is what moves the workflow on to `sleep`; the signal behind

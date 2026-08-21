@@ -24,7 +24,6 @@
 import {createLocalRuntime} from '../../src';
 import {
   condition,
-  defineSignal,
   patched,
   runActivity,
   setHandler,
@@ -36,7 +35,7 @@ function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-const tick = defineSignal('tick');
+const tick = 'tick';
 
 describe('workflow versioning — changing a running workflow', () => {
   /**

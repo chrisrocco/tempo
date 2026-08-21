@@ -49,7 +49,7 @@
  */
 
 import {condition} from '../core/condition';
-import {clearHandler, setHandler, type SignalDef} from '../core/signals';
+import {clearHandler, setHandler} from '../core/signals';
 
 export interface ApprovalRequest {
   /**
@@ -57,7 +57,7 @@ export interface ApprovalRequest {
    * `awaiting.signal`, so it is also the address a dashboard sends to — make it
    * unique within the workflow if several approvals can be outstanding at once.
    */
-  signal: SignalDef | string;
+  signal: string;
   /**
    * What is being approved, for the human being asked. Free-form JSON,
    * published verbatim as `awaiting.detail`; the engine and this helper never
@@ -91,14 +91,12 @@ export interface ApprovalDecision {
 export async function waitForApproval<D = ApprovalDecision>(
   request: ApprovalRequest,
 ): Promise<D> {
-  const name =
-    typeof request.signal === 'string' ? request.signal : request.signal.name;
   let decision: D | undefined;
   let decided = false;
   // A flag beside the value, not `decision !== undefined`: a payload is JSON
   // from the wire, and `undefined` — while a sender's bug — must end the wait
   // rather than hang it.
-  setHandler({name}, (payload: D) => {
+  setHandler(request.signal, (payload: D) => {
     if (decided) return; // first writer wins; see the fileoverview
     decision = payload;
     decided = true;
@@ -107,14 +105,14 @@ export async function waitForApproval<D = ApprovalDecision>(
     await condition(() => decided, {
       awaiting: {
         kind: 'approval',
-        signal: name,
+        signal: request.signal,
         ...(request.detail === undefined ? {} : {detail: request.detail}),
       },
     });
   } finally {
     // On resolution and on cancellation alike: give the name back, so a later
     // wait on the same signal registers cleanly instead of being displaced.
-    clearHandler({name});
+    clearHandler(request.signal);
   }
   return decision as D;
 }

@@ -369,8 +369,8 @@ describe('architecture — browser safety', () => {
   });
 
   /**
-   * The exemption that makes the rule usable at all: `client/client.ts` names
-   * `SignalDef` from `core/` and `remote_service.ts` names a dozen protocol types.
+   * The exemption that makes the rule usable at all: `remote_service.ts` names
+   * a dozen protocol types.
    * An erased import emits no module reference, so no bundler follows it.
    */
   it('ignores a type-only import of a module that is not browser-safe', () => {

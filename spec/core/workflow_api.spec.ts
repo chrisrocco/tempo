@@ -10,7 +10,6 @@ import {
   CancelledFailure,
   continueAsNew,
   createContext,
-  defineSignal,
   drainMicrotasks,
   executeChild,
   createActivityProxy,
@@ -177,7 +176,7 @@ describe('core primitives — signalling another workflow', () => {
     const ctx = createContext([], []);
 
     als.run(ctx, () => {
-      signalWorkflow('parent-1', defineSignal('comment'), {id: 7});
+      signalWorkflow('parent-1', 'comment', {id: 7});
     });
 
     expect(ctx.commands[0]).toEqual({
@@ -198,7 +197,7 @@ describe('core primitives — signalling another workflow', () => {
     const ctx = createContext([], []);
 
     als.run(ctx, () => {
-      signalWorkflow('parent-1', defineSignal('comment'));
+      signalWorkflow('parent-1', 'comment');
       void runActivity('after');
     });
 
@@ -229,7 +228,7 @@ describe('core primitives — signalling another workflow', () => {
     );
 
     als.run(ctx, () => {
-      signalWorkflow('parent-1', defineSignal('comment'), {id: 7});
+      signalWorkflow('parent-1', 'comment', {id: 7});
     });
 
     expect(ctx.commands).toEqual([]);
@@ -241,7 +240,7 @@ describe('core primitives — signalling another workflow', () => {
     ctx.cancelled = true;
 
     als.run(ctx, () => {
-      signalWorkflow('parent-1', defineSignal('comment'));
+      signalWorkflow('parent-1', 'comment');
     });
 
     expect(ctx.commands).toEqual([]);

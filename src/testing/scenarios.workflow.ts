@@ -38,12 +38,7 @@
  */
 
 import * as scenarioActivities from './scenario_activities';
-import {
-  condition,
-  defineSignal,
-  proxyActivities,
-  setHandler,
-} from '../workflow';
+import {condition, proxyActivities, setHandler} from '../workflow';
 // Type-only, and erased — which is the whole reason a workflow module may reach
 // past `workflow.ts` for them at all (`tools/boundaries.ts`). They buy the
 // name-keyed map below a compiler.
@@ -70,7 +65,7 @@ const retrying = proxyActivities(scenarioActivities, {
 });
 
 /** Sent to a parked execution to release it — the scenario's escape hatch. */
-export const release = defineSignal('release');
+export const release = 'release';
 
 export async function scenarioCompletes(props: {
   value: string;

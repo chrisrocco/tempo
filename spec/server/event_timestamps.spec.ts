@@ -18,15 +18,9 @@
 import {createLocalRuntime} from '../../src';
 import {MemoryHistoryStore} from '../../src/server';
 import type {HistoryEvent} from '../../src/protocol';
-import {
-  defineSignal,
-  executeChild,
-  runActivity,
-  setHandler,
-  sleep,
-} from '../../src/workflow';
+import {executeChild, runActivity, setHandler, sleep} from '../../src/workflow';
 
-const go = defineSignal('go');
+const go = 'go';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));

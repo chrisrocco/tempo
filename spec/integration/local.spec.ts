@@ -21,7 +21,6 @@ import {
   CancelledFailure,
   condition,
   continueAsNew,
-  defineSignal,
   executeChild,
   proxyActivities,
   runActivity,
@@ -306,7 +305,7 @@ describe('local runtime — signals and condition', () => {
   it('parks on a condition and wakes when a signal makes it true', async () => {
     const rt = createLocalRuntime().registerWorkflow('waiter', async () => {
       let go = false;
-      setHandler(defineSignal('go'), () => {
+      setHandler('go', () => {
         go = true;
       });
       await condition(() => go);
@@ -322,7 +321,7 @@ describe('local runtime — signals and condition', () => {
   it('delivers the signal payload to the handler', async () => {
     const rt = createLocalRuntime().registerWorkflow('collector', async () => {
       let value: number | undefined;
-      setHandler(defineSignal('set'), (v: number) => {
+      setHandler('set', (v: number) => {
         value = v;
       });
       await condition(() => value !== undefined);
@@ -346,7 +345,7 @@ describe('local runtime — signals and condition', () => {
       .registerActivity('work', () => 'done')
       .registerWorkflow('greeter', async () => {
         const seen: string[] = [];
-        setHandler(defineSignal('ping'), (p: string) => seen.push(p));
+        setHandler('ping', (p: string) => seen.push(p));
         const result = await runActivity<string>('work');
         return `${result}/${seen.join(',')}`;
       });
@@ -361,7 +360,7 @@ describe('local runtime — signals and condition', () => {
     const rt = createLocalRuntime().registerWorkflow('adder', async () => {
       let total = 0;
       let count = 0;
-      setHandler(defineSignal('add'), (n: number) => {
+      setHandler('add', (n: number) => {
         total += n;
         count += 1;
       });
@@ -706,7 +705,7 @@ describe('local runtime — cancellation', () => {
 
 describe('local runtime — signalling another workflow', () => {
   it('sends a signal to another execution by workflow id', async () => {
-    const ping = defineSignal('ping');
+    const ping = 'ping';
     const rt = createLocalRuntime()
       .registerWorkflow('receiver', async () => {
         let heard: string | undefined;
@@ -735,7 +734,7 @@ describe('local runtime — signalling another workflow', () => {
    * event per item and reads them as ordinary control flow.
    */
   it('lets a child feed its parent items as they are found', async () => {
-    const found = defineSignal('found');
+    const found = 'found';
     const rt = createLocalRuntime()
       .registerActivity('lookup', (from: number) => [from, from + 1])
       .registerWorkflow('finder', async () => {
@@ -766,7 +765,7 @@ describe('local runtime — signalling another workflow', () => {
    */
   it('carries on when the target does not exist', async () => {
     const rt = createLocalRuntime().registerWorkflow('shouter', async () => {
-      signalWorkflow('nobody-1', defineSignal('ping'), 'hello');
+      signalWorkflow('nobody-1', 'ping', 'hello');
       return 'shouted';
     });
 

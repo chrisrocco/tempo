@@ -13,13 +13,13 @@
 
 import {createLocalRuntime} from '../../src';
 import {MemoryHistoryStore} from '../../src/server';
-import {condition, defineSignal, setHandler} from '../../src/workflow';
+import {condition, setHandler} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-const go = defineSignal('go');
+const go = 'go';
 
 describe('a workflow parked on a condition', () => {
   it('reports the condition it is waiting on', async () => {
