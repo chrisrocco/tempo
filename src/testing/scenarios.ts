@@ -52,6 +52,7 @@ export type ScenarioName =
   | 'awaiting-approval'
   | 'bugfix-agent'
   | 'schedules'
+  | 'divergence'
   | 'retrying'
   | 'stuck'
   | 'unserved-queue'
@@ -126,6 +127,7 @@ export const SCENARIO_WORKFLOWS = {
   parks: 'scenarioParks',
   awaitsApproval: 'scenarioAwaitsApproval',
   bugfixAgent: 'scenarioBugfixAgent',
+  diverges: 'scenarioDiverges',
   researcher: 'scenarioResearcher',
   reviewer: 'scenarioReviewer',
   ciWatcher: 'scenarioCiWatcher',
@@ -166,6 +168,7 @@ export const SCENARIO_IDS = {
   parked: 'scenario-parked',
   awaitingApproval: 'scenario-awaiting-approval',
   bugfixAgent: 'scenario-bugfix-agent',
+  diverged: 'scenario-diverged',
   heartbeatSchedule: 'scenario-heartbeat-report',
   pausedSchedule: 'scenario-quarterly-cleanup',
   retrying: 'scenario-retrying',
@@ -338,6 +341,45 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
           paused?.definition !== undefined
         );
       });
+    },
+  },
+
+  divergence: {
+    summary:
+      'An execution wedged on NondeterminismError — its history no longer matches the deployed code. `reset` is the recovery.',
+    async seed(context) {
+      // The switch is reset first, so reseeding in one process replays the
+      // same story: v1 runs, "the deploy" lands, v2 diverges.
+      scenarioWorkflowModule.DEPLOYED.version = 1;
+      context.service.start(SCENARIO_WORKFLOWS.diverges, undefined, {
+        workflowId: SCENARIO_IDS.diverged,
+        taskQueue: context.queue,
+      });
+      await context.until('the v1 run has parked on its timer', async () => {
+        const detail = await describeOf(context, SCENARIO_IDS.diverged);
+        return (
+          detail?.history.some((event) => event.type === 'timerStarted') ??
+          false
+        );
+      });
+
+      // The deploy: the code the workers run changes under a live execution.
+      // The signal is only the wake-up — any activation replays from the top,
+      // and the replay is what disagrees with history.
+      scenarioWorkflowModule.DEPLOYED.version = 2;
+      context.service.signal(SCENARIO_IDS.diverged, 'wake');
+
+      await context.until(
+        'the execution wedges on nondeterminism',
+        async () => {
+          const detail = await describeOf(context, SCENARIO_IDS.diverged);
+          return (
+            detail !== undefined &&
+            isStuck(detail) &&
+            (detail.lastTaskFailure ?? '').includes('nondeterminism')
+          );
+        },
+      );
     },
   },
 

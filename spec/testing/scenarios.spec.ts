@@ -41,6 +41,7 @@ describe('the scenario harness', () => {
         'awaiting-approval',
         'bugfix-agent',
         'schedules',
+        'divergence',
         'retrying',
         'stuck',
         'unserved-queue',
@@ -279,6 +280,43 @@ describe('the scenario harness', () => {
     expect(wedged?.taskFailures).toBeGreaterThan(0);
     expect(unclaimed?.taskFailures).toBe(0);
   });
+
+  it('serves an execution wedged on nondeterminism, naming the disagreement', async () => {
+    const detail = await server.client
+      .getHandle(SCENARIO_IDS.diverged)
+      .describe();
+
+    expect(detail?.status).toBe('running');
+    expect(detail && isStuck(detail)).toBe(true);
+    // The error names both sides — what history holds and what the code did —
+    // which is the whole diagnosis an operator gets to act on.
+    expect(detail?.lastTaskFailure).toContain('nondeterminism at seq 0');
+    expect(detail?.lastTaskFailure).toContain('timer');
+  });
+
+  /**
+   * The recovery `reset` exists for, driven the way a dashboard would drive
+   * it: rewind to before the event the deployed code cannot replay, and the
+   * same workers that wedged it complete it. This settles `scenario-diverged`;
+   * nothing after this spec reads it.
+   */
+  it('recovers a diverged execution with a reset', async () => {
+    server.client.reset(SCENARIO_IDS.diverged, 0);
+
+    const handle = server.client.getHandle<string>(SCENARIO_IDS.diverged);
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if ((await handle.describe())?.status === 'completed') break;
+      await wait(100);
+    }
+
+    const detail = await handle.describe();
+    expect(detail?.status).toBe('completed');
+    expect(detail?.result).toBe('v2 report sent — no wait');
+    // Recovered means recovered: the failure counter was cleared with the
+    // history that caused it.
+    expect(detail?.taskFailures).toBe(0);
+  }, 20_000);
 
   it('serves both schedule states: one live, one paused', async () => {
     // A schedule is one execution of the `scheduler` workflow whose props are

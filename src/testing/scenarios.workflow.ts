@@ -363,6 +363,36 @@ export async function scenarioBugfixAgent(props: {
 }
 
 /**
+ * The deploy switch behind `scenarioDiverges` — mutable host state a workflow
+ * reads, which is precisely the determinism violation being modeled. A real
+ * fleet does this by rolling a new binary; a fixture in one process does it by
+ * flipping this object between tasks. Nothing else here may imitate it: every
+ * other scenario workflow is honestly deterministic, and this one is
+ * deliberately, instructively not.
+ */
+export const DEPLOYED = {version: 1};
+
+/**
+ * Wedges on `NondeterminismError` once the "deploy" lands.
+ *
+ * Version 1 parks on an hour-long timer, so history's seq 0 is a
+ * `timerStarted` marker. Version 2 skips the wait and reaches for an activity
+ * first — so the next replay issues `scheduleActivity` at seq 0, history
+ * disagrees, and the task fails with the one error `reset` exists to fix.
+ * The retry loop keeps failing identically, which is what makes it a fixture:
+ * running, `taskFailures` climbing, unrecoverable by anything but a rewind.
+ */
+export async function scenarioDiverges(): Promise<string> {
+  if (DEPLOYED.version === 1) {
+    await sleep(60 * 60 * 1000);
+    return 'v1 report sent, an hour late';
+  }
+  return settling.scenario_succeed(
+    'v2 report sent — no wait',
+  ) as Promise<string>;
+}
+
+/**
  * Parks on `waitForApproval`, which is `scenarioParks` with the affordance the
  * approval pattern adds: the parked state carries `{kind: 'approval', signal,
  * detail}`, so a dashboard can render what is being asked and knows where to
@@ -470,6 +500,11 @@ export const SCENARIO_DESCRIPTORS: Record<
     title: 'Watchdog',
     description:
       'Parks until cancelled — the dead-man switch the bug-fix agent stands down once CI is green.',
+  },
+  scenarioDiverges: {
+    title: 'Diverges after a deploy',
+    description:
+      'Version 1 parked on a timer; version 2 reaches for an activity first. The replay disagrees with history, the task fails with NondeterminismError forever, and `reset` is the recovery.',
   },
 } as const;
 
