@@ -39,7 +39,7 @@
  */
 
 import {DEFAULT_TASK_QUEUE, isNameServed} from '../protocol';
-import {durationToMs, type Duration} from '../walltime';
+import {durationToMs, type Duration} from '../libraries/walltime';
 import type {
   CalendarSpec,
   ExecutionDetail,

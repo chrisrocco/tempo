@@ -11,10 +11,11 @@
  *
  * ## The contract, and where it is enforced
  *
- * - **It imports nothing.** Not other layers, not Node builtins — the layering
- *   map (`tools/boundaries.ts`) pins `walltime: []`, same as `protocol/`.
+ * - **It imports nothing.** Not other layers, not Node builtins — living under
+ *   `src/libraries/` opts it into the checker's `library-boundary` rule
+ *   (`tools/boundaries.ts`), which pins every file here to this package.
  * - **The engine touches it only at named call sites.** The seam — every file
- *   allowed to import this library — is asserted by `spec/walltime/seam.spec.ts`,
+ *   allowed to import this library — is asserted by `spec/libraries/walltime/seam.spec.ts`,
  *   which is also the removal instruction: delete this directory, revert those
  *   files to their numbers-only forms, and the engine is whole again. If a new
  *   import site appears without being added there deliberately, the suite fails.

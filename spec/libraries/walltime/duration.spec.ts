@@ -5,7 +5,7 @@
  * input it lets through becomes a number nobody re-checks.
  */
 
-import {durationToMs} from '../../src/walltime';
+import {durationToMs} from '../../../src/libraries/walltime';
 
 describe('durationToMs — the string grammar', () => {
   it('parses each unit, short and long form alike', () => {

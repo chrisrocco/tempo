@@ -6,9 +6,9 @@
  * implementation, because the library's claim is that no vendor is special.
  */
 
-import {emitJsonSchema, runSchema} from '../../src/schema';
-import type {StandardSchemaV1} from '../../src/schema';
-import {num, obj, str} from '../support/mini_schema';
+import {emitJsonSchema, runSchema} from '../../../src/libraries/schema';
+import type {StandardSchemaV1} from '../../../src/libraries/schema';
+import {num, obj, str} from '../../support/mini_schema';
 
 describe('schema — runSchema over any Standard Schema', () => {
   const issue = obj({key: str(), votes: num()});

@@ -16,7 +16,7 @@ import {
   registerSchemaEmitter,
   type JsonSchema,
   type StandardSchemaV1,
-} from '../../src/schema';
+} from '../../src/libraries/schema';
 
 export interface MiniSchema<T> extends StandardSchemaV1<T, T> {
   readonly jsonSchema: JsonSchema;

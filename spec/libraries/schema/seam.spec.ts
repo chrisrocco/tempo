@@ -13,7 +13,7 @@
  * consumer — allowed, deliberately, by naming it here.
  */
 
-import {describeLibrarySeam} from '../support/library_seam';
+import {describeLibrarySeam} from '../../support/library_seam';
 
 describeLibrarySeam({
   library: 'schema',

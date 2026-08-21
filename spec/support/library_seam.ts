@@ -1,9 +1,8 @@
 /**
  * @fileoverview
  * The internal-library seam, as a reusable check — the mechanics that held
- * `walltime/` at arm's length, generalized so every library on
- * `INTERNAL_LIBRARIES` (tools/boundaries.ts) is held to the same contract by
- * the same code.
+ * `walltime/` at arm's length, generalized so every package under
+ * `src/libraries/` is held to the same contract by the same code.
  *
  * An internal library is repo-owned code deliberately treated like a
  * third-party dependency. Two facts make that a real property rather than a
@@ -21,10 +20,12 @@
  *    longer exists) fails, because a stale surface overstates the removal cost
  *    the same way a missing entry understates it.
  *
- * A third check guards the *category*: the library must be listed in
- * `INTERNAL_LIBRARIES`, so a seam spec cannot be written for a directory that
- * never signed up to the contract — and boundaries' documentation of the list
- * stays the one place the contract is defined.
+ * A third check guards against a phantom: the library must actually exist
+ * under `src/libraries/` — location is the declaration, so a seam spec for a
+ * directory that is not there (moved, renamed, deleted) fails by name instead
+ * of silently checking nothing. The imports-nothing half is also enforced
+ * repo-wide by the checker's `library-boundary` rule; this spec restates it so
+ * a library's whole contract fails in one place, with its removal surface.
  *
  * Static, by reading imports, for the same reason `client_entrypoint.spec.ts`
  * is: this is a property of the import graph, and nothing behavioural fails
@@ -35,7 +36,7 @@
 
 import * as path from 'node:path';
 import {
-  INTERNAL_LIBRARIES,
+  internalLibraries,
   readSourceFiles,
   stripCommentsAndStrings,
 } from '../../tools/boundaries';
@@ -75,18 +76,18 @@ export function describeLibrarySeam(options: {
   removalSurface: readonly RemovalSite[];
 }): void {
   const {library, removalSurface} = options;
-  const dir = `src/${library}/`;
+  const dir = `src/libraries/${library}/`;
   const sources = readSourceFiles(REPO_ROOT, ['src']);
   const importsLibrary = (file: {path: string; text: string}) =>
     importSpecifiers(file.text).some((specifier) =>
-      resolves(file.path, specifier)?.startsWith(`src/${library}`),
+      resolves(file.path, specifier)?.startsWith(`src/libraries/${library}`),
     );
 
   describe(`the ${library} library seam`, () => {
-    it('is a declared internal library, so the contract has an owner', () => {
-      expect(INTERNAL_LIBRARIES)
+    it('exists under src/libraries/, where location is the declaration', () => {
+      expect(internalLibraries(sources))
         .withContext(
-          `'${library}' has a seam spec but is not on INTERNAL_LIBRARIES in tools/boundaries.ts — the list is where the contract is defined, so join it there`,
+          `'${library}' has a seam spec but no package under src/libraries/ — moved, renamed, or deleted without its spec`,
         )
         .toContain(library);
     });

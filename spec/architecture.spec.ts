@@ -11,6 +11,7 @@ import {checkDependencies, checkRepoDependencies} from '../tools/dependencies';
 import {
   BROWSER_SAFE_ENTRYPOINTS,
   checkBoundaries,
+  internalLibraries,
   isWorkflowModule,
   readSourceFiles,
   stripCommentsAndStrings,
@@ -485,5 +486,89 @@ describe('architecture — dependencies', () => {
 
     expect(violations.map((v) => v.name).sort()).toEqual(['esbuild', 'vite']);
     expect(violations.every((v) => v.field === 'devDependencies')).toBe(true);
+  });
+});
+
+describe('architecture — internal libraries', () => {
+  /**
+   * Location is the declaration: any file under src/libraries/<name>/ is held
+   * to the library contract with no list to join. These plant each way the
+   * contract can break; the last two check the real tree for the halves the
+   * checker cannot see (a contract entrypoint, a seam spec).
+   */
+  it('rejects a library reaching into the engine', () => {
+    const violations = checkBoundaries([
+      file('src/libraries/fake/thing.ts', `import {x} from '../../core';`),
+    ]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('library-boundary');
+    expect(violations[0].message).toContain('libraries/fake');
+  });
+
+  it('rejects a library importing a Node builtin — third-party means self-contained', () => {
+    const violations = checkBoundaries([
+      file('src/libraries/fake/thing.ts', `import * as fs from 'node:fs';`),
+    ]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('library-boundary');
+  });
+
+  it('rejects a library importing a sibling library', () => {
+    const violations = checkBoundaries([
+      file(
+        'src/libraries/fake/thing.ts',
+        `import {x} from '../schema/validate';`,
+      ),
+    ]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('library-boundary');
+  });
+
+  it('allows a library importing its own files', () => {
+    expect(
+      checkBoundaries([
+        file('src/libraries/fake/thing.ts', `import {x} from './other';`),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('refuses a loose file directly under src/libraries/', () => {
+    const violations = checkBoundaries([
+      file('src/libraries/stray.ts', `export const x = 1;`),
+    ]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('library-boundary');
+    expect(violations[0].message).toContain('belongs to no package');
+  });
+
+  it('derives the membership every other check keys on from the tree', () => {
+    expect(internalLibraries(readSourceFiles(repoRoot, ['src']))).toEqual([
+      'schema',
+      'walltime',
+    ]);
+  });
+
+  // The two halves of the contract the checker cannot enforce from file
+  // contents alone: an index.ts stating the contract, and a seam spec pinning
+  // the removal surface. Checked here against the real tree so a package
+  // cannot drift into existence with neither.
+  it('gives every library a contract entrypoint and a seam spec', () => {
+    const src = readSourceFiles(repoRoot, ['src']);
+    const specs = new Set(
+      readSourceFiles(repoRoot, ['spec']).map((f) => f.path),
+    );
+    const srcPaths = new Set(src.map((f) => f.path));
+    for (const library of internalLibraries(src)) {
+      expect(srcPaths.has(`src/libraries/${library}/index.ts`))
+        .withContext(
+          `src/libraries/${library}/ has no index.ts — the contract fileoverview lives there`,
+        )
+        .toBe(true);
+      expect(specs.has(`spec/libraries/${library}/seam.spec.ts`))
+        .withContext(
+          `src/libraries/${library}/ has no seam spec — spec/libraries/${library}/seam.spec.ts names its removal surface`,
+        )
+        .toBe(true);
+    }
   });
 });

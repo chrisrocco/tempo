@@ -61,7 +61,7 @@ import {
   runSchema,
   strictProblems,
   type StandardSchemaV1,
-} from '../schema';
+} from '../libraries/schema';
 import {resolveContext} from './runtime';
 
 type In<S extends StandardSchemaV1> = StandardSchemaV1.InferInput<S>;

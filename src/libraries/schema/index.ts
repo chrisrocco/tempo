@@ -14,12 +14,11 @@
  *
  * ## The contract, and where it is enforced
  *
- * - **It imports nothing.** Not other layers, not Node builtins — the layering
- *   map (`tools/boundaries.ts`) pins `schema: []`, and the library is listed in
- *   `INTERNAL_LIBRARIES` there, which is what obliges it to the rest of this
- *   contract.
+ * - **It imports nothing.** Not other layers, not Node builtins — living under
+ *   `src/libraries/` opts it into the checker's `library-boundary` rule
+ *   (`tools/boundaries.ts`), which pins every file here to this package.
  * - **The engine touches it only at named call sites.** The seam is asserted by
- *   `spec/schema/seam.spec.ts` (built on `spec/support/library_seam.ts`), which
+ *   `spec/libraries/schema/seam.spec.ts` (built on `spec/support/library_seam.ts`), which
  *   is also the removal instruction: today every call site is in
  *   `connectors/`, so deleting connectors and this directory together leaves
  *   the engine exactly as it was.

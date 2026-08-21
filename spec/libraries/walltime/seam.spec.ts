@@ -6,12 +6,12 @@
  * the repo happens to host. The checks — imports nothing, touched only at the
  * call sites named below — are the shared internal-library seam
  * (`spec/support/library_seam.ts`); what is specific to walltime is the removal
- * instruction this surface encodes: delete `src/walltime/`, revert these files
+ * instruction this surface encodes: delete `src/libraries/walltime/`, revert these files
  * to their numbers-only forms, delete the `calendar` member of `ScheduleSpec`,
  * and the engine is whole again.
  */
 
-import {describeLibrarySeam} from '../support/library_seam';
+import {describeLibrarySeam} from '../../support/library_seam';
 
 describeLibrarySeam({
   library: 'walltime',

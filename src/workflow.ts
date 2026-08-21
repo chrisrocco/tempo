@@ -154,7 +154,7 @@ export type {
   ActivityOptionsInput,
   RetryPolicyInput,
 } from './core/activity_options_input';
-export type {Duration} from './walltime';
+export type {Duration} from './libraries/walltime';
 
 export type {ActivityProxy};
 

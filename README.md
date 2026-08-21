@@ -429,9 +429,12 @@ src/
   core/           The deterministic engine: (history) -> (commands).
   patterns/       Authoring helpers built from core's primitives — pollForever,
                   diffing, signal streams. Depends on core; core never on it.
-  walltime/       An internally-owned library, held at arm's length: duration
-                  strings and wall-clock rules. Imports nothing, knows nothing
-                  about the engine; its removal surface is a checked list.
+  libraries/      Internal libraries, held at arm's length — each imports
+                  nothing, knows nothing about the engine, and has its removal
+                  surface pinned by a seam spec. Location is the declaration.
+    walltime/       Duration strings and wall-clock rules.
+    schema/         Standard Schema validation, structural JSON Schema with
+                    vendor emitters, strict conformance.
   schedule/       Schedules: the scheduler workflow, its client, and the
                   when-does-this-fire arithmetic (client and worker halves are
                   separate entrypoints on purpose — see schedule/index.ts).

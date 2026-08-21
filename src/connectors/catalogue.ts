@@ -10,7 +10,7 @@
 
 import type {Connector} from './connector';
 import type {AnyCommandDef, AnyQueryDef, AnyTriggerDef} from './definition';
-import {emitJsonSchema, type JsonSchema} from '../schema';
+import {emitJsonSchema, type JsonSchema} from '../libraries/schema';
 
 export interface CatalogueEntry {
   readonly connector: string;

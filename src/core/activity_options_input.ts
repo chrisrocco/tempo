@@ -20,7 +20,7 @@
  */
 
 import type {ActivityOptions} from '../protocol';
-import {durationToMs, type Duration} from '../walltime';
+import {durationToMs, type Duration} from '../libraries/walltime';
 
 /** `RetryPolicy` as an author writes it — see `ActivityOptionsInput`. */
 export interface RetryPolicyInput {

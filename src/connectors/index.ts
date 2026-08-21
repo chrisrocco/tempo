@@ -24,7 +24,7 @@
  * This repo carries zero runtime dependencies, so the framework could not adopt
  * Zod even if it wanted to — and it doesn't want to. Operations accept any
  * Standard Schema, validated and emitted through the `schema/` internal library
- * (see `src/schema/index.ts` for its contract), whose pieces are re-exported
+ * (see `src/libraries/schema/index.ts` for its contract), whose pieces are re-exported
  * here so a connector author needs one import root. The same decoupling move
  * `protocol/workflow_descriptor.ts` made for workflow metadata, applied to
  * validation.
@@ -37,7 +37,7 @@ export {
   type JsonSchema,
   type SchemaEmitter,
   type StandardSchemaV1,
-} from '../schema';
+} from '../libraries/schema';
 export {
   ConnectorError,
   type ConnectorErrorEnvelope,
