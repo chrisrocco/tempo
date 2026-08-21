@@ -3,14 +3,14 @@
  * The catalogue: every operation of every connector as data a dashboard can
  * render — kind, description, idempotency, and JSON Schema for the forms.
  *
- * Schemas render only if the consumer registered an emitter for their vendor
- * (`json_schema.ts`); an un-emittable schema lists without a form rather than
- * failing the walk, mirroring tempo's "every descriptor field is optional".
+ * Schemas render only if they carry `toJsonSchema` (the validator port's
+ * optional half); one that does not lists without a form rather than failing
+ * the walk, mirroring tempo's "every descriptor field is optional".
  */
 
 import type {Connector} from './connector';
 import type {AnyCommandDef, AnyQueryDef, AnyTriggerDef} from './definition';
-import {emitJsonSchema, type JsonSchema} from '../libraries/schema';
+import type {JsonSchema} from '../libraries/schema';
 
 export interface CatalogueEntry {
   readonly connector: string;
@@ -48,8 +48,8 @@ export function catalogue(
         kind: 'query',
         name: op,
         description: def.description,
-        input: emitJsonSchema(def.input),
-        output: emitJsonSchema(def.output),
+        input: def.input.toJsonSchema?.(),
+        output: def.output.toJsonSchema?.(),
       });
     }
     for (const [op, def] of Object.entries(commands)) {
@@ -60,8 +60,8 @@ export function catalogue(
         description: def.description,
         idempotency: def.idempotency,
         unsafeBecause: def.unsafeBecause,
-        input: emitJsonSchema(def.input),
-        output: emitJsonSchema(def.output),
+        input: def.input.toJsonSchema?.(),
+        output: def.output.toJsonSchema?.(),
       });
     }
     for (const [op, def] of Object.entries(triggers)) {
@@ -70,8 +70,8 @@ export function catalogue(
         kind: 'trigger',
         name: op,
         description: def.description,
-        event: emitJsonSchema(def.event),
-        filter: def.filter && emitJsonSchema(def.filter),
+        event: def.event.toJsonSchema?.(),
+        filter: def.filter?.toJsonSchema?.(),
       });
     }
   }

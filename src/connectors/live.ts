@@ -6,8 +6,8 @@
  * connector trustworthy:
  *
  * 1. **Schema truth** — every operation's live response matches its declared
- *    output, and carries nothing undeclared (`strict.ts`, against the emitted
- *    JSON Schema — the vendor-neutral spelling of "strict").
+ *    output, and carries nothing undeclared (`strict.ts`, against the schema's
+ *    own `toJsonSchema()` — the vendor-neutral spelling of "strict").
  * 2. **Retry safety** — every `'natural'` command is fired **twice** with one
  *    identity and produces exactly one effect: the double delivery the engine's
  *    at-least-once contract will eventually produce, made routine. `'unsafe'`
@@ -57,15 +57,16 @@ import type {
 } from './definition';
 import {ConnectorError} from './errors';
 import {
-  emitJsonSchema,
   runSchema,
   strictProblems,
-  type StandardSchemaV1,
+  type InferInput,
+  type InferOutput,
+  type Schema,
 } from '../libraries/schema';
 import {resolveContext} from './runtime';
 
-type In<S extends StandardSchemaV1> = StandardSchemaV1.InferInput<S>;
-type Out<S extends StandardSchemaV1> = StandardSchemaV1.InferOutput<S>;
+type In<S extends Schema> = InferInput<S>;
+type Out<S extends Schema> = InferOutput<S>;
 
 /* -------------------------------------------------------------------------- */
 /* The fixture protocol                                                       */
@@ -302,7 +303,7 @@ export function planLiveSuite<
    */
   async function certifyOutput(
     op: string,
-    schema: StandardSchemaV1,
+    schema: Schema,
     raw: unknown,
   ): Promise<unknown> {
     const parsed = await runSchema(schema, raw);
@@ -313,7 +314,7 @@ export function planLiveSuite<
         `live response does not match the declared schema: ${parsed.message}`,
       );
     }
-    const emitted = emitJsonSchema(schema);
+    const emitted = schema.toJsonSchema?.();
     if (emitted) {
       const problems = strictProblems(emitted, raw);
       if (problems.length > 0) {

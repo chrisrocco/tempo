@@ -1,24 +1,29 @@
 /**
  * @fileoverview
- * A deliberately tiny schema library implementing Standard Schema v1 — the
- * proof that the framework is vendor-agnostic. Nothing in `src/` knows this
- * exists; it plugs in exactly the way Zod or Valibot would: schemas carry
- * `~standard`, and one emitter registration makes them render in the catalogue.
+ * A deliberately tiny schema library implementing the validator port natively —
+ * the proof that a hand-rolled validator plugs in with no Standard Schema, no
+ * adapter, and no vendor at all: `validate` and `toJsonSchema` are just
+ * methods, and inference rides the port's generic parameter. Nothing in `src/`
+ * knows this exists.
  *
- * In a real deployment this file is replaced by `import {z} from 'zod'` plus:
+ * In a real deployment this file is replaced by `import {z} from 'zod'` plus
+ * the one-per-repo pairing helper over the `standard()` adapter:
  *
  * ```ts
- * registerSchemaEmitter('zod', (s) => z.toJSONSchema(s as never) as JsonSchema);
+ * const schema = <S extends z.ZodType>(s: S) =>
+ *   standard(s, () => z.toJSONSchema(s) as JsonSchema);
  * ```
  */
 
-import {
-  registerSchemaEmitter,
-  type JsonSchema,
-  type StandardSchemaV1,
+import type {
+  JsonSchema,
+  Schema,
+  SchemaResult,
 } from '../../src/libraries/schema';
 
-export interface MiniSchema<T> extends StandardSchemaV1<T, T> {
+export interface MiniSchema<T> extends Schema<T, T> {
+  validate(value: unknown): SchemaResult<T>;
+  toJsonSchema(): JsonSchema;
   readonly jsonSchema: JsonSchema;
   /** Set by `opt()`; `obj()` reads it to build `required`. */
   readonly optional?: boolean;
@@ -31,7 +36,7 @@ export interface OptionalMiniSchema<T> extends MiniSchema<T> {
 
 export type Infer<S> = S extends MiniSchema<infer T> ? T : never;
 
-type Result<T> = StandardSchemaV1.Result<T>;
+type Result<T> = SchemaResult<T>;
 
 function make<T>(
   jsonSchema: JsonSchema,
@@ -41,23 +46,25 @@ function make<T>(
   return {
     jsonSchema,
     optional,
-    '~standard': {version: 1, vendor: 'mini', validate},
+    validate,
+    toJsonSchema: () => jsonSchema,
   };
 }
 
-const issue = (message: string): StandardSchemaV1.FailureResult => ({
+const issue = (message: string): {ok: false; issues: [{message: string}]} => ({
+  ok: false,
   issues: [{message}],
 });
 
 export const str = (): MiniSchema<string> =>
   make({type: 'string'}, (v) =>
-    typeof v === 'string' ? {value: v} : issue('expected string'),
+    typeof v === 'string' ? {ok: true, value: v} : issue('expected string'),
   );
 
 export const num = (): MiniSchema<number> =>
   make({type: 'number'}, (v) =>
     typeof v === 'number' && Number.isFinite(v)
-      ? {value: v}
+      ? {ok: true, value: v}
       : issue('expected number'),
   );
 
@@ -66,15 +73,15 @@ export const lit = <const L extends readonly string[]>(
 ): MiniSchema<L[number]> =>
   make({type: 'string', enum: [...values]}, (v) =>
     typeof v === 'string' && values.includes(v)
-      ? {value: v as L[number]}
+      ? {ok: true, value: v as L[number]}
       : issue(`expected one of ${values.join(', ')}`),
   );
 
 export const nul = <T>(inner: MiniSchema<T>): MiniSchema<T | null> =>
   make({...inner.jsonSchema, nullable: true}, (v) =>
     v === null
-      ? {value: null}
-      : (inner['~standard'].validate(v) as Result<T | null>),
+      ? {ok: true, value: null}
+      : (inner.validate(v) as Result<T | null>),
   );
 
 export const opt = <T>(
@@ -84,8 +91,8 @@ export const opt = <T>(
     inner.jsonSchema,
     (v) =>
       v === undefined
-        ? {value: undefined}
-        : (inner['~standard'].validate(v) as Result<T | undefined>),
+        ? {ok: true, value: undefined}
+        : (inner.validate(v) as Result<T | undefined>),
     true,
   ) as OptionalMiniSchema<T | undefined>;
 
@@ -94,11 +101,11 @@ export const arr = <T>(inner: MiniSchema<T>): MiniSchema<T[]> =>
     if (!Array.isArray(v)) return issue('expected array');
     const out: T[] = [];
     for (const [i, item] of v.entries()) {
-      const r = inner['~standard'].validate(item) as Result<T>;
-      if (r.issues) return issue(`[${i}]: ${r.issues[0]!.message}`);
+      const r = inner.validate(item);
+      if (!r.ok) return issue(`[${i}]: ${r.issues[0]!.message}`);
       out.push(r.value);
     }
-    return {value: out};
+    return {ok: true, value: out};
   });
 
 type ReqKeys<Shape> = {
@@ -127,15 +134,10 @@ export const obj = <Shape extends Record<string, MiniSchema<unknown>>>(
     if (typeof v !== 'object' || v === null) return issue('expected object');
     const out: Record<string, unknown> = {};
     for (const [key, field] of Object.entries(shape)) {
-      const r = field['~standard'].validate(
-        (v as Record<string, unknown>)[key],
-      ) as Result<unknown>;
-      if (r.issues) return issue(`${key}: ${r.issues[0]!.message}`);
+      const r = field.validate((v as Record<string, unknown>)[key]);
+      if (!r.ok) return issue(`${key}: ${r.issues[0]!.message}`);
       out[key] = r.value;
     }
-    return {value: out as ObjOut<Shape>};
+    return {ok: true, value: out as ObjOut<Shape>};
   });
 };
-
-// One line wires the vendor into the catalogue — same as Zod would need.
-registerSchemaEmitter('mini', (s) => (s as MiniSchema<unknown>).jsonSchema);

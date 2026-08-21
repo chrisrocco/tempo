@@ -55,7 +55,12 @@ import type {
 } from './definition';
 import {ConnectorError, type ConnectorErrorEnvelope} from './errors';
 import {resolveContext} from './runtime';
-import {runSchema, type StandardSchemaV1} from '../libraries/schema';
+import {
+  runSchema,
+  type InferInput,
+  type InferOutput,
+  type Schema,
+} from '../libraries/schema';
 
 /** What every operation activity returns: JSON-safe, lives in history. */
 export type WireResult<T> =
@@ -66,15 +71,15 @@ export type WireResult<T> =
 /* Author-facing surface types                                                */
 /* -------------------------------------------------------------------------- */
 
-type In<S extends StandardSchemaV1> = StandardSchemaV1.InferInput<S>;
-type Out<S extends StandardSchemaV1> = StandardSchemaV1.InferOutput<S>;
+type In<S extends Schema> = InferInput<S>;
+type Out<S extends Schema> = InferOutput<S>;
 
 // Structural infer over {input, output} rather than over the def generics:
 // immune to Ctx variance, and it is genuinely all a call site needs to know.
 export type QuerySurface<Q> = {
   [K in keyof Q]: Q[K] extends {
-    input: infer I extends StandardSchemaV1;
-    output: infer O extends StandardSchemaV1;
+    input: infer I extends Schema;
+    output: infer O extends Schema;
   }
     ? (input: In<I>) => Promise<Out<O>>
     : never;
@@ -107,13 +112,13 @@ export interface WatchHandle<E> extends AsyncIterable<E> {
 }
 
 type TriggerFilterOf<D> = D extends {filter?: infer F}
-  ? NonNullable<F> extends StandardSchemaV1
+  ? NonNullable<F> extends Schema
     ? Out<NonNullable<F>>
     : undefined
   : undefined;
 
 export type WatchSurface<T> = {
-  [K in keyof T]: T[K] extends {event: infer E extends StandardSchemaV1}
+  [K in keyof T]: T[K] extends {event: infer E extends Schema}
     ? (options: WatchOptions<TriggerFilterOf<T[K]>>) => WatchHandle<Out<E>>
     : never;
 };
@@ -219,8 +224,8 @@ export function toMs(every: number | string): number {
 /* -------------------------------------------------------------------------- */
 
 interface OpLike {
-  readonly input: StandardSchemaV1;
-  readonly output: StandardSchemaV1;
+  readonly input: Schema;
+  readonly output: Schema;
   readonly handler: (input: never, ctx: never) => unknown;
 }
 

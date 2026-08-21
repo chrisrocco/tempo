@@ -22,20 +22,24 @@
  * ## No schema vendor, deliberately
  *
  * This repo carries zero runtime dependencies, so the framework could not adopt
- * Zod even if it wanted to — and it doesn't want to. Operations accept any
- * Standard Schema, validated and emitted through the `schema/` internal library
- * (see `src/libraries/schema/index.ts` for its contract), whose pieces are re-exported
- * here so a connector author needs one import root. The same decoupling move
- * `protocol/workflow_descriptor.ts` made for workflow metadata, applied to
- * validation.
+ * Zod even if it wanted to — and it doesn't want to. Operations accept the
+ * schema library's **validator port** (see `src/libraries/schema/index.ts` for
+ * its contract): validate, optional `toJsonSchema`, inference on the generic
+ * parameters. `standard()` adapts any Standard Schema vendor in one call, and
+ * the pieces are re-exported here so a connector author needs one import root.
+ * The same decoupling move `protocol/workflow_descriptor.ts` made for workflow
+ * metadata, applied to validation.
  */
 
 export {
-  emitJsonSchema,
-  registerSchemaEmitter,
+  standard,
   strictProblems,
+  type InferInput,
+  type InferOutput,
   type JsonSchema,
-  type SchemaEmitter,
+  type Schema,
+  type SchemaIssue,
+  type SchemaResult,
   type StandardSchemaV1,
 } from '../libraries/schema';
 export {

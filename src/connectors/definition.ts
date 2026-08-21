@@ -5,21 +5,22 @@
  * engine, which is what keeps a definition loadable by the catalogue, the test
  * harness, and a workflow module alike.
  *
- * Schemas are `StandardSchemaV1` — the framework validates through `~standard`
- * and never names a vendor. `ops<Ctx>()` exists purely for inference: it returns
- * the same builders with the context type pinned, so handlers get a typed `ctx`
- * without annotating every one.
+ * Schemas are the schema library's validator port (`Schema`) — the framework
+ * validates and renders through the port's methods and never names a vendor.
+ * `ops<Ctx>()` exists purely for inference: it returns the same builders with
+ * the context type pinned, so handlers get a typed `ctx` without annotating
+ * every one.
  */
 
 import type {ActivityOptionsInput} from '../workflow';
-import type {StandardSchemaV1} from '../libraries/schema';
+import type {InferOutput, Schema} from '../libraries/schema';
 
-type Out<S extends StandardSchemaV1> = StandardSchemaV1.InferOutput<S>;
+type Out<S extends Schema> = InferOutput<S>;
 
 export interface QueryDef<
   Ctx = unknown,
-  I extends StandardSchemaV1 = StandardSchemaV1,
-  O extends StandardSchemaV1 = StandardSchemaV1,
+  I extends Schema = Schema,
+  O extends Schema = Schema,
 > {
   readonly kind: 'query';
   readonly description: string;
@@ -42,8 +43,8 @@ export type Idempotency = 'natural' | 'unsafe';
 
 export interface CommandDef<
   Ctx = unknown,
-  I extends StandardSchemaV1 = StandardSchemaV1,
-  O extends StandardSchemaV1 = StandardSchemaV1,
+  I extends Schema = Schema,
+  O extends Schema = Schema,
 > {
   readonly kind: 'command';
   readonly description: string;
@@ -64,8 +65,8 @@ export interface PollArgs<F> {
 
 export interface TriggerDef<
   Ctx = unknown,
-  E extends StandardSchemaV1 = StandardSchemaV1,
-  F extends StandardSchemaV1 = StandardSchemaV1,
+  E extends Schema = Schema,
+  F extends Schema = Schema,
 > {
   readonly kind: 'trigger';
   readonly description: string;
@@ -85,35 +86,19 @@ export interface TriggerDef<
   readonly options?: ActivityOptionsInput;
 }
 
-export type AnyQueryDef<Ctx = unknown> = QueryDef<
-  Ctx,
-  StandardSchemaV1,
-  StandardSchemaV1
->;
-export type AnyCommandDef<Ctx = unknown> = CommandDef<
-  Ctx,
-  StandardSchemaV1,
-  StandardSchemaV1
->;
-export type AnyTriggerDef<Ctx = unknown> = TriggerDef<
-  Ctx,
-  StandardSchemaV1,
-  StandardSchemaV1
->;
+export type AnyQueryDef<Ctx = unknown> = QueryDef<Ctx, Schema, Schema>;
+export type AnyCommandDef<Ctx = unknown> = CommandDef<Ctx, Schema, Schema>;
+export type AnyTriggerDef<Ctx = unknown> = TriggerDef<Ctx, Schema, Schema>;
 
-export function query<
-  Ctx,
-  I extends StandardSchemaV1,
-  O extends StandardSchemaV1,
->(def: Omit<QueryDef<Ctx, I, O>, 'kind'>): QueryDef<Ctx, I, O> {
+export function query<Ctx, I extends Schema, O extends Schema>(
+  def: Omit<QueryDef<Ctx, I, O>, 'kind'>,
+): QueryDef<Ctx, I, O> {
   return {...def, kind: 'query'};
 }
 
-export function command<
-  Ctx,
-  I extends StandardSchemaV1,
-  O extends StandardSchemaV1,
->(def: Omit<CommandDef<Ctx, I, O>, 'kind'>): CommandDef<Ctx, I, O> {
+export function command<Ctx, I extends Schema, O extends Schema>(
+  def: Omit<CommandDef<Ctx, I, O>, 'kind'>,
+): CommandDef<Ctx, I, O> {
   if (def.idempotency === 'unsafe' && !def.unsafeBecause) {
     throw new Error(
       `an 'unsafe' command must say why (unsafeBecause) — it becomes the catalogue flag and the keying backlog`,
@@ -122,11 +107,9 @@ export function command<
   return {...def, kind: 'command'};
 }
 
-export function trigger<
-  Ctx,
-  E extends StandardSchemaV1,
-  F extends StandardSchemaV1,
->(def: Omit<TriggerDef<Ctx, E, F>, 'kind'>): TriggerDef<Ctx, E, F> {
+export function trigger<Ctx, E extends Schema, F extends Schema>(
+  def: Omit<TriggerDef<Ctx, E, F>, 'kind'>,
+): TriggerDef<Ctx, E, F> {
   return {...def, kind: 'trigger'};
 }
 
@@ -139,13 +122,13 @@ export function trigger<
  * ```
  */
 export function ops<Ctx>(): {
-  query: <I extends StandardSchemaV1, O extends StandardSchemaV1>(
+  query: <I extends Schema, O extends Schema>(
     def: Omit<QueryDef<Ctx, I, O>, 'kind'>,
   ) => QueryDef<Ctx, I, O>;
-  command: <I extends StandardSchemaV1, O extends StandardSchemaV1>(
+  command: <I extends Schema, O extends Schema>(
     def: Omit<CommandDef<Ctx, I, O>, 'kind'>,
   ) => CommandDef<Ctx, I, O>;
-  trigger: <E extends StandardSchemaV1, F extends StandardSchemaV1>(
+  trigger: <E extends Schema, F extends Schema>(
     def: Omit<TriggerDef<Ctx, E, F>, 'kind'>,
   ) => TriggerDef<Ctx, E, F>;
 } {
@@ -170,7 +153,7 @@ export interface ConnectorSpec<
   readonly title?: string;
   readonly description: string;
   /** Validated against the configured env source (default `process.env`). */
-  readonly config: StandardSchemaV1<unknown, Cfg>;
+  readonly config: Schema<Cfg, unknown>;
   /** Built once per process from validated config; handlers receive it. */
   readonly context: (cfg: Cfg) => Ctx | Promise<Ctx>;
   readonly queries?: Q;
