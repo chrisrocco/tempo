@@ -14,16 +14,15 @@
  * reading a field, because reading a field proves nothing about whether the value
  * works as an address.
  *
- * Note the two spellings of the same signal, which is not an accident of the test:
- * inside the workflow it is a `SignalDef`, and from outside it is the name on the
- * wire. The engine's own boundary is where the two meet.
+ * A signal is the same bare name on both sides of the wire — `setHandler` inside
+ * the workflow, `.signal()` outside it — so the address an activity hands to an
+ * external system is a `workflowId` and a string, nothing more.
  */
 
 import {createLocalRuntime} from '../../src';
 import {
   condition,
   continueAsNew,
-  defineSignal,
   runActivity,
   setHandler,
   sleep,
@@ -34,14 +33,12 @@ function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-// No type argument: `SignalDef` is not generic here. A `<[string]>` would be
-// Temporal's shape rather than this engine's — Temporal signals take an argument
-// *list*, so its defs are parameterised by a tuple, where a signal here carries
-// one payload, delivered as `fn(payload)`. The handler below takes a `string`, and
-// `.signal('jobDone', 'finished')` sends one, so a tuple would be the wrong type
-// even if it compiled. `core/signals.ts` records why making `SignalDef` generic is
-// the right long-term fix and what it would buy.
-const jobDone = defineSignal('jobDone');
+// A plain string, and untyped on purpose: a signal here carries one JSON payload,
+// delivered as `fn(payload)`, and the handler's own signature is the assertion
+// about its shape. `core/signals.ts` records why the `defineSignal` wrapper this
+// used to be was deleted, and what a *typed* definition would have to look like
+// to earn its way back.
+const jobDone = 'jobDone';
 
 describe('a workflow knows its own id', () => {
   it('reports the id a client started it under', async () => {

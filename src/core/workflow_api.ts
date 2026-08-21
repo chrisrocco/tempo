@@ -29,7 +29,6 @@ import {durationToMs, type Duration} from '../walltime';
 import {captureSite} from './call_site';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
-import type {SignalDef} from './signals';
 
 /**
  * The one place a command becomes real. Every site that mints a `Command` must go
@@ -276,7 +275,7 @@ export function startChild(
  */
 export function signalWorkflow(
   workflowId: string,
-  signal: SignalDef,
+  signal: string,
   payload?: unknown,
 ): void {
   const ctx = getContext();
@@ -284,7 +283,7 @@ export function signalWorkflow(
   issue(ctx, {
     type: 'signalWorkflow',
     targetId: workflowId,
-    signalName: signal.name,
+    signalName: signal,
     payload,
     seq: ctx.seq++,
   });

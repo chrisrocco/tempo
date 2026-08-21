@@ -20,7 +20,7 @@ import type {
   ConditionParkedEvent,
   ConditionUnparkedEvent,
 } from '../../src/protocol';
-import {condition, defineSignal, setHandler} from '../../src/workflow';
+import {condition, setHandler} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -35,8 +35,8 @@ function parkEvents(
   );
 }
 
-const go = defineSignal('go');
-const nudge = defineSignal('nudge');
+const go = 'go';
+const nudge = 'nudge';
 
 describe('a parked condition in history', () => {
   it('records the park while the workflow is still waiting', async () => {

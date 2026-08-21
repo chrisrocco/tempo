@@ -19,12 +19,7 @@
 
 import {createLocalRuntime} from '../../src';
 import {MemoryHistoryStore} from '../../src/server';
-import {
-  condition,
-  defineSignal,
-  setHandler,
-  startChild,
-} from '../../src/workflow';
+import {condition, setHandler, startChild} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -57,7 +52,7 @@ describe('cancelling a detached child', () => {
   });
 
   it('reaches the child when the cancel is issued with history still unconsumed', async () => {
-    const ping = defineSignal('ping');
+    const ping = 'ping';
     const store = new MemoryHistoryStore();
     const rt = createLocalRuntime({historyStore: store})
       .registerWorkflow('child', async () => {

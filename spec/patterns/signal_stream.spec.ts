@@ -13,7 +13,6 @@
 import {
   condition,
   createContext,
-  defineSignal,
   replay,
   runActivity,
   setHandler,
@@ -25,8 +24,8 @@ import {
 } from '../../src/patterns/signal_stream';
 import type {HistoryEvent} from '../../src/protocol';
 
-const comment = defineSignal('comment');
-const stop = defineSignal('stop');
+const comment = 'comment';
+const stop = 'stop';
 
 /** A signal event, since these specs are mostly lists of them. */
 function sig(name: string, payload: unknown): HistoryEvent {

@@ -88,6 +88,12 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
     'services',
     'worker',
     'workflow_descriptor',
+    // The harness registers `scheduleWorkflows` and seeds schedules through the
+    // schedule client, because a schedule is a state a dashboard has to render
+    // and the catalogue's rule is that a state it cannot produce is a state no
+    // dashboard should claim to handle. Same seam discipline as everything
+    // else here: the client half, never `server/`.
+    'schedule',
   ],
 };
 
@@ -549,10 +555,9 @@ function checkAuthorEntrypoint(
  * ## Value imports only
  *
  * A statement-level `import type` is erased: the emitted JavaScript names no
- * module, so no bundler follows it. That is what lets `client/client.ts` name
- * `SignalDef` from `core/` and `remote_service.ts` name a dozen protocol types
- * without either of them pulling anything into a browser build. The same
- * exemption, and the same reasoning, as `checkAuthorEntrypoint`.
+ * module, so no bundler follows it. That is what lets `remote_service.ts` name
+ * a dozen protocol types without pulling anything into a browser build. The
+ * same exemption, and the same reasoning, as `checkAuthorEntrypoint`.
  */
 function checkBrowserSafety(files: SourceFile[]): Violation[] {
   const byPath = new Map(files.map((file) => [file.path, file]));
