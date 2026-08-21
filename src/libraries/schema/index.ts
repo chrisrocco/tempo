@@ -1,6 +1,8 @@
 /**
  * @fileoverview
  * ★ SCHEMA — an internally-owned library, deliberately held at arm's length.
+ * Developer documentation for authoring with `t` lives with its consumer:
+ * `src/connectors/README.md` (the "Schemas: t" section).
  *
  * A complete schema library, owned outright: `t` (`builder.ts`) is the
  * authoring surface — validation, JSON Schema rendering, and type inference in

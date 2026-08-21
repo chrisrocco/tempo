@@ -1,6 +1,8 @@
 /**
  * @fileoverview
  * ★ CONNECTORS ENTRYPOINT — what connector authors and workflow builders import.
+ * Developer documentation — why, quickstart, concepts — is `README.md` in this
+ * directory; this comment carries only what an entrypoint owes its reader.
  *
  * A connector wraps one service as queries (reads), commands (writes with a
  * declared idempotency story), and triggers (facts consumed in-workflow as

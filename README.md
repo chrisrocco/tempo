@@ -77,8 +77,8 @@ on npm and makes no stability promises — clone it, read it, run it.
   `pollForever`, `signalWorkflow`, and `signalStream`. Schemas are authored
   with `t`, a small first-party builder sized to what JSON Schema can render
   (`t.object`, `t.enum`, `t.defaulted`, descriptions everywhere) — no schema
-  dependency, built on an internal validator port — see
-  [`src/connectors/`](src/connectors/index.ts)
+  dependency, built on an internal validator port. Developer docs:
+  [`src/connectors/README.md`](src/connectors/README.md)
 
 The same workflow code runs four ways, with no changes:
 
