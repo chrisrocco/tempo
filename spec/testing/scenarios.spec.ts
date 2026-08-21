@@ -8,9 +8,9 @@
  * fixture that drifts from the engine and takes a UI with it.
  *
  * One server for the whole file, seeded with everything: standing one up costs a
- * port, two poll loops and a round of seeding, and doing that six times to assert
- * six things would trade a real minute of CI for no extra coverage. The scenarios
- * are independent by construction — separate workflow ids, separate queues — so
+ * port, two poll loops and a round of seeding, and doing that once per scenario
+ * would trade a real minute of CI for no extra coverage. The scenarios are
+ * independent by construction — separate workflow ids, separate queues — so
  * sharing a server is not sharing state between the cases below.
  */
 
@@ -23,7 +23,7 @@ import {
 } from '../../src/testing';
 import {SCENARIO_DESCRIPTORS} from '../../src/testing/scenarios.workflow';
 
-/** Generous: it stands up a server and waits for six states to be observable. */
+/** Generous: it stands up a server and waits for every state to be observable. */
 const SETUP_TIMEOUT_MS = 60_000;
 
 describe('the scenario harness', () => {
@@ -34,6 +34,7 @@ describe('the scenario harness', () => {
       [
         'settled-mixed',
         'parked',
+        'awaiting-approval',
         'retrying',
         'stuck',
         'unserved-queue',
@@ -92,6 +93,47 @@ describe('the scenario harness', () => {
 
     expect(detail?.status).toBe('running');
     expect(detail?.parked.length).toBeGreaterThan(0);
+  });
+
+  it('serves an execution advertising an approval request', async () => {
+    const detail = await server.client
+      .getHandle(SCENARIO_IDS.awaitingApproval)
+      .describe();
+    const awaiting = detail?.parked[0]?.awaiting as
+      {kind?: unknown; signal?: unknown; detail?: unknown} | undefined;
+
+    expect(detail?.status).toBe('running');
+    // The whole affordance: what kind of wait, where to answer it, and what a
+    // human is being asked — everything a dashboard needs to render the request.
+    expect(awaiting?.kind).toBe('approval');
+    expect(awaiting?.signal).toBe('decide');
+    expect(awaiting?.detail).toEqual({
+      what: 'Ship the pending release',
+      requestedBy: 'scenario-harness',
+    });
+  });
+
+  /**
+   * The closed loop the scenario exists for, driven the way a dashboard would
+   * drive it: the signal name comes from the parked state itself, not from an
+   * imported constant, and the attribution in the payload comes back on the
+   * settled result. This settles `scenario-awaiting-approval`; nothing after
+   * this spec reads it.
+   */
+  it('settles when a decision is sent to the signal the state names', async () => {
+    const handle = server.client.getHandle<string>(
+      SCENARIO_IDS.awaitingApproval,
+    );
+    const detail = await handle.describe();
+    const awaiting = detail?.parked[0]?.awaiting as {signal: string};
+
+    handle.signal(awaiting.signal, {
+      approved: true,
+      approvedBy: 'chris@example.com',
+      via: 'scenario-spec',
+    });
+
+    expect(await handle.result()).toBe('approved by chris@example.com');
   });
 
   /**
