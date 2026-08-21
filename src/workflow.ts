@@ -96,7 +96,12 @@ import {
 import {createActivityProxy, type ActivityProxy} from './core/workflow_api';
 
 export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
-export {condition} from './core/condition';
+export {condition, type ConditionOptions} from './core/condition';
+export {
+  waitForApproval,
+  type ApprovalDecision,
+  type ApprovalRequest,
+} from './patterns/approval';
 export {byCursor, byId, type Differ, type DiffResult} from './patterns/diff';
 export {CancelledFailure} from './core/errors';
 export {
