@@ -1208,7 +1208,35 @@ export interface ParkedCondition {
    * rather than as "no site".
    */
   site?: string;
+  /**
+   * What the workflow says it is waiting for — free-form JSON, declared at the
+   * `condition()` call and opaque to the engine.
+   *
+   * `site` answers "which line"; this answers "what would release it", which is
+   * the question a dashboard has to answer before it can offer to. The engine
+   * stores and returns it and interprets nothing: any convention layered on top
+   * — a `kind` field a UI dispatches on, a signal name it offers to send — is a
+   * contract between the workflow author and the reader, held in `patterns/`
+   * helpers rather than here. `waitForApproval` is the first such convention.
+   *
+   * Fixed for the life of the park: it is computed where `condition()` is
+   * called, and replay reaches that call with the same history prefix every
+   * task, so the same `condSeq` reports the same value until it unparks.
+   */
+  awaiting?: unknown;
 }
+
+/**
+ * A ceiling on one condition's serialized `awaiting`, enforced when the worker
+ * reports the parked set — the same seam, and the same reasoning, as
+ * `MAX_CARRYOVER_BYTES`: stored on every task a park survives and stamped into
+ * history at the park, so unbounded growth degrades quietly. The cap converts
+ * it into a loud task failure naming the condition's site, at the first task
+ * that crosses the line. Smaller than the carryover cap because this is a
+ * description of a wait, not state — "what would release this" fits in a
+ * sentence and a few ids.
+ */
+export const MAX_AWAITING_BYTES = 4 * 1024;
 
 export interface WorkflowTaskResult {
   done: boolean;

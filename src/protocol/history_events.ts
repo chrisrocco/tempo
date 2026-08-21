@@ -488,6 +488,13 @@ export interface ConditionParkedEvent extends HistoryEventBase {
   condSeq: number;
   /** Where `condition()` was called, innermost first. Absent when uncaptured. */
   site?: string;
+  /**
+   * The `ParkedCondition.awaiting` the workflow declared, as it stood when the
+   * span opened. Stamped here so the record of *having waited* keeps what the
+   * wait was for after the live parked state has moved on — how long approval
+   * took is a question asked mostly after it was granted.
+   */
+  awaiting?: unknown;
 }
 
 /**

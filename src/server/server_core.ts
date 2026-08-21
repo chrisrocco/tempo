@@ -1075,7 +1075,15 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (
       stored.length === parked.length &&
       stored.every(
-        (s, i) => s.seq === parked[i]?.seq && s.site === parked[i]?.site,
+        (s, i) =>
+          s.seq === parked[i]?.seq &&
+          s.site === parked[i]?.site &&
+          // Deterministic replay reaches each `condition()` call with the same
+          // history prefix every task, so a surviving park reports the same
+          // `awaiting` and this compares equal — stringify order included. A
+          // mismatch means the code changed under a live park (a deploy), and
+          // the store should follow the worker's latest report.
+          JSON.stringify(s.awaiting) === JSON.stringify(parked[i]?.awaiting),
       )
     )
       return;
@@ -1090,12 +1098,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           type: 'conditionUnparked',
           condSeq: s.seq,
         });
+    // Membership, not equality: a park whose `awaiting` text changed under a
+    // deploy is still the same wait, so the span stays open and the store below
+    // just adopts the new value — no event churn for a workflow that is not
+    // actually moving.
     for (const p of parked)
       if (!was.has(p.seq))
         await appendEvent(workflowId, {
           type: 'conditionParked',
           condSeq: p.seq,
           site: p.site,
+          awaiting: p.awaiting,
         });
     await historyStore.setParkedConditions(workflowId, parked);
   }
