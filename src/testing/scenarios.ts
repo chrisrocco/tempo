@@ -48,6 +48,7 @@ import * as scenarioWorkflowModule from './scenarios.workflow';
 export type ScenarioName =
   | 'settled-mixed'
   | 'parked'
+  | 'awaiting-approval'
   | 'retrying'
   | 'stuck'
   | 'unserved-queue'
@@ -120,6 +121,7 @@ export const SCENARIO_WORKFLOWS = {
   completes: 'scenarioCompletes',
   fails: 'scenarioFails',
   parks: 'scenarioParks',
+  awaitsApproval: 'scenarioAwaitsApproval',
   retries: 'scenarioRetries',
   undeployed: 'scenarioNotDeployedYet',
 } as const;
@@ -154,6 +156,7 @@ export const SCENARIO_IDS = {
   completed: 'scenario-completed',
   failed: 'scenario-failed',
   parked: 'scenario-parked',
+  awaitingApproval: 'scenario-awaiting-approval',
   retrying: 'scenario-retrying',
   stuck: 'scenario-stuck',
   unserved: 'scenario-unserved',
@@ -219,6 +222,35 @@ export const SCENARIOS: Record<ScenarioName, ScenarioDefinition> = {
         async () => {
           const detail = await describeOf(context, SCENARIO_IDS.parked);
           return (detail?.parked.length ?? 0) > 0;
+        },
+      );
+    },
+  },
+
+  'awaiting-approval': {
+    summary:
+      'An execution parked on `waitForApproval`, advertising what it is asking and which signal decides it.',
+    async seed(context) {
+      context.service.start(SCENARIO_WORKFLOWS.awaitsApproval, undefined, {
+        workflowId: SCENARIO_IDS.awaitingApproval,
+        taskQueue: context.queue,
+      });
+
+      // Advertising, specifically — not merely parked. This scenario exists for
+      // the approval affordance, and `parked.length > 0` would resolve on state
+      // the plain `parked` scenario already provides.
+      await context.until(
+        'the parked condition advertises an approval awaiting',
+        async () => {
+          const detail = await describeOf(
+            context,
+            SCENARIO_IDS.awaitingApproval,
+          );
+          return (detail?.parked ?? []).some(
+            (parked) =>
+              (parked.awaiting as {kind?: unknown} | undefined)?.kind ===
+              'approval',
+          );
         },
       );
     },

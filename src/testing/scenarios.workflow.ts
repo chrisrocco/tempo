@@ -38,7 +38,13 @@
  */
 
 import * as scenarioActivities from './scenario_activities';
-import {condition, proxyActivities, setHandler} from '../workflow';
+import {
+  condition,
+  proxyActivities,
+  setHandler,
+  waitForApproval,
+  type ApprovalDecision,
+} from '../workflow';
 // Type-only, and erased — which is the whole reason a workflow module may reach
 // past `workflow.ts` for them at all (`tools/boundaries.ts`). They buy the
 // name-keyed map below a compiler.
@@ -67,6 +73,16 @@ const retrying = proxyActivities(scenarioActivities, {
 /** Sent to a parked execution to release it — the scenario's escape hatch. */
 export const release = 'release';
 
+/**
+ * The signal that settles the awaiting-approval execution.
+ *
+ * Exported for the consumer who wants to script the decision, but the fixture's
+ * point is that nobody needs this constant: the parked state itself advertises
+ * the name in `awaiting.signal`, and a dashboard that reads it from there is
+ * exercising the whole affordance the scenario exists to demonstrate.
+ */
+export const decide = 'decide';
+
 export async function scenarioCompletes(props: {
   value: string;
 }): Promise<unknown> {
@@ -88,6 +104,26 @@ export async function scenarioParks(): Promise<string> {
 
 export async function scenarioRetries(): Promise<unknown> {
   return retrying.scenario_fail();
+}
+
+/**
+ * Parks on `waitForApproval`, which is `scenarioParks` with the affordance the
+ * approval pattern adds: the parked state carries `{kind: 'approval', signal,
+ * detail}`, so a dashboard can render what is being asked and knows where to
+ * send the answer. "Stays there" holds the same way — nothing decides it unless
+ * someone does — and the result echoes the decision's attribution, so the
+ * round trip is visible on the settled execution rather than only in history.
+ */
+export async function scenarioAwaitsApproval(): Promise<string> {
+  const decision = await waitForApproval<ApprovalDecision>({
+    signal: decide,
+    detail: {
+      what: 'Ship the pending release',
+      requestedBy: 'scenario-harness',
+    },
+  });
+  const by = decision.approvedBy ?? 'someone unnamed';
+  return decision.approved ? `approved by ${by}` : `declined by ${by}`;
 }
 
 /**
@@ -142,6 +178,11 @@ export const SCENARIO_DESCRIPTORS: Record<
     title: 'Retries an activity',
     description:
       'Runs an activity that always throws, backing off a minute between attempts. Stays running with its attempt count climbing.',
+  },
+  scenarioAwaitsApproval: {
+    title: 'Waits for approval',
+    description:
+      'Parks on `waitForApproval`, so its parked state advertises {kind: "approval"} naming the `decide` signal. A decision payload carrying attribution settles it.',
   },
 } as const;
 
