@@ -67,3 +67,18 @@ export {
   type WireResult,
 } from './connector';
 export {catalogue, type CatalogueEntry} from './catalogue';
+export {strictProblems} from './strict';
+export {
+  planLiveSuite,
+  runLivePlan,
+  type CommandCertification,
+  type CommandCtx,
+  type LiveCase,
+  type LiveCtx,
+  type LiveFailure,
+  type LiveFixtures,
+  type LiveOptions,
+  type LivePlan,
+  type LiveRegistrar,
+  type TriggerCertification,
+} from './live';

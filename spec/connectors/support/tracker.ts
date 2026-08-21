@@ -35,20 +35,34 @@ export type IssueTransitionedT = Infer<typeof IssueTransitioned>;
 
 /* ----------------------- the fake Tracker service ------------------------ */
 
+export interface FakeProject {
+  key: string;
+  name: string;
+  labels: string[];
+  createdAtMs: number;
+  archived: boolean;
+}
+
 export interface FakeTracker {
   issues: Map<string, IssueT>;
   events: IssueTransitionedT[];
+  projects: Map<string, FakeProject>;
   nextIssue: number;
   nextSeq: number;
   byExternalId(externalId: string): IssueT | undefined;
   /** Test hook: transition from "outside" (a human resolving the ticket). */
   forceTransition(issueKey: string, to: IssueT['status']): void;
+  /** The fixture unit: projects are cheap, contain everything, and archive in one call. */
+  createProject(props: {key: string; name: string; labels: string[]}): void;
+  archiveProject(key: string): void;
+  listProjects(q: {label?: string; createdBeforeMs?: number}): FakeProject[];
 }
 
 export function createFakeTracker(): FakeTracker {
   const svc: FakeTracker = {
     issues: new Map(),
     events: [],
+    projects: new Map(),
     nextIssue: 1,
     nextSeq: 1,
     byExternalId(externalId) {
@@ -63,6 +77,28 @@ export function createFakeTracker(): FakeTracker {
       const from = issue.status;
       issue.status = to;
       svc.events.push({seq: svc.nextSeq++, issueKey, from, to});
+    },
+    createProject({key, name, labels}) {
+      svc.projects.set(key, {
+        key,
+        name,
+        labels,
+        createdAtMs: Date.now(),
+        archived: false,
+      });
+    },
+    archiveProject(key) {
+      const project = svc.projects.get(key);
+      if (!project) throw new Error(`no project ${key}`);
+      project.archived = true;
+    },
+    listProjects({label, createdBeforeMs}) {
+      return [...svc.projects.values()].filter(
+        (p) =>
+          !p.archived &&
+          (label === undefined || p.labels.includes(label)) &&
+          (createdBeforeMs === undefined || p.createdAtMs < createdBeforeMs),
+      );
     },
   };
   return svc;
