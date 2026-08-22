@@ -55,6 +55,22 @@ function errorMessage(e: unknown): string {
 export interface RemoteServiceOptions {
   /** How often getResult/pollers back off when there's nothing yet. */
   pollIntervalMs?: number;
+  /**
+   * How one request reaches the server. Defaults to a `fetch` POST at
+   * `baseUrl`, which is what "remote" means everywhere it is deployed.
+   *
+   * Overriding it is how the *same client* — every method, every retry, every
+   * status cache — runs against a host reached some other way: a browser
+   * hosting the engine in a Web Worker, a test skipping the socket. The
+   * alternative is a second implementation of fifteen methods that must not
+   * drift from this one, which is the thing this seam exists to prevent. It
+   * resolves the `value` of an `RpcResponse`; a failure is thrown, so a
+   * transport reports errors the way this file's own `fetch` path does.
+   *
+   * `baseUrl` is still required and still meaningful when this is supplied:
+   * `health()` and anything that reports where the server is read it.
+   */
+  transport?(request: RpcRequest): Promise<unknown>;
 }
 
 // `RemoteWorkflowService` — the seam this module implements — is declared in
@@ -72,7 +88,10 @@ export function createRemoteService(
   const statusCache = new Map<string, ExecutionStatus>();
   let idCounter = 0;
 
-  async function call(request: RpcRequest): Promise<unknown> {
+  const call: (request: RpcRequest) => Promise<unknown> =
+    options.transport ?? httpCall;
+
+  async function httpCall(request: RpcRequest): Promise<unknown> {
     const res = await fetch(baseUrl, {
       method: 'POST',
       headers: {'content-type': 'application/json'},

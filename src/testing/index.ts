@@ -56,7 +56,6 @@
 
 import {createRemoteClient, type RemoteClient} from '../client';
 import {
-  DEFAULT_TASK_QUEUE,
   serverUrl,
   type RemoteWorkflowService,
   type ServerEndpoint,
@@ -67,27 +66,12 @@ import {
   createServerHost,
   resolveEndpoint,
 } from '../services';
-import {nextFire, scheduleWorkflows} from '../schedule/worker';
-import * as scenarioActivities from './scenario_activities';
-import * as scenarioWorkflows from './scenarios.workflow';
+import {type ScenarioName} from './scenarios';
 import {
-  describedAs,
-  SCENARIOS,
-  type ScenarioName,
-  type SeedContext,
-} from './scenarios';
-import {
-  createActivityRegistry,
-  createActivityWorker,
-  createWorkflowRegistry,
-  createWorkflowWorker,
-  runActivityWorker,
-  runWorkflowWorker,
-  startWorkflowReporter,
-  type ActivityFn,
-  type WorkerLoop,
-} from '../worker';
-import type {WorkflowFn} from '../core';
+  startHarnessOn,
+  DEFAULT_TIMEOUT_MS,
+  type RunningHarness,
+} from './harness';
 import type {AddressInfo} from 'node:net';
 
 export {
@@ -97,22 +81,7 @@ export {
   type ScenarioName,
 } from './scenarios';
 
-/** The queue the harness's own workers serve. */
-export const SCENARIO_QUEUE = DEFAULT_TASK_QUEUE;
-
-/**
- * A queue the harness deliberately never polls.
- *
- * Named rather than generated so a consumer can assert against it, and separate
- * from `SCENARIO_QUEUE` because the whole point is a pool with no workers on it.
- */
-export const UNSERVED_QUEUE = 'unserved';
-
-/** How long any one scenario may take to reach its state before giving up. */
-const DEFAULT_TIMEOUT_MS = 15_000;
-
-/** How often a scenario's settling condition is re-checked. */
-const POLL_MS = 20;
+export {SCENARIO_QUEUE, UNSERVED_QUEUE} from './harness';
 
 export interface StartScenarioOptions {
   /** Port to bind. Defaults to 0 — any free one, which is what lets two run at once. */
@@ -154,7 +123,6 @@ export async function startScenario(
   options: StartScenarioOptions = {},
 ): Promise<ScenarioServer> {
   const bindHost = options.host ?? '127.0.0.1';
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   // Silent by default: `createServerHost` defaults its logger to `silentLogger`,
   // and a fixture that writes JSON Lines into a consumer's test output would be
@@ -185,130 +153,34 @@ export async function startScenario(
   const url = serverUrl(endpoint);
   const service: RemoteWorkflowService = createRemoteService(url);
 
-  const workflows = Object.entries(scenarioWorkflows).filter(
-    (entry): entry is [string, WorkflowFn] => typeof entry[1] === 'function',
-  );
-
-  // Started before the loops, because its digest is what they put on every poll.
-  // Without it the catalogue is empty and `listWorkflows` has nothing to show,
-  // which is half of what a dashboard developer came here for.
-  const reporter = startWorkflowReporter(
-    service,
-    [
-      ...workflows.map(([name]) => ({name, ...describedAs(name)})),
-      // The scheduler is in the manifest, not only the registry: `isNameServed`
-      // answers from what workers *report*, so leaving it out makes creating a
-      // schedule against this harness warn "no worker runs scheduler" about a
-      // worker that does — a state no correctly-configured deployment produces,
-      // which is the one thing this harness must not fake.
-      ...Object.keys(scheduleWorkflows).map((name) => ({
-        name,
-        title: 'Scheduler',
-        description:
-          'Runs schedules — each schedule is one execution of this workflow, addressed by its schedule id.',
-      })),
-    ],
-    {identity: 'scenario-harness', taskQueue: SCENARIO_QUEUE},
-  );
-
-  const workflowRegistry = createWorkflowRegistry();
-  for (const [name, fn] of workflows) workflowRegistry.set(name, fn);
-  const activityRegistry = createActivityRegistry();
-  for (const [name, fn] of Object.entries(scenarioActivities))
-    activityRegistry.set(name, fn as ActivityFn);
-  // The schedule machinery, registered the way a consumer's worker binary
-  // would register it. Unconditional rather than per-scenario: a dashboard
-  // developed against this harness has a "create schedule" affordance, and a
-  // fixture where creating one silently wedges — no worker registers
-  // `scheduler` — is a state no deployment with schedules produces.
-  for (const [name, fn] of Object.entries(scheduleWorkflows))
-    workflowRegistry.set(name, fn as WorkflowFn);
-  activityRegistry.set('nextFire', nextFire as unknown as ActivityFn);
-
-  const loops: WorkerLoop[] = [
-    runWorkflowWorker(service, createWorkflowWorker(workflowRegistry), {
-      taskQueue: SCENARIO_QUEUE,
-      identity: 'scenario-harness',
-      servesHash: reporter.hash,
-    }),
-    runActivityWorker(service, createActivityWorker(activityRegistry), {
-      taskQueue: SCENARIO_QUEUE,
-      identity: 'scenario-harness',
-    }),
-  ];
-
-  // What the seeds started and the harness must therefore stop — a scenario can
-  // be a running process (see `split-manifest`), and a consumer holds no handle
-  // to it but this server's `stop`.
-  const seedStops: Array<() => void | Promise<void>> = [];
+  let harness: RunningHarness;
+  try {
+    harness = await startHarnessOn(service, scenarios, {
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
+  } catch (e) {
+    // A half-seeded harness still holds a port, and a consumer whose
+    // `startScenario` rejected has no handle to close it with. The loops have
+    // already torn themselves down (see `startHarnessOn`).
+    await new Promise<void>((resolve) => rpc.close(() => resolve()));
+    throw e;
+  }
 
   let stopping: Promise<void> | undefined;
-  const server: ScenarioServer = {
+  return {
     url,
     port: address.port,
-    taskQueue: SCENARIO_QUEUE,
+    taskQueue: harness.taskQueue,
     client: createRemoteClient(service),
     stop() {
-      // Idempotent, and in this order: the loops — the harness's own and any a
-      // seed registered — must stop polling before the port closes, or a poll
-      // in flight rejects and the loop reports a failure on the way out that
-      // nothing was wrong with.
+      // Idempotent, and in this order: the loops must stop polling before the
+      // port closes, or a poll in flight rejects and the loop reports a failure
+      // on the way out that nothing was wrong with.
       stopping ??= (async () => {
-        reporter.stop();
-        await Promise.all([
-          ...loops.map((loop) => loop.stop()),
-          ...seedStops.map((stop) => stop()),
-        ]);
+        await harness.stop();
         await new Promise<void>((resolve) => rpc.close(() => resolve()));
       })();
       return stopping;
     },
   };
-
-  const context: SeedContext = {
-    service,
-    queue: SCENARIO_QUEUE,
-    unservedQueue: UNSERVED_QUEUE,
-    until: (label, predicate) => until(label, predicate, timeoutMs),
-    onStop: (stop) => {
-      seedStops.push(stop);
-    },
-  };
-
-  try {
-    for (const name of scenarios) await SCENARIOS[name].seed(context);
-  } catch (e) {
-    // A half-seeded harness still holds a port and two poll loops, and a consumer
-    // whose `startScenario` rejected has no handle to close them with. Tearing
-    // down here is the only chance anything gets to.
-    await server.stop();
-    throw e;
-  }
-
-  return server;
-}
-
-/**
- * Poll until `predicate` holds, or throw naming what was being waited for.
- *
- * Polling rather than an event, because every condition here is a projection the
- * server derives on request — there is nothing to subscribe to, and inventing a
- * notification for the harness's benefit would be a feature of the engine rather
- * than of the fixture.
- */
-async function until(
-  label: string,
-  predicate: () => Promise<boolean>,
-  timeoutMs: number,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, POLL_MS);
-    });
-  }
-  throw new Error(
-    `scenario timed out after ${timeoutMs}ms waited for: ${label}`,
-  );
 }
