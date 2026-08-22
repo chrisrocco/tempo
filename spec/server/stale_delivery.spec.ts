@@ -11,6 +11,13 @@
  * lease always acks after redelivery, so its ack is a no-op, and the task
  * loops forever — a phantom `activityStarted` per lease period and a real
  * re-execution per loop, for an activity that finished long ago (issue #132).
+ *
+ * The settlement sweep in `reportActivityResult` is the other half of the
+ * defense, and which half fires depends on where the copy is when the seq
+ * settles: still in the lease table (held or lapsed), and the sweep's ack
+ * kills it there; already reclaimed into the queue — it has no token, so the
+ * sweep cannot reach it — and this poll-side check is what stands. One test
+ * below pins each half.
  */
 
 import type {LogFields} from '../../src/server';
@@ -59,7 +66,7 @@ function enqueueSlow(activityTaskQueue: MemoryTaskQueue): void {
 }
 
 describe('a redelivered copy outliving its settled activity', () => {
-  it('is discarded at poll rather than dispatched again, and stays gone', async () => {
+  it('dies with the settlement when it is still in the lease table, and stays gone', async () => {
     const historyStore = new MemoryHistoryStore();
     const {core, activityTaskQueue, events} = makeCore(historyStore, 30);
     await seedScheduledActivity(historyStore);
@@ -73,17 +80,19 @@ describe('a redelivered copy outliving its settled activity', () => {
 
     // Worker 1 finishes anyway. Its queue ack is a no-op — the task now
     // belongs to worker 2 — but the result is welcome and settles the seq.
+    // Settling is what sweeps worker 2's claim: the copy is still in the
+    // lease table, and the sweep's ack takes it out before it can lapse and
+    // come back around.
     await core.completeActivityTask(first!.token, {ok: true, result: 'done'});
+    const swept = events.find((e) => e.event === 'activity.attempts_swept');
+    expect(swept).toBeDefined();
+    expect(swept!.fields['seq']).toBe(0);
 
-    // Worker 2's copy outlives its lease too (every attempt of this activity
-    // does — that is what made it redeliver in the first place), so the copy
-    // comes back around. History already answered this seq; handing the task
-    // out again would append a phantom `activityStarted` and re-run real work.
+    // Nothing to redeliver: history already answered this seq, and handing the
+    // task out again would append a phantom `activityStarted` and re-run real
+    // work. Not on the next lease period either — dead, not resting.
     await wait(60);
     expect(await core.pollActivityTask()).toBeUndefined();
-
-    // Discarded means dead, not resting: the copy must not resurface on the
-    // next lease period, or the loop has only been slowed down.
     await wait(60);
     expect(await core.pollActivityTask()).toBeUndefined();
 
@@ -94,6 +103,38 @@ describe('a redelivered copy outliving its settled activity', () => {
     expect(
       rec!.history.filter((e) => e.type === 'activityCompleted').length,
     ).toBe(1);
+  });
+
+  it('is discarded at poll when it was already back in the queue at settlement', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const {core, activityTaskQueue, events} = makeCore(historyStore, 30);
+    await seedScheduledActivity(historyStore);
+    enqueueSlow(activityTaskQueue);
+
+    const first = await core.pollActivityTask();
+    await wait(60);
+    const second = await core.pollActivityTask(); // redelivered to worker 2
+    expect(second?.seq).toBe(0);
+
+    // Worker 2's copy outlives its lease too (every attempt of this activity
+    // does — that is what made it redeliver in the first place), and any poll
+    // on the queue reclaims lapsed leases before routing. A poll for a
+    // different task queue plays that part: the copy moves back into the
+    // queue proper, tokenless, where the settlement sweep cannot reach it.
+    await wait(60);
+    expect(
+      await core.pollActivityTask({taskQueue: 'another-queue'}),
+    ).toBeUndefined();
+
+    await core.completeActivityTask(first!.token, {ok: true, result: 'done'});
+
+    // The queued copy survived the settlement, so the poll-side check is what
+    // stands between it and a third dispatch.
+    expect(await core.pollActivityTask()).toBeUndefined();
+    const rec = await historyStore.get('wf');
+    expect(
+      rec!.history.filter((e) => e.type === 'activityStarted').length,
+    ).toBe(2);
 
     // The drop does work by *not* doing work, so without an event the only
     // evidence would be an absence in history — same reasoning as

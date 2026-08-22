@@ -1029,6 +1029,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // a live handle for an hour, and long sleeps in cancelled executions is exactly
       // the scheduler shape.
       timerService.cancelAll(workflowId);
+      // The same rule for activity attempts still out — a workflow can settle
+      // with one running (`Promise.race`, a dispatch never awaited) — whose
+      // reports a settled record would drop anyway.
+      sweepActivityAttempts(workflowId);
       onSettled(workflowId, 'completed', {result: result.result});
       // Children before the parent: by the time the generation above is woken by
       // this outcome, the generation below has already been dealt with, so an
@@ -1059,6 +1063,8 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // a live handle for an hour, and long sleeps in cancelled executions is exactly
       // the scheduler shape.
       timerService.cancelAll(workflowId);
+      // See the completed disposition above.
+      sweepActivityAttempts(workflowId);
       onSettled(workflowId, 'failed', {failure: result.failure});
       await closeChildren(workflowId);
       await notifyParentOfTerminal(workflowId);
@@ -1179,6 +1185,50 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     scheduleProgress(enqueue, delayMs);
   }
 
+  /**
+   * Forget every in-memory attempt record for a workflow — or, with `seq`, for
+   * one activity: leases, deadline timers, heartbeat bookkeeping, and the
+   * queue claims behind them.
+   *
+   * The maps are keyed per token, but lease-expiry redelivery means one seq
+   * can have several tokens out at once, and only the reporting attempt cleans
+   * up after itself. A sibling's entries otherwise wait on that worker's ack —
+   * and a worker that crashed holding an activity with no startToClose or
+   * heartbeat timeout never acks, so its entries live until a reset or a
+   * process restart. Both maps are scanned because neither holds every token:
+   * `abandonAttempt` deletes the lease but leaves `heartbeatTasks`.
+   *
+   * Acking the queue is right for both kinds of token this finds: an expired
+   * sibling's ack is a no-op, and a live one — the terminate and settle
+   * sweeps' case — is exactly the claim that must not be redelivered.
+   */
+  function sweepActivityAttempts(workflowId: string, seq?: number): void {
+    const tokens = new Set<TaskToken>();
+    const claim = (token: TaskToken, wf: string, s: number): void => {
+      if (wf === workflowId && (seq === undefined || s === seq))
+        tokens.add(token);
+    };
+    for (const [token, lease] of activityLeases)
+      claim(token, lease.workflowId, lease.seq);
+    for (const [token, task] of heartbeatTasks)
+      claim(token, task.workflowId, task.seq);
+    for (const token of tokens) {
+      activityLeases.delete(token);
+      clearAttemptTimers(token);
+      heartbeatTasks.delete(token);
+      activityTaskQueue.complete(token);
+    }
+    // Only when something was actually dropped: a sweep that finds stale
+    // attempts is the trace of a lease-expiry race or a crashed worker, worth
+    // a line — one that finds nothing is every ordinary settlement.
+    if (tokens.size > 0)
+      log('activity.attempts_swept', {
+        workflowId,
+        ...(seq === undefined ? {} : {seq}),
+        count: tokens.size,
+      });
+  }
+
   async function reportActivityResult(
     workflowId: string,
     seq: number,
@@ -1188,11 +1238,16 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (!rec || rec.status !== 'running') return;
     // Activity delivery is at-least-once, so a seq can be reported twice: a lease
     // expires, the task is redelivered and completed by a second worker, and the
-    // first worker — slow, not dead — acks afterwards. The first terminal event
-    // for the seq wins and the rest are dropped here. This is the only place that
-    // can absorb them: replay cannot, because the waiter is deleted when the
-    // first completion resolves, so a second one is a history event for an
-    // unknown seq and `core/apply_event` throws nondeterminism on it.
+    // first worker — slow, not dead — acks afterwards. A straggler arriving after
+    // the seq settled is turned away earlier, at `completeActivityTask`, whose
+    // lease the settlement sweep deleted; what this dedup absorbs is the report
+    // already *in flight* when that happened — both attempts passed their lease
+    // check before either appended, since this function awaits the store in
+    // between. The first terminal event for the seq wins and the rest are dropped
+    // here, and here is the last place that can: replay cannot, because the
+    // waiter is deleted when the first completion resolves, so a second one is a
+    // history event for an unknown seq and `core/apply_event` throws
+    // nondeterminism on it.
     if (completedSeqs(rec.history).activities.has(seq)) {
       log('activity.duplicate_dropped', {workflowId, seq});
       return;
@@ -1270,6 +1325,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           },
     );
     await historyStore.clearActivityAttempts(workflowId, seq);
+    // The seq is settled, so no attempt still out — an expired-lease sibling,
+    // a straggler mid-run — can report anything history would accept. Their
+    // records go now rather than whenever (or whether) each worker acks.
+    sweepActivityAttempts(workflowId, seq);
     log('activity.settled', {
       workflowId,
       seq,
@@ -1366,6 +1425,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // Same as the two dispositions above: nothing should stay armed for an
     // execution that is not waiting on it.
     timerService.cancelAll(workflowId);
+    // Attempts still out with workers included: nothing they report can land
+    // on a terminated execution, so their leases, timers, and queue claims go
+    // now instead of waiting on each worker's ack — which a crashed worker on
+    // an activity with no timeouts would never send.
+    sweepActivityAttempts(workflowId);
     log('execution.settled', {
       workflowId,
       status: 'terminated',
@@ -1434,14 +1498,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     };
     const bounded = Math.max(0, Math.min(keep, before.historyLength));
 
-    // Order matters: leases go before the truncate so that nothing can settle
-    // against the old history in the window between the two.
-    for (const [token, lease] of [...activityLeases]) {
-      if (lease.workflowId !== workflowId) continue;
-      activityLeases.delete(token);
-      clearAttemptTimers(token);
-      activityTaskQueue.complete(token);
-    }
+    // Order matters: attempts are swept before the truncate so that nothing
+    // can settle against the old history in the window between the two.
+    sweepActivityAttempts(workflowId);
     for (const timer of before.timers)
       timerService.cancel(workflowId, timer.seq);
 
@@ -1870,17 +1929,20 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       if (!task) return undefined;
       // The queue redelivers on silence, and silence cannot tell a dead worker
       // from a slow one — so a wrong guess leaves a copy of the task
-      // circulating after the original attempt settled the seq. The copy can
-      // never leave on its own: every attempt of an activity slower than the
-      // lease acks after redelivery, where the ack is a no-op. Unchecked, it
-      // loops forever — a phantom `activityStarted` per lease period, a real
-      // re-execution per loop. This is the one moment every copy passes back
-      // through the server's hands, so it is where the queue's guess is
-      // reconciled against history: same predicate as the result-side dedup in
-      // `reportActivityResult`, and terminal-events-only for the same reason a
-      // looser one would break retries — a retry reuses its seq, marked by
-      // `activityRetryScheduled`, never by a terminal event. Costs one store
-      // read per dispatch; idle polls return above without reading.
+      // circulating after the original attempt settled the seq. The settlement
+      // sweep in `reportActivityResult` acks the copies still in the lease
+      // table, but one already reclaimed into the queue by then has no token
+      // for the sweep to ack — and it can never leave on its own: every
+      // attempt of an activity slower than the lease acks after redelivery,
+      // where the ack is a no-op. Unchecked, it loops forever — a phantom
+      // `activityStarted` per lease period, a real re-execution per loop. This
+      // is the one moment every copy passes back through the server's hands,
+      // so it is where the queue's guess is reconciled against history: same
+      // predicate as the result-side dedup in `reportActivityResult`, and
+      // terminal-events-only for the same reason a looser one would break
+      // retries — a retry reuses its seq, marked by `activityRetryScheduled`,
+      // never by a terminal event. Costs one store read per dispatch; idle
+      // polls return above without reading.
       const rec = await historyStore.get(task.workflowId);
       if (
         !rec ||
@@ -1996,10 +2058,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     clearAttemptTimers(token); // this attempt is over, whatever it reported
     heartbeatTasks.delete(token);
     activityTaskQueue.complete(token);
-    // Nothing sweeps this map when the queue expires a lease, so an expired
-    // token still resolves here — the redelivery case is caught downstream, by
-    // the completion dedup in `reportActivityResult`. `!lease` therefore means
-    // only a double-ack of the same token, or a token this server never issued.
+    // Lease *expiry* does not remove an entry — a slow worker whose seq is
+    // still unsettled must be able to report, and its race against an
+    // in-flight redelivered sibling is caught downstream by the completion
+    // dedup in `reportActivityResult`. *Settlement* does: the sweep there
+    // drops every attempt for the seq. `!lease` therefore means a straggler
+    // whose seq already settled, a double-ack of the same token, or a token
+    // this server never issued.
     if (!lease) return;
     activityLeases.delete(token);
     await reportActivityResult(lease.workflowId, lease.seq, result);

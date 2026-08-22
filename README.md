@@ -424,8 +424,8 @@ warm executions on the worker is planned but not built.
 
 ## Project layout
 
-Dependencies point strictly down: `protocol <- core <- {patterns, server,
-services, worker, client} <- {local_runtime, entrypoints, bin}`.
+Dependencies point strictly down: `protocol <- core <- {patterns, schedule,
+server, services, worker, client} <- {local_runtime, entrypoints, bin}`.
 
 ```
 src/
@@ -459,7 +459,12 @@ src/
                   from a browser included. Published as `workflow-engine/client`.
   testing/        ★ TESTING ENTRYPOINT — startScenario(), a real server already
                   in the states a UI has to render
+  local_runtime.ts  createLocalRuntime — the single-node wiring seam
   process_flags.ts  how a deployed process reads its own configuration
+  activity_registry.ts    what proxyActivities recorded, waiting for a worker
+  workflow_registry.ts    createWorkflow — a child reference that registers itself
+  workflow_descriptor.ts  the descriptor createWorkflow binds to the function;
+                          a worker reads it back for its catalogue
 bin/              server-main.ts — the reference server binary, one call
 spec/             the executable documentation; spec/support/greeter_worker.ts
                   is the reference worker binary the process-level specs deploy
