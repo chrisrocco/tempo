@@ -28,6 +28,19 @@
  * (`byId` differs report them) are not delivered; a watcher is a stream of
  * appearances. Reopen that when a caller has a real branch to write on one.
  *
+ * ## A dead poller is loud, not deaf
+ *
+ * If the poll fails terminally — its retry budget exhausted on a persistent
+ * problem — the child does not just die while its parent waits forever on a
+ * signal that will never come. Its last act is one more signal: a failure
+ * marker, delivered on the same signal name (the server dispatches a failing
+ * activation's commands before settling it, so the marker always lands). The
+ * parent-side handle recognizes it and throws `WatcherFailedError` from
+ * `next()` / iteration, which turns "my subscription silently stopped" into an
+ * ordinary catchable failure at the exact `await` that was depending on it.
+ * Cancellation is not failure: `signalWorkflow` refuses new work after cancel,
+ * so `stop()` and parent close never produce a spurious marker.
+ *
  * ## One `as` per subscription
  *
  * The subscription name (`as`, defaulting to `'watch'`) is part of both the
@@ -42,6 +55,39 @@ import {signalWorkflow, startChild, workflowInfo} from '../core/workflow_api';
 import type {Differ} from './diff';
 import {pollForever, type PollStart} from './poller';
 import {signalStream} from './signal_stream';
+
+/**
+ * Thrown by a `WatcherHandle` when the poller child died on a terminal poll
+ * failure. The message carries the child's own failure, so the parent sees
+ * *why* the subscription ended, not just that it did.
+ */
+export class WatcherFailedError extends Error {
+  /** The watcher's workflow name (its `createWatcher` key). */
+  readonly watcher: string;
+
+  constructor(watcher: string, message: string) {
+    super(`watcher '${watcher}' failed: ${message}`);
+    this.name = 'WatcherFailedError';
+    this.watcher = watcher;
+  }
+}
+
+/**
+ * The failure marker a dying child sends as its last signal. Namespaced key so
+ * no plausible item collides with it; JSON-safe because it rides history like
+ * any other payload.
+ */
+interface WatcherFailureSignal {
+  readonly __tempoWatcherFailed: {readonly message: string};
+}
+
+function isFailureSignal(value: unknown): value is WatcherFailureSignal {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    '__tempoWatcherFailed' in value
+  );
+}
 
 /**
  * The child's props: everything a watcher run needs, all JSON-safe, because a
@@ -62,7 +108,10 @@ export interface WatcherProps {
 
 /** The parent's end of a watcher: an async iterable of what the child found. */
 export interface WatcherHandle<T> extends AsyncIterable<T> {
-  /** Park until the next item. */
+  /**
+   * Park until the next item. Throws `WatcherFailedError` if the poller child
+   * died on a terminal poll failure — a subscription never just goes quiet.
+   */
   next(): Promise<T>;
   /** Cancel the poller child. (Parent close also terminates it.) */
   stop(): void;
@@ -93,17 +142,35 @@ export function watcherRun<T, S, Q>(
   poll: (query: Q, input: unknown) => Promise<readonly T[]>,
   differ: Differ<T, S, Q>,
 ): (props: WatcherProps) => Promise<never> {
-  return (props) =>
-    pollForever<T, S, Q>({
-      everyMs: props.everyMs,
-      poll: (query) => poll(query, props.input),
-      differ,
-      startFrom:
-        props.start === 'all' || props.start === 'new'
-          ? props.start
-          : {state: props.start.state as S},
-      onAdded: (item) => signalWorkflow(props.parentId, props.signalName, item),
-    });
+  return async (props) => {
+    try {
+      return await pollForever<T, S, Q>({
+        everyMs: props.everyMs,
+        poll: (query) => poll(query, props.input),
+        differ,
+        startFrom:
+          props.start === 'all' || props.start === 'new'
+            ? props.start
+            : {state: props.start.state as S},
+        onAdded: (item) =>
+          signalWorkflow(props.parentId, props.signalName, item),
+      });
+    } catch (e) {
+      // The child's last act: tell the parent the subscription is over, and
+      // why. `signalWorkflow` refuses new work after cancel, so a stopped or
+      // parent-closed child sends nothing — only a genuine failure poisons the
+      // stream. The command is dispatched before this failure settles the
+      // child (the server applies a failing activation's commands first), so
+      // the marker always lands.
+      const failure: WatcherFailureSignal = {
+        __tempoWatcherFailed: {
+          message: e instanceof Error ? e.message : String(e),
+        },
+      };
+      signalWorkflow(props.parentId, props.signalName, failure);
+      throw e;
+    }
+  };
 }
 
 /**
@@ -137,13 +204,32 @@ export function openWatcher<T, S, I>(
       input: options.input,
     } satisfies WatcherProps,
   });
-  const iterator = signalStream<T>(signalName, {from: 'start'})[
-    Symbol.asyncIterator
-  ]();
+  const raw = signalStream<T | WatcherFailureSignal>(signalName, {
+    from: 'start',
+  })[Symbol.asyncIterator]();
+  // One guard between the wire and the caller: failure markers become throws,
+  // everything else passes through. `next()` and `for await` share the one
+  // generator, so consuming from either advances the same stream.
+  const guarded = (async function* (): AsyncGenerator<T> {
+    try {
+      while (true) {
+        const value = (await raw.next()).value;
+        if (isFailureSignal(value)) {
+          throw new WatcherFailedError(
+            workflowName,
+            value.__tempoWatcherFailed.message,
+          );
+        }
+        yield value as T;
+      }
+    } finally {
+      await raw.return?.(undefined as never); // release the signal handler
+    }
+  })();
   return {
-    next: async () => (await iterator.next()).value as T,
+    next: async () => (await guarded.next()).value as T,
     stop: () => child.cancel(),
     signalName,
-    [Symbol.asyncIterator]: () => iterator,
+    [Symbol.asyncIterator]: () => guarded,
   };
 }
