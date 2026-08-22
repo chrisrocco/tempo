@@ -12,7 +12,7 @@
  * codebase that already passes (see spec/architecture.spec.ts). Reading the disk
  * lives separately in `readSourceFiles`.
  *
- * Four rules, each mapping to a claim made elsewhere in the docs:
+ * Five rules, each mapping to a claim made elsewhere in the docs:
  *
  * 1. **Layering** — dependencies point strictly down, and each layer declares what
  *    it may reach. Two are worth calling out: `server/` may NOT import `core/`,
@@ -31,6 +31,9 @@
  *    import reach neither a Node builtin nor a workflow module through a value
  *    import, transitively. The only rule here that reads the import graph; see
  *    `BROWSER_SAFE_ENTRYPOINTS`.
+ * 5. **Library boundary** — every package under `src/libraries/` imports only
+ *    its own files. Location is the declaration: see `internalLibraries` and
+ *    `checkLibraryBoundary`.
  *
  * A different fourth rule used to exist — package direction, forbidding any
  * mention of `dashboard/` from `src/`. It guarded a one-way edge between two
@@ -58,8 +61,35 @@ export interface SourceFile {
 export interface Violation {
   path: string;
   line: number;
-  rule: 'layering' | 'core-purity' | 'author-entrypoint' | 'browser-safety';
+  rule:
+    | 'layering'
+    | 'core-purity'
+    | 'author-entrypoint'
+    | 'browser-safety'
+    | 'library-boundary';
   message: string;
+}
+
+/**
+ * The internal libraries, derived from the tree: every directory under
+ * `src/libraries/` is one. **Location is the declaration** — there is no list
+ * to join and none to forget, which closes the gap the old `INTERNAL_LIBRARIES`
+ * constant left open (a library-shaped directory that never signed up).
+ *
+ * Being under `src/libraries/` is a contract with three enforced halves: the
+ * `library-boundary` rule below pins every file to its own package (it imports
+ * nothing — not other layers, not Node, not a sibling library); the package's
+ * `index.ts` states its contract and a seam spec built on
+ * `spec/support/library_seam.ts` pins every call site — both of whose existence
+ * `spec/architecture.spec.ts` asserts against the real tree.
+ */
+export function internalLibraries(files: SourceFile[]): string[] {
+  const names = new Set<string>();
+  for (const file of files) {
+    const m = /^src\/libraries\/([^/]+)\//.exec(file.path);
+    if (m?.[1]) names.add(m[1]);
+  }
+  return [...names].sort();
 }
 
 /**
@@ -68,7 +98,6 @@ export interface Violation {
  */
 const LAYER_IMPORTS: Record<string, readonly string[]> = {
   protocol: [],
-  walltime: [],
   core: ['protocol', 'walltime'],
   patterns: ['protocol', 'core'],
   schedule: ['protocol', 'walltime'],
@@ -76,11 +105,16 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
   worker: ['protocol', 'core'],
   client: ['protocol', 'core'],
   services: ['protocol', 'core', 'server', 'worker'],
-  // `workflow_descriptor` is a top-level module rather than a directory, but
-  // `layerOf` reads the first path segment under `src/` either way, so importing
-  // one from inside a layer has to be declared like a layer. `tempo.ts` reaches
-  // the same module unchecked, being top-level itself — which is the asymmetry
-  // this entry pays for, not a second kind of dependency.
+  // Everything connectors/ builds on — proxyActivities, createWorkflow,
+  // pollForever, signalStream — is re-exported by the author entrypoint, so the
+  // layer declares that dependency plus the schema/ internal library, and the
+  // entrypoint stays the single account of what connector machinery may reach.
+  connectors: ['workflow', 'schema'],
+  // `workflow_descriptor` (below) is a top-level module rather than a directory,
+  // but `layerOf` reads the first path segment under `src/` either way, so
+  // importing one from inside a layer has to be declared like a layer.
+  // `tempo.ts` reaches the same module unchecked, being top-level itself — which
+  // is the asymmetry that entry pays for, not a second kind of dependency.
   testing: [
     'protocol',
     'core',
@@ -101,8 +135,6 @@ const LAYER_IMPORTS: Record<string, readonly string[]> = {
 const LAYER_RATIONALE: Record<string, string> = {
   protocol:
     'protocol/ is pure data with no dependencies — it is what lets core and server share types without depending on each other',
-  walltime:
-    'walltime/ is an internally-owned library — duration strings and wall-clock rules — treated like a third-party dependency the repo happens to host: it knows nothing about the engine and imports nothing, so it stays removable by deleting the directory and the call sites spec/walltime/seam.spec.ts names',
   core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/ and walltime/ (whose deterministic half it uses) — and never patterns/, which is built on top of it',
   patterns:
     'patterns/ is workflow-authoring helpers built from the primitives core/ exports; it depends on core/, never the reverse',
@@ -117,6 +149,8 @@ const LAYER_RATIONALE: Record<string, string> = {
     'services/ composes server/ and worker/ behind the WorkflowService seam',
   testing:
     'testing/ composes a server and its workers into named fixture states, so it reaches almost everything — but not server/ directly, because a fixture that reached past the service seam could build a state no deployment can reach, which is the one thing a shared fixture must not do',
+  connectors:
+    'connectors/ is service-wrapping machinery built for workflow authors, so it may import only workflow.ts — the same deterministic surface its consumers use. Needing anything the author entrypoint does not re-export would mean a connector concept the author surface cannot express, which is a gap to fix there, not a dependency to add here',
 };
 
 /** Constructs that make replay irreproducible, so they cannot appear on the deterministic side. */
@@ -147,7 +181,7 @@ const NONDETERMINISTIC = [
  */
 const ALLOWED_HOST_COUPLING: Record<string, readonly string[]> = {
   'src/core/microtask_scheduler.ts': ['setImmediate'],
-  'src/walltime/wall_clock.ts': ['new Date()'],
+  'src/libraries/walltime/wall_clock.ts': ['new Date()'],
 };
 
 /**
@@ -374,8 +408,16 @@ function extractImports(strippedText: string): ImportRef[] {
   return refs;
 }
 
-/** The layer a repo-relative path belongs to, or undefined if it is not layered. */
+/**
+ * The layer a repo-relative path belongs to, or undefined if it is not layered.
+ * A file under `src/libraries/<name>/` belongs to layer `<name>`, so consumer
+ * declarations keep the short spelling (`core: ['protocol', 'walltime']`) and
+ * the purity list can keep naming `walltime` — the `libraries/` segment is
+ * where a package lives, not what it is called.
+ */
 function layerOf(repoPath: string): string | undefined {
+  const lib = /^src\/libraries\/([^/]+)\//.exec(repoPath);
+  if (lib) return lib[1];
   const m = /^src\/([^/]+)\//.exec(repoPath);
   return m ? m[1] : undefined;
 }
@@ -386,6 +428,44 @@ function resolveSpecifier(fromPath: string, specifier: string): string | null {
     path.posix.join(path.posix.dirname(fromPath), specifier),
   );
   return resolved;
+}
+
+/**
+ * Rule 5: a file under `src/libraries/<name>/` may import only its own
+ * package's files — not engine layers, not Node builtins, not packages, not a
+ * sibling library. Type-only imports count: a type is still knowledge, and
+ * still breaks compilation when the library is removed. Applied by location,
+ * so putting code under `libraries/` *is* accepting the contract; there is no
+ * declaration to skip. A loose file directly in `src/libraries/` belongs to no
+ * package and is refused outright.
+ */
+function checkLibraryBoundary(file: SourceFile, stripped: string): Violation[] {
+  if (!file.path.startsWith('src/libraries/')) return [];
+  const m = /^src\/libraries\/([^/]+)\//.exec(file.path);
+  if (!m) {
+    return [
+      {
+        path: file.path,
+        line: 1,
+        rule: 'library-boundary',
+        message:
+          'src/libraries/ holds library packages only — a loose file here belongs to no package and escapes the library contract; move it into a package directory',
+      },
+    ];
+  }
+  const home = `src/libraries/${m[1]}/`;
+  const violations: Violation[] = [];
+  for (const ref of extractImports(stripped)) {
+    const resolved = resolveSpecifier(file.path, ref.specifier);
+    if (resolved !== null && `${resolved}/`.startsWith(home)) continue;
+    violations.push({
+      path: file.path,
+      line: ref.line,
+      rule: 'library-boundary',
+      message: `libraries/${m[1]} may import only its own files, not '${ref.specifier}' — an internal library is treated like a third-party dependency: it knows nothing, not even Node, which is what keeps it removable`,
+    });
+  }
+  return violations;
 }
 
 function checkLayering(file: SourceFile, stripped: string): Violation[] {
@@ -636,6 +716,7 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
       violations.push(...checkPurity(file, stripped, 'author-entrypoint'));
       continue;
     }
+    violations.push(...checkLibraryBoundary(file, stripped));
     violations.push(...checkLayering(file, stripped));
     // These layers run inside a replay, so they are held to determinism. Keying
     // this on `core` alone was safe only while `core` was the only thing that

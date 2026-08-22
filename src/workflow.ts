@@ -94,6 +94,17 @@ import {
   type ActivityOptionsInput,
 } from './core/activity_options_input';
 import {createActivityProxy, type ActivityProxy} from './core/workflow_api';
+import {durationToMs, type Duration} from './libraries/walltime';
+import type {Differ} from './patterns/diff';
+import type {PollStart} from './patterns/poller';
+import {
+  openWatcher,
+  watcherRun,
+  type WatcherHandle,
+  type WatcherProps,
+} from './patterns/watcher';
+import type {AnyWorkflowFn} from './workflow_descriptor';
+import {createWorkflow} from './workflow_registry';
 
 export {clearCarryover, getCarryover, setCarryover} from './core/carryover';
 export {condition, type ConditionOptions} from './core/condition';
@@ -154,7 +165,7 @@ export type {
   ActivityOptionsInput,
   RetryPolicyInput,
 } from './core/activity_options_input';
-export type {Duration} from './walltime';
+export type {Duration} from './libraries/walltime';
 
 export type {ActivityProxy};
 
@@ -226,3 +237,158 @@ export function proxyActivities<A extends object>(
   // loudly, in the worker that would have run this — never during a replay.
   return createActivityProxy<A>(normalizeActivityOptions(options));
 }
+
+/**
+ * The retry a watcher's poll gets unless its registration says otherwise. Not
+ * the engine's spartan default (one attempt), because a poller that dies on
+ * its first transient failure is a subscription that silently went deaf — a
+ * watcher's poll should outlive a blip and fail only on a persistent problem.
+ */
+const WATCHER_POLL_DEFAULTS: ActivityOptionsInput = {
+  retry: {
+    maximumAttempts: 5,
+    initialInterval: '1 second',
+    backoffCoefficient: 2,
+    maximumInterval: '30 seconds',
+  },
+  startToCloseTimeout: '30 seconds',
+};
+
+/** What a watcher is: a fetch, a notion of "new", and a cadence. */
+export interface WatcherRegistration<T, S, Q, I> {
+  /**
+   * The wire name of the poller child workflow; the poll activity registers as
+   * `${key}.poll`. Also the root of every subscription's child id and signal
+   * name, so it must be unique across the worker, like any workflow key.
+   */
+  key: string;
+  /**
+   * The side-effecting fetch — an ordinary activity implementation. Receives
+   * the differ's query (a cursor for `byCursor`, `undefined` for `byId`) and
+   * the watch's `input`, so a source that can filter server-side gets to.
+   */
+  poll: (query: Q, input: I) => Promise<readonly T[]> | readonly T[];
+  /** What counts as new — `byCursor` for streams, `byId` for entity feeds. */
+  diff: Differ<T, S, Q>;
+  /** Default poll cadence; a watch site may override. */
+  every: Duration | number;
+  /** Poll activity options. Defaults to `WATCHER_POLL_DEFAULTS`. */
+  options?: ActivityOptionsInput;
+}
+
+/** Per-watch knobs; the watcher's identity (poll, diff, key) is fixed. */
+export interface WatcherWatchOptions<S, I> {
+  every?: Duration | number;
+  /** Defaults to `'new'`: the first poll is the baseline, only later items fire. */
+  start?: PollStart<S>;
+  /** Names this subscription when one workflow watches the same watcher twice. */
+  as?: string;
+  /** Forwarded to every poll. Must be JSON-safe: it rides the child's props. */
+  input?: I;
+}
+
+/** A declared watcher: `watch()` from workflow code; maps for explicit hosts. */
+export interface WatcherRef<T, S, I> {
+  readonly workflowName: string;
+  readonly pollName: string;
+  /**
+   * Subscribe, from inside a workflow: claims the poller child under a
+   * deterministic id and returns the async iterable of what it finds. Items
+   * arriving while the workflow is busy are buffered in order.
+   */
+  watch(options?: WatcherWatchOptions<S, I>): WatcherHandle<T>;
+  /**
+   * The workflow and activity this watcher declared, for hosts that register
+   * explicitly (`createLocalRuntime`, a worker that lists what it serves).
+   * `startWorker` needs neither — declaring was registering.
+   */
+  registrations(): {
+    workflows: Record<string, AnyWorkflowFn>;
+    activities: Record<string, (args: never) => unknown>;
+  };
+}
+
+/**
+ * Declare a watcher: a poller child workflow that delivers what its `poll`
+ * finds — one signal per new item — to whichever workflow opens it, consumed
+ * behind an async iterable.
+ *
+ * ```ts
+ * const issueClosed = createWatcher('gh.issueClosed', {
+ *   poll: (since: number | undefined, repo: {owner: string; repo: string}) =>
+ *     listClosedEvents(repo, since),
+ *   diff: byCursor((e) => e.id),
+ *   every: '30 seconds',
+ * });
+ *
+ * // In a workflow:
+ * const closed = issueClosed.watch({input: {owner: 'acme', repo: 'api'}});
+ * const event = await closed.next(); // parks durably; wakes on the signal
+ * closed.stop();
+ * ```
+ *
+ * Like `proxyActivities` and `createWorkflow`, **declaring is registering**:
+ * calling this at module scope registers the poll activity and the child
+ * workflow on whatever worker loads the module. And like `proxyActivities`,
+ * this is the seam where an implementation is handed across the determinism
+ * boundary: `poll` is real I/O, bound here into an activity — the child's body
+ * only ever sees the proxied forwarder (`patterns/watcher.ts` holds the
+ * deterministic half and says what the composition guarantees).
+ *
+ * Two rules the wrapper cannot enforce for you: items must be
+ * JSON-serializable (they ride history twice — the child's command and the
+ * parent's signal), and one watch per `as` per workflow (a second open with
+ * the same name replaces the first's signal handler and starves it).
+ */
+export function createWatcher<T, S, Q, I = undefined>(
+  key: string,
+  registration: Omit<WatcherRegistration<T, S, Q, I>, 'key'>,
+): WatcherRef<T, S, I> {
+  const {poll, diff, every, options} = registration;
+  const pollName = `${key}.poll`;
+  const pollImpl = (args: {query: Q; input: I}) => poll(args.query, args.input);
+  const proxy = proxyActivities(
+    {[pollName]: pollImpl},
+    options ?? WATCHER_POLL_DEFAULTS,
+  );
+  const run = watcherRun<T, S, Q>(
+    (query, input) =>
+      proxy[pollName]({query, input: input as I}) as Promise<readonly T[]>,
+    diff,
+  );
+  const child = createWorkflow({
+    key,
+    title: `${key} watcher`,
+    description: `Polls and signals its parent one item at a time.`,
+    run: (props: WatcherProps) => run(props),
+  });
+  const defaultEveryMs = toEveryMs(every);
+  return {
+    workflowName: key,
+    pollName,
+    watch: (watchOptions = {}) =>
+      openWatcher<T, S, I>(key, defaultEveryMs, {
+        ...(watchOptions.every !== undefined
+          ? {everyMs: toEveryMs(watchOptions.every)}
+          : {}),
+        ...(watchOptions.start !== undefined
+          ? {start: watchOptions.start}
+          : {}),
+        ...(watchOptions.as !== undefined ? {as: watchOptions.as} : {}),
+        ...(watchOptions.input !== undefined
+          ? {input: watchOptions.input}
+          : {}),
+      }),
+    registrations: () => ({
+      workflows: {[key]: child as AnyWorkflowFn},
+      activities: {[pollName]: pollImpl as (args: never) => unknown},
+    }),
+  };
+}
+
+/** `every`, whichever spelling it arrived in, as the milliseconds props carry. */
+function toEveryMs(every: Duration | number): number {
+  return typeof every === 'number' ? every : durationToMs(every);
+}
+
+export type {WatcherHandle, WatcherProps} from './patterns/watcher';

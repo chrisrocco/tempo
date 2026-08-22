@@ -50,7 +50,7 @@ import {
   nextOccurrenceAfter,
   previousOccurrenceAtOrBefore,
   wallClockRuleProblems,
-} from '../walltime';
+} from '../libraries/walltime';
 
 /** Exhaustiveness backstop for `spec.type` switches — see AGENTS.md. */
 function assertNever(spec: never): never {

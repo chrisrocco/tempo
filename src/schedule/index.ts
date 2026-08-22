@@ -54,7 +54,7 @@ export {
  */
 export {nextFireAfter, scheduleSpecProblems} from './next_fire';
 
-export type {Duration} from '../walltime';
+export type {Duration} from '../libraries/walltime';
 
 export type {
   CalendarSpec,

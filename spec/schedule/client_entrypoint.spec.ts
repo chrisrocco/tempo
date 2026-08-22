@@ -61,13 +61,15 @@ describe('the schedule client entrypoint', () => {
   /**
    * Transitively, too. `schedule_client.ts` may name the workflow's types — those are
    * erased — but must not import it for a value, and the arithmetic must stay pure.
-   * `../walltime` is allowed because the library imports nothing and uses only
-   * browser globals (`Intl`) — properties spec/walltime/seam.spec.ts holds.
+   * `../libraries/walltime` is allowed because the library imports nothing and
+   * uses only browser globals (`Intl`) — properties its seam spec
+   * (spec/libraries/walltime/seam.spec.ts) and the checker's library-boundary
+   * rule hold.
    */
   it('reaches only protocol, walltime, and pure arithmetic', () => {
     const allowed = new Set([
       '../protocol',
-      '../walltime',
+      '../libraries/walltime',
       './schedule_client',
       './next_fire',
     ]);

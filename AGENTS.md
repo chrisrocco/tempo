@@ -10,11 +10,20 @@ modules, or there is nowhere for the explanation to live. Structure first, then
 document.
 
 **Organize by responsibility, not by technical kind.** The top-level split is
-`protocol/`, `walltime/`, `core/`, `patterns/`, `schedule/`, `server/`,
-`services/`, `worker/`, `client/` — each a job the system does, and each
-declaring what it may import in [`tools/boundaries.ts`](tools/boundaries.ts).
-(`walltime/` is the odd one out: an internally-owned library the engine treats
-like a third-party dependency — see `src/walltime/index.ts` for its contract.) A new area of behaviour
+`protocol/`, `core/`, `patterns/`, `schedule/`, `server/`, `services/`,
+`worker/`, `client/`, `connectors/`, plus `libraries/` — each layer a job the
+system does, and each declaring what it may import in
+[`tools/boundaries.ts`](tools/boundaries.ts). `src/libraries/` holds the
+**internal libraries** (`walltime/`, `schema/`): repo-owned code deliberately
+treated like third-party dependencies, and the one place where grouping is by
+contract rather than by job — being under that directory _is_ the declaration.
+The checker derives membership from the tree and pins every package to itself
+(imports nothing: not layers, not Node, not a sibling library), and each
+package owes a contract fileoverview in its `index.ts` plus a seam spec built
+on [`spec/support/library_seam.ts`](spec/support/library_seam.ts) naming every
+call site — which doubles as the removal instruction. All of it is checked:
+`spec/architecture.spec.ts` plants violations of the library boundary and
+asserts the contract files exist. A new area of behaviour
 gets its own layer there rather than a folder inside a neighbour: absence from
 that map means _unrestricted_, so skipping the declaration exempts the new code
 rather than leaving it safely unchecked. Resist `types/`, `utils/`, `helpers/`, `handlers/`: those group

@@ -69,6 +69,16 @@ on npm and makes no stability promises — clone it, read it, run it.
 - **Task queues** — route work to a pool of workers, so several applications
   can share one server; activities and children inherit their execution's
   queue
+- **Connectors** (experimental) — `workflow-engine/connectors`: define a
+  service wrapper once as queries, commands (each with a declared idempotency
+  story), and triggers, and derive the typed workflow proxy, the worker
+  registration, a JSON-Schema catalogue for dashboards, and **watchers** — a
+  poller child that signals its parent one event at a time, riding the
+  engine's own `createWatcher` primitive. Schemas are authored
+  with `t`, a small first-party builder sized to what JSON Schema can render
+  (`t.object`, `t.enum`, `t.defaulted`, descriptions everywhere) — no schema
+  dependency, built on an internal validator port. Developer docs:
+  [`src/connectors/README.md`](src/connectors/README.md)
 
 The same workflow code runs four ways, with no changes:
 
@@ -409,6 +419,7 @@ warm executions on the worker is planned but not built.
 | **Marker event**  | A record that work was _dispatched_; resolves nothing, but stops re-dispatch on replay      |
 | **Wake**          | Enqueuing a workflow task for an execution                                                  |
 | **Execution**     | One running instance of a workflow (a `workflowId`, plus a `runId` per run)                 |
+| **Watcher**       | A poller child that signals each new item to its parent once; `createWatcher` declares one  |
 
 ## Project layout
 
@@ -420,10 +431,14 @@ src/
   protocol/       Pure data + contracts. The wire format. No logic, no deps.
   core/           The deterministic engine: (history) -> (commands).
   patterns/       Authoring helpers built from core's primitives — pollForever,
-                  diffing, signal streams. Depends on core; core never on it.
-  walltime/       An internally-owned library, held at arm's length: duration
-                  strings and wall-clock rules. Imports nothing, knows nothing
-                  about the engine; its removal surface is a checked list.
+                  diffing, signal streams, the watcher. Depends on core; core
+                  never on it.
+  libraries/      Internal libraries, held at arm's length — each imports
+                  nothing, knows nothing about the engine, and has its removal
+                  surface pinned by a seam spec. Location is the declaration.
+    walltime/       Duration strings and wall-clock rules.
+    schema/         The validator port, the first-party `t` builder,
+                    structural JSON Schema, strict conformance.
   schedule/       Schedules: the scheduler workflow, its client, and the
                   when-does-this-fire arithmetic (client and worker halves are
                   separate entrypoints on purpose — see schedule/index.ts).
