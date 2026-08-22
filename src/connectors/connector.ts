@@ -23,25 +23,22 @@
  *
  * ## Watchers
  *
- * `watch.<trigger>(opts)` spawns one generic-per-connector poller child
- * (`pollForever` over a `byCursor` differ on `eventId`) with a deterministic
- * child id, `parentClosePolicy: 'terminate'`, and events delivered home as
- * signals — `signalWorkflow` being a recorded command is what makes delivery
- * once-per-event. The handle wraps `signalStream`.
+ * `watch.<trigger>(opts)` rides the engine's `createWatcher` primitive: each
+ * trigger declares one watcher (`cnx.<name>.watch.<trigger>`) whose poll is
+ * the trigger's poll wrapped in validation and eventId normalization, over a
+ * `byCursor` differ. Deterministic child ids, once-per-event delivery, and
+ * the async-iterable handle are the primitive's guarantees
+ * (`patterns/watcher.ts`); this layer only adds connector semantics — filter
+ * validation, event-schema drift checks, and unwrapping items to events.
  */
 
 import {
   byCursor,
-  createWorkflow,
-  pollForever,
+  createWatcher,
   proxyActivities,
-  signalStream,
-  signalWorkflow,
-  startChild,
-  workflowInfo,
   type ActivityOptionsInput,
   type AnyWorkflowFn,
-  type WorkflowRef,
+  type WatcherRef,
 } from '../workflow';
 
 import type {
@@ -270,22 +267,20 @@ function unwrap<T>(result: WireResult<T>): T {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Watcher: the generic per-connector poller child                             */
+/* Watchers: one engine watcher per trigger                                    */
 /* -------------------------------------------------------------------------- */
 
-interface WatcherProps {
-  trigger: string;
-  parentId: string;
-  signalName: string;
-  everyMs: number;
-  filter?: unknown;
-  start: 'all' | 'new' | {cursor: string | number};
-}
-
+/** What a trigger's poll activity yields: the event plus its cursor id. */
 interface FeedItem {
   id: string | number;
   event: unknown;
 }
+
+type TriggerWatcher = WatcherRef<
+  FeedItem,
+  (string | number) | undefined,
+  unknown
+>;
 
 /* -------------------------------------------------------------------------- */
 /* defineConnector                                                            */
@@ -304,24 +299,16 @@ export function defineConnector<
   const triggers = spec.triggers ?? ({} as T);
 
   const wireName = (op: string) => `cnx.${spec.name}.${op}`;
-  const pollName = (t: string) => `cnx.${spec.name}.poll.${t}`;
-  const watcherKey = `cnx.${spec.name}.watch`;
+  const watcherKey = (t: string) => `cnx.${spec.name}.watch.${t}`;
 
   /**
-   * Built once, lazily: the raw activity implementations, the poll proxies the
-   * watcher closes over, and the watcher workflow itself. `use()` and
-   * `registrations()` share these so both paths serve identical code.
+   * Built once, lazily: the raw activity implementations and one engine
+   * watcher per trigger. `use()` and `registrations()` share these so both
+   * paths serve identical code.
    */
   interface Parts {
     activities: Record<string, (input: unknown) => Promise<unknown>>;
-    pollProxies: Record<
-      string,
-      (args: {
-        cursor: string | number | undefined;
-        filter: unknown;
-      }) => Promise<WireResult<readonly FeedItem[]>>
-    >;
-    watcher: WorkflowRef<(props: WatcherProps) => Promise<void>>;
+    watchers: Record<string, TriggerWatcher>;
   }
   let parts: Parts | undefined;
 
@@ -336,85 +323,55 @@ export function defineConnector<
       activities[wireName(name)] = activityImplFor(anySpec, name, def);
     }
 
-    // A trigger's poll compiles to a query-shaped activity that returns the
-    // feed *normalized*: `eventId` is applied service-side of the wire, so the
-    // watcher workflow can run one generic cursor differ for every trigger.
-    const pollProxies: Parts['pollProxies'] = {};
+    // A trigger's poll becomes an engine watcher: the poll is wrapped in
+    // filter validation, event-schema checks, and eventId normalization, so
+    // one `byCursor` differ serves every trigger. Poll failures throw — a
+    // non-retryable one burns the retry budget before the child fails, which
+    // is the price of keeping the primitive envelope-free; the poller-death
+    // notification belongs to `patterns/watcher.ts` when it grows one.
+    const watchers: Parts['watchers'] = {};
     for (const [name, def] of Object.entries(triggers)) {
-      const impl = async (args: {
-        cursor: string | number | undefined;
-        filter: unknown;
-      }): Promise<WireResult<readonly FeedItem[]>> => {
-        const ctx = await resolveContext(anySpec);
-        let filter: unknown;
-        if (def.filter !== undefined && args.filter !== undefined) {
-          const parsed = await runSchema(def.filter, args.filter);
-          if (!parsed.ok) return fail('invalid', `${name}: ${parsed.message}`);
-          filter = parsed.value;
-        }
-        try {
+      watchers[name] = createWatcher(watcherKey(name), {
+        every: '30 seconds',
+        options: mergeOptions(QUERY_DEFAULTS, def.options),
+        diff: byCursor<FeedItem, string | number>((item) => item.id),
+        poll: async (
+          query: (string | number) | undefined,
+          input: unknown,
+        ): Promise<readonly FeedItem[]> => {
+          const ctx = await resolveContext(anySpec);
+          let filter: unknown;
+          if (def.filter !== undefined && input !== undefined) {
+            const parsed = await runSchema(def.filter, input);
+            if (!parsed.ok) {
+              throw new ConnectorError('invalid', `${name}: ${parsed.message}`);
+            }
+            filter = parsed.value;
+          }
           const events = await def.poll(
-            {cursor: args.cursor, filter: filter as never},
+            {cursor: query, filter: filter as never},
             ctx as never,
           );
           const items: FeedItem[] = [];
           for (const event of events) {
             const parsed = await runSchema(def.event, event);
             if (!parsed.ok) {
-              return fail('drift', `${name}: event ${parsed.message}`);
+              throw new ConnectorError(
+                'drift',
+                `${name}: event ${parsed.message}`,
+              );
             }
             items.push({
               id: def.eventId(parsed.value as never),
               event: parsed.value,
             });
           }
-          return {ok: true, value: items};
-        } catch (e) {
-          if (e instanceof ConnectorError && !e.retryable) {
-            return {ok: false, error: e.toEnvelope()};
-          }
-          throw e;
-        }
-      };
-      activities[pollName(name)] = impl as (input: unknown) => Promise<unknown>;
-      const proxy = proxyActivities(
-        {[pollName(name)]: impl},
-        mergeOptions(QUERY_DEFAULTS, def.options),
-      );
-      pollProxies[name] = proxy[pollName(name)] as Parts['pollProxies'][string];
+          return items;
+        },
+      });
     }
 
-    // One watcher workflow per connector; the trigger rides in its props.
-    // NOTE (prototype): a poll that fails non-retryably kills the watcher
-    // child, and child failure does not propagate to a detached parent — the
-    // production version should signal the parent a terminal error event.
-    const watcher = createWorkflow({
-      key: watcherKey,
-      title: `${spec.title ?? spec.name} watcher`,
-      description: `Polls one ${spec.name} trigger and signals its parent per event.`,
-      async run(props: WatcherProps): Promise<void> {
-        const poll = build().pollProxies[props.trigger];
-        if (!poll) throw new Error(`unknown trigger '${props.trigger}'`);
-        await pollForever<
-          FeedItem,
-          (string | number) | undefined,
-          (string | number) | undefined
-        >({
-          everyMs: props.everyMs,
-          poll: async (cursor) =>
-            unwrap(await poll({cursor, filter: props.filter})),
-          differ: byCursor<FeedItem, string | number>((item) => item.id),
-          startFrom:
-            props.start === 'all' || props.start === 'new'
-              ? props.start
-              : {state: props.start.cursor},
-          onAdded: (item) =>
-            signalWorkflow(props.parentId, props.signalName, item.event),
-        });
-      },
-    });
-
-    parts = {activities, pollProxies, watcher};
+    parts = {activities, watchers};
     return parts;
   }
 
@@ -453,30 +410,28 @@ export function defineConnector<
       (opts: WatchOptions<unknown>) => WatchHandle<unknown>
     >;
     for (const name of Object.keys(triggers)) {
+      const ref = built.watchers[name]!;
       watch[name] = (opts) => {
-        const info = workflowInfo();
-        const as = opts.as ?? name;
-        const signalName = `cnx:${spec.name}.${name}:${as}`;
-        const child = startChild(built.watcher.workflowName, {
-          workflowId: `${info.workflowId}/watch/${spec.name}.${name}/${as}`,
-          parentClosePolicy: 'terminate',
-          props: {
-            trigger: name,
-            parentId: info.workflowId,
-            signalName,
-            everyMs: toMs(opts.every),
-            filter: opts.where,
-            start: opts.start ?? 'new',
-          } satisfies WatcherProps,
+        const handle = ref.watch({
+          every: toMs(opts.every),
+          start:
+            opts.start === undefined
+              ? 'new'
+              : opts.start === 'all' || opts.start === 'new'
+                ? opts.start
+                : {state: opts.start.cursor},
+          ...(opts.as !== undefined ? {as: opts.as} : {}),
+          ...(opts.where !== undefined ? {input: opts.where} : {}),
         });
-        const iterator = signalStream<unknown>(signalName, {from: 'start'})[
-          Symbol.asyncIterator
-        ]();
+        // The primitive delivers FeedItems; the connector promised events.
+        const events = (async function* () {
+          for await (const item of handle) yield (item as FeedItem).event;
+        })();
         return {
-          next: async () => (await iterator.next()).value as unknown,
-          stop: () => child.cancel(),
-          signalName,
-          [Symbol.asyncIterator]: () => iterator,
+          next: async () => ((await handle.next()) as FeedItem).event,
+          stop: handle.stop,
+          signalName: handle.signalName,
+          [Symbol.asyncIterator]: () => events,
         };
       };
     }
@@ -510,10 +465,17 @@ export function defineConnector<
 
   function registrations(): Registrations {
     const built = build();
-    return {
-      activities: built.activities,
-      workflows: {[watcherKey]: built.watcher},
-    };
+    const workflows: Record<string, AnyWorkflowFn> = {};
+    const activities = {...built.activities};
+    for (const ref of Object.values(built.watchers)) {
+      const regs = ref.registrations();
+      Object.assign(workflows, regs.workflows);
+      Object.assign(
+        activities,
+        regs.activities as Record<string, (input: unknown) => Promise<unknown>>,
+      );
+    }
+    return {activities, workflows};
   }
 
   return {spec, use, direct, registrations};

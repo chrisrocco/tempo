@@ -238,10 +238,12 @@ const evt = await resolved.next(); // or: for await (const evt of resolved)
 resolved.stop();                   // cancel the child (parent close also does)
 ```
 
-Everything here is assembled from engine primitives (`pollForever`,
-`signalWorkflow`, `signalStream`, parent-close policies) — "once per event"
-falls out of engine guarantees, not new machinery. Two rules keep watchers
-honest:
+Under the hood this is the engine's own `createWatcher` primitive
+(`src/patterns/watcher.ts` holds the deterministic half and its guarantees) —
+one watcher per trigger, declared at `use()` time. `createWatcher` in turn is
+the composition of `pollForever`, `signalWorkflow`, and `signalStream`, so
+"once per event" falls out of engine guarantees, not new machinery. Two rules
+keep watchers honest:
 
 - **`eventId` is the cursor**, so it must be stable per event and strictly
   increasing in feed order. A service without an ordered event feed will fail
