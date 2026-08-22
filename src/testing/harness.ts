@@ -60,11 +60,30 @@ const POLL_MS = 20;
 export interface HarnessOptions {
   /** How long to wait for each scenario to reach its state. */
   timeoutMs?: number;
+  /**
+   * Called as each scenario begins seeding.
+   *
+   * Seeding is the slow part — several scenarios wait on real state to appear —
+   * and a caller with a screen has something useful to do with the knowledge.
+   * Reporting the *start* rather than the finish is deliberate: what a reader
+   * wants to see named is the thing currently taking the time.
+   */
+  onScenario?(name: ScenarioName, index: number, total: number): void;
 }
 
 /** Everything the harness started, and how to stop it. */
 export interface RunningHarness {
   readonly taskQueue: string;
+  /**
+   * Seed more scenarios into the running harness.
+   *
+   * The reason this is separate from starting: a caller that seeds nothing is
+   * live in milliseconds, and can then fill in states while someone is already
+   * looking at the server. `startScenario` uses the all-at-once path because a
+   * test wants everything present before its first assertion; a dashboard
+   * would rather be usable now and complete shortly.
+   */
+  seed(scenarios: readonly ScenarioName[]): Promise<void>;
   /** Stop the workers and anything a seed started. Idempotent. */
   stop(): Promise<void>;
 }
@@ -143,6 +162,12 @@ export async function startHarnessOn(
   let stopping: Promise<void> | undefined;
   const harness: RunningHarness = {
     taskQueue: SCENARIO_QUEUE,
+    async seed(names) {
+      for (const [index, name] of names.entries()) {
+        options.onScenario?.(name, index, names.length);
+        await SCENARIOS[name].seed(context);
+      }
+    },
     stop() {
       stopping ??= (async () => {
         reporter.stop();
@@ -166,7 +191,7 @@ export async function startHarnessOn(
   };
 
   try {
-    for (const name of scenarios) await SCENARIOS[name].seed(context);
+    await harness.seed(scenarios);
   } catch (e) {
     await harness.stop();
     throw e;

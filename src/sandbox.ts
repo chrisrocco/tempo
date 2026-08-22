@@ -91,6 +91,15 @@ export interface Sandbox {
   dispatch(request: RpcRequest): Promise<unknown>;
   /** The queue the sandbox's workers serve. */
   readonly taskQueue: string;
+  /**
+   * Seed more scenarios into the running sandbox.
+   *
+   * `createSandbox([])` is live almost immediately; seeding is what takes the
+   * time. A page can therefore be interactive first and fill in behind itself,
+   * rather than showing a spinner for as long as the slowest fixture takes to
+   * reach its state.
+   */
+  seed(scenarios: readonly ScenarioName[]): Promise<void>;
   /** Stop the workers. The history goes with the process. */
   stop(): Promise<void>;
 }
@@ -136,6 +145,7 @@ export async function createSandbox(
   return {
     dispatch: call,
     taskQueue: harness.taskQueue,
+    seed: (names) => harness.seed(names),
     stop: () => harness.stop(),
   };
 }
