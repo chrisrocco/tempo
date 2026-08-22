@@ -21,7 +21,11 @@ function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-function makeCore(historyStore: MemoryHistoryStore, leaseMs: number) {
+function makeCore(
+  historyStore: MemoryHistoryStore,
+  leaseMs: number,
+  defaultStartToCloseTimeoutMs?: number,
+) {
   const activityTaskQueue = new MemoryTaskQueue(leaseMs);
   const core = createServerCore({
     historyStore,
@@ -31,6 +35,7 @@ function makeCore(historyStore: MemoryHistoryStore, leaseMs: number) {
     launch: () => 'child',
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
+    defaultStartToCloseTimeoutMs,
   });
   return {core, activityTaskQueue};
 }
@@ -46,8 +51,11 @@ async function seedScheduledActivity(
 }
 
 describe('an activity that outlives its lease, with no timeout set', () => {
-  // Documents today's default. Not a bug — at-least-once is the contract — but
-  // the reason startToCloseTimeoutMs exists.
+  // Documents the window before any deadline fires: the server's default
+  // start-to-close (10 minutes) bounds the activity eventually, but inside
+  // that window a no-heartbeat activity slower than the lease still runs
+  // concurrently, once per lease period. Not a bug — at-least-once is the
+  // contract — but the reason to set a deadline shorter than the lease.
   it('is handed to a second worker while the first is still running', async () => {
     const historyStore = new MemoryHistoryStore();
     const {core, activityTaskQueue} = makeCore(historyStore, 30);
@@ -177,5 +185,86 @@ describe('start-to-close timeout', () => {
     );
     expect(terminal.length).toBe(1);
     expect(terminal[0].type).toBe('activityFailed');
+  });
+});
+
+/**
+ * The server-supplied deadline for activities that configured none. The policy
+ * (and the reasoning) live on `ServerCoreDeps.defaultStartToCloseTimeoutMs`;
+ * these pin the three edges: it applies when nothing was set, it yields to
+ * anything the author did set — including the explicit `0` opt-out — and it
+ * stays out of the way of heartbeating activities, whose reaper is the
+ * heartbeat deadline.
+ */
+describe('the default start-to-close timeout', () => {
+  function enqueueSlow(
+    activityTaskQueue: MemoryTaskQueue,
+    options: ActivityOptions,
+  ): void {
+    activityTaskQueue.enqueue(
+      {workflowId: 'wf', seq: 0, name: 'slow', args: [], options},
+      'default',
+    );
+  }
+
+  it('bounds an activity that configured no deadline at all, and says the deadline was the default', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const {core, activityTaskQueue} = makeCore(historyStore, 5000, 30);
+    await seedScheduledActivity(historyStore, {});
+    enqueueSlow(activityTaskQueue, {});
+
+    await core.pollActivityTask();
+    await wait(80); // the worker never reports back
+
+    const rec = await historyStore.get('wf');
+    const failure = rec!.history.find((e) => e.type === 'activityFailed');
+    expect(failure).toBeDefined();
+    expect((failure as {error: string}).error).toContain('timed out');
+    // The author never wrote this deadline, so the error must say where it
+    // came from — otherwise the first default ever hit is a hunt for a
+    // `startToCloseTimeoutMs` that appears in no source file.
+    expect((failure as {error: string}).error).toContain('server default');
+  });
+
+  it('yields to an explicit startToCloseTimeoutMs', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const {core, activityTaskQueue} = makeCore(historyStore, 5000, 20);
+    const options: ActivityOptions = {startToCloseTimeoutMs: 5000};
+    await seedScheduledActivity(historyStore, options);
+    enqueueSlow(activityTaskQueue, options);
+
+    await core.pollActivityTask();
+    await wait(80); // well past the default; the explicit deadline is armed
+
+    const rec = await historyStore.get('wf');
+    expect(rec!.history.some((e) => e.type === 'activityFailed')).toBeFalse();
+  });
+
+  it('honors the explicit 0 opt-out — unbounded, and the author means it', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const {core, activityTaskQueue} = makeCore(historyStore, 5000, 20);
+    const options: ActivityOptions = {startToCloseTimeoutMs: 0};
+    await seedScheduledActivity(historyStore, options);
+    enqueueSlow(activityTaskQueue, options);
+
+    await core.pollActivityTask();
+    await wait(80);
+
+    const rec = await historyStore.get('wf');
+    expect(rec!.history.some((e) => e.type === 'activityFailed')).toBeFalse();
+  });
+
+  it('leaves a heartbeating activity unbounded — its reaper is the heartbeat deadline', async () => {
+    const historyStore = new MemoryHistoryStore();
+    const {core, activityTaskQueue} = makeCore(historyStore, 5000, 20);
+    const options: ActivityOptions = {heartbeatTimeoutMs: 5000};
+    await seedScheduledActivity(historyStore, options);
+    enqueueSlow(activityTaskQueue, options);
+
+    await core.pollActivityTask();
+    await wait(80); // past the default; the heartbeat deadline is nowhere near
+
+    const rec = await historyStore.get('wf');
+    expect(rec!.history.some((e) => e.type === 'activityFailed')).toBeFalse();
   });
 });

@@ -30,8 +30,9 @@ on npm and makes no stability promises — clone it, read it, run it.
 
 - **Activities** with typed `proxyActivities`, which registers what it types, plus
   server-decided retry with
-  backoff, start-to-close timeouts, and `heartbeat()` for work of unbounded
-  duration
+  backoff, start-to-close timeouts (defaulted to 10 minutes when an activity
+  sets no deadline at all — `startToCloseTimeoutMs: 0` opts out), and
+  `heartbeat()` for work of unbounded duration
 - **Timers** — real wall-clock, durable, re-armed from history on restart;
   `sleep('30 minutes')` or milliseconds, and the same duration strings anywhere
   an option wants a time span

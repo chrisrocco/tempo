@@ -40,22 +40,33 @@ export interface ActivityOptions {
   retry?: RetryPolicy;
   /**
    * How long a single attempt may run before the server gives up on it, measured
-   * from when a worker polls the task. Unset means unbounded.
+   * from when a worker polls the task.
    *
-   * Setting it changes what happens when an attempt overruns, and that is the
-   * whole point. **Unset**, the lease eventually expires and the task is
-   * redelivered — so a slow activity ends up running *concurrently* with the
-   * attempt already in flight, once per lease period. **Set**, the server fails
-   * the attempt at the deadline and stops redelivering it, so the workflow sees a
-   * timeout instead of the engine quietly running the work twice.
+   * **Unset does not mean unbounded.** An activity that configures no deadline
+   * at all — neither this field nor `heartbeatTimeoutMs` — is given the
+   * server's default (`DEFAULT_START_TO_CLOSE_MS`, 10 minutes), because a
+   * deadline-less activity whose worker dies silently parks its workflow
+   * forever with an operator reset as the only way out. The default is the
+   * server's policy, applied at dispatch and configurable per server
+   * (`defaultStartToCloseTimeoutMs`); the error it produces says it was the
+   * default. To genuinely run without a ceiling, opt out explicitly with `0` —
+   * or heartbeat, which is the better contract for long work: the attempt
+   * keeps its claim for as long as it is demonstrably alive.
+   *
+   * Setting a value changes what happens when an attempt overruns, and that is
+   * the whole point: the server fails the attempt at the deadline and stops
+   * waiting, so the workflow sees a timeout instead of the engine quietly
+   * running the work twice.
    *
    * It does not stop the worker. Nothing here can — there is no heartbeat, so the
    * server cannot tell a slow worker from a dead one, and cannot reach into one
    * that is still going. The guarantee is about what the *engine* does: one
    * attempt is dispatched, one outcome is recorded.
    *
-   * Must be shorter than the server's `ACTIVITY_LEASE_MS`, or the lease expires
-   * first and redelivers before this deadline is reached.
+   * Keep it shorter than the server's `ACTIVITY_LEASE_MS` when you can: a
+   * deadline longer than the lease still decides the outcome (its failure
+   * settles the seq, and stale redeliveries are dropped at poll), but every
+   * lease period until it fires redelivers the attempt into a concurrent run.
    */
   startToCloseTimeoutMs?: number;
   /**

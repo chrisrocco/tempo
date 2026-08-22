@@ -313,7 +313,35 @@ export interface ServerCoreDeps {
    * the default came to be 4.
    */
   continueAsNewSuggestThreshold?: number;
+  /**
+   * The start-to-close deadline applied to an activity that configured no
+   * deadline of its own — neither `startToCloseTimeoutMs` nor a heartbeat.
+   * Defaults to `DEFAULT_START_TO_CLOSE_MS` (10 minutes).
+   *
+   * Exists because a deadline-less activity whose worker dies silently has no
+   * reaper: nothing ever settles the seq, the workflow waits forever, and the
+   * server's attempt bookkeeping for it can only be reclaimed by an operator
+   * reset. Requiring authors to remember a timeout just moves the leak to
+   * whoever forgets, so the server supplies one — the same stance Temporal
+   * takes by refusing deadline-less activities outright.
+   *
+   * The default is a policy of this server, not of the activity: it is applied
+   * at dispatch, never written into the `activityScheduled` event, so changing
+   * it changes the next attempt of everything already in flight. An activity
+   * that genuinely wants no ceiling opts out explicitly with
+   * `startToCloseTimeoutMs: 0`, and one that heartbeats already has its reaper
+   * (the heartbeat deadline), so the default leaves it unbounded — see
+   * `protocol/activity_options.ts`.
+   */
+  defaultStartToCloseTimeoutMs?: number;
 }
+
+/**
+ * Ten minutes: long enough that an activity which finishes at all almost
+ * certainly finishes inside it, short enough that a workflow stuck on a dead
+ * worker fails while someone still remembers deploying it.
+ */
+export const DEFAULT_START_TO_CLOSE_MS = 600_000;
 
 export interface ServerCore {
   /** Build the task for an execution the worker has claimed (or undefined if gone/terminal). */
@@ -487,6 +515,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     onSettled = () => {},
     log = silentLogger,
     continueAsNewSuggestThreshold = DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+    defaultStartToCloseTimeoutMs = DEFAULT_START_TO_CLOSE_MS,
   } = deps;
 
   // Keyed by the `startChild` seq that spawned each child, so `cancelChild` can
@@ -1771,6 +1800,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     task: LeasedActivityTask,
     kind: 'startToClose' | 'heartbeat',
     timeoutMs: number,
+    opts: {defaulted?: boolean} = {},
   ): void {
     const lease = activityLeases.get(task.token);
     if (!lease) return; // already settled
@@ -1783,13 +1813,22 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       name: task.name,
       kind,
       timeoutMs,
+      // A deadline the author never wrote deserves to say so where it will be
+      // read: in the log line an operator greps and in the error the workflow
+      // catches — otherwise the first default timeout ever hit becomes a hunt
+      // for a `startToCloseTimeoutMs` that appears in no source file.
+      ...(opts.defaulted ? {defaulted: true} : {}),
     });
     void reportActivityResult(lease.workflowId, lease.seq, {
       ok: false,
       error:
         kind === 'heartbeat'
           ? `activity ${task.name} stopped heartbeating for ${timeoutMs}ms`
-          : `activity ${task.name} timed out after ${timeoutMs}ms`,
+          : `activity ${task.name} timed out after ${timeoutMs}ms${
+              opts.defaulted
+                ? ' (server default; set startToCloseTimeoutMs to change it, or 0 to opt out)'
+                : ''
+            }`,
     });
   }
 
@@ -1798,11 +1837,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     task: LeasedActivityTask,
     kind: 'startToClose' | 'heartbeat',
     timeoutMs: number,
+    opts: {defaulted?: boolean} = {},
   ): void {
     const timers = attemptTimers.get(task.token) ?? {};
     if (timers[kind]) clearTimeout(timers[kind]);
     const timer = setTimeout(
-      () => abandonAttempt(task, kind, timeoutMs),
+      () => abandonAttempt(task, kind, timeoutMs, opts),
       timeoutMs,
     );
     timer.unref?.(); // a pending deadline must not hold the process open
@@ -1885,12 +1925,26 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // Armed on poll, not on dispatch: both deadlines bound the attempt, and the
       // attempt begins when a worker takes the task, not when it was queued.
       const {startToCloseTimeoutMs, heartbeatTimeoutMs} = task.options;
-      if (startToCloseTimeoutMs !== undefined && startToCloseTimeoutMs > 0)
+      const heartbeats =
+        heartbeatTimeoutMs !== undefined && heartbeatTimeoutMs > 0;
+      if (startToCloseTimeoutMs !== undefined && startToCloseTimeoutMs > 0) {
         armAttemptTimer(task, 'startToClose', startToCloseTimeoutMs);
+      } else if (startToCloseTimeoutMs === undefined && !heartbeats) {
+        // No deadline of any kind means no reaper: a worker that dies silently
+        // leaves the seq unsettled forever and the workflow parked on it, with
+        // an operator reset as the only way out. So an activity that configured
+        // nothing gets this server's default deadline. Applied here rather than
+        // stamped into `activityScheduled`, because it is the server's policy
+        // and not the activity's record — an explicit `startToCloseTimeoutMs: 0`
+        // is the author saying "unbounded, and I mean it", and a heartbeating
+        // activity already has its reaper below.
+        armAttemptTimer(task, 'startToClose', defaultStartToCloseTimeoutMs, {
+          defaulted: true,
+        });
+      }
       // The heartbeat clock starts now, so an attempt that never beats at all is
       // caught just as surely as one that stops partway.
-      if (heartbeatTimeoutMs !== undefined && heartbeatTimeoutMs > 0)
-        armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
+      if (heartbeats) armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
       heartbeatTasks.set(task.token, task);
       return task;
     }

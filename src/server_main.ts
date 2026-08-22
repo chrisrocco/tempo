@@ -131,11 +131,20 @@ export interface StartServerOptions {
   /**
    * Activity-task lease timeout. `--activity-lease-ms` overrides.
    *
-   * Must exceed the largest `startToCloseTimeoutMs` any activity sets, or the
-   * lease redelivers the task before its own deadline is reached and the timeout
-   * never gets to decide.
+   * Should exceed the largest `startToCloseTimeoutMs` any activity sets — a
+   * lease shorter than a deadline redelivers the task into a concurrent second
+   * run before the deadline fires. The deadline still decides in the end (its
+   * failure settles the seq, and the poll guard then drains the stale
+   * redeliveries), but every lease period until then dispatches the work again.
    */
   activityLeaseMs?: number;
+  /**
+   * Start-to-close deadline for activities that configured no deadline of
+   * their own. Default 10 minutes. A launch-site knob with no flag on purpose:
+   * changing it is a policy decision about every workflow on the server, not a
+   * per-deploy tuning. See `ServerCoreDeps.defaultStartToCloseTimeoutMs`.
+   */
+  defaultStartToCloseTimeoutMs?: number;
   /**
    * Delete executions closed longer than this many **days**.
    * `--retain-closed-for-days` overrides. **Unset keeps every execution
@@ -219,6 +228,7 @@ export async function startServer(
   let endpoint: ServerEndpoint | undefined;
   const host = createServerHost(store, {
     activityLeaseMs,
+    defaultStartToCloseTimeoutMs: options.defaultStartToCloseTimeoutMs,
     // The one place days become milliseconds — the host, like every store and
     // lease below it, speaks ms.
     retainClosedForMs:
