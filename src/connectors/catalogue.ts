@@ -9,12 +9,7 @@
  */
 
 import type {Connector} from './connector';
-import type {
-  AnyCommandDef,
-  AnyQueryDef,
-  AnyTriggerDef,
-  Idempotency,
-} from './definition';
+import type {AnyCommandDef, AnyQueryDef, AnyTriggerDef} from './definition';
 import type {JsonSchema} from '../libraries/schema';
 
 export interface CatalogueEntry {
@@ -22,7 +17,7 @@ export interface CatalogueEntry {
   readonly kind: 'query' | 'command' | 'trigger';
   readonly name: string;
   readonly description: string;
-  readonly idempotency?: Idempotency;
+  readonly idempotency?: 'natural' | 'unsafe';
   readonly unsafeBecause?: string;
   readonly input?: JsonSchema;
   readonly output?: JsonSchema;

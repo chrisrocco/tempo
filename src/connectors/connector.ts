@@ -35,7 +35,6 @@
 import {
   byCursor,
   createWatcher,
-  durationToMs,
   proxyActivities,
   type ActivityOptionsInput,
   type AnyWorkflowFn,
@@ -86,7 +85,7 @@ export type QuerySurface<Q> = {
 export type CommandSurface<C> = QuerySurface<C>;
 
 export interface WatchOptions<F> {
-  /** Poll interval: milliseconds, or duration text (`'30 seconds'`, `'1h 30m'`). */
+  /** Poll interval: milliseconds, or `'30 seconds'`-style text. */
   every: number | string;
   /** Forwarded to the trigger's poll, so the service filters at the source. */
   where?: F;
@@ -195,16 +194,27 @@ function mergeOptions(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Duration text                                                              */
+/* Duration text — a deliberately tiny parser                                 */
 /* -------------------------------------------------------------------------- */
 
-/**
- * `every`, whichever spelling it arrived in, as milliseconds. This is the
- * walltime library's one duration grammar (`'30 seconds'`, `'90s'`,
- * `'1h 30m'`; numbers pass through) — connectors deliberately carry no second
- * parser.
- */
-export const toMs: (every: number | string) => number = durationToMs;
+const DURATION =
+  /^(\d+)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)$/;
+
+export function toMs(every: number | string): number {
+  if (typeof every === 'number') return every;
+  const m = DURATION.exec(every.trim());
+  if (!m) throw new Error(`unparseable duration: '${every}'`);
+  const unit = m[2]!;
+  const factor =
+    unit === 'ms' || unit.startsWith('milli')
+      ? 1
+      : unit.startsWith('s')
+        ? 1_000
+        : unit.startsWith('m')
+          ? 60_000
+          : 3_600_000;
+  return Number(m[1]) * factor;
+}
 
 /* -------------------------------------------------------------------------- */
 /* The wrapper: one operation definition -> one activity implementation        */
@@ -213,9 +223,7 @@ export const toMs: (every: number | string) => number = durationToMs;
 interface OpLike {
   readonly input: Schema;
   readonly output: Schema;
-  /** Present only on `'keyed'` commands: derives the idempotency key. */
-  key?(input: never): string;
-  handler(input: never, ctx: never, idempotencyKey?: string): unknown;
+  readonly handler: (input: never, ctx: never) => unknown;
 }
 
 function activityImplFor(
@@ -230,15 +238,7 @@ function activityImplFor(
       return fail('invalid', `${opName}: ${parsedIn.message}`);
     }
     try {
-      // Derived from the parsed input, so both deliveries of one recorded
-      // command — same input, replayed — compute the same key. That identity
-      // is what the service dedupes on, and what makes 'keyed' retryable.
-      const idempotencyKey = def.key?.(parsedIn.value as never);
-      const raw = await def.handler(
-        parsedIn.value as never,
-        ctx as never,
-        idempotencyKey,
-      );
+      const raw = await def.handler(parsedIn.value as never, ctx as never);
       const parsedOut = await runSchema(def.output, raw);
       if (!parsedOut.ok) {
         // The service answered, but not in the declared shape: contract drift.

@@ -212,25 +212,14 @@ eventually run twice.** A command therefore declares how it survives that:
     A retry landing after success sees `conflict`, checks whether the target
     state already holds, and reports success.
   - _Upsert/set/delete_: naturally repeatable.
-- **`idempotency: 'keyed'`** — the service accepts an **idempotency key** but
-  the operation has no natural dedupe shape. The definition declares
-  `key: (input) => string`, the framework derives it from the parsed input and
-  hands it to the handler as a third argument, and the handler's one keyed
-  obligation is to send it (an `Idempotency-Key` header, a dedupe field).
-  Both deliveries of one recorded command carry the same input, so the derived
-  key is identical — that is the whole mechanism. The input must therefore
-  carry a business identity to derive from; a keyed command whose input has
-  none is an unsafe command with better marketing, and the builder refuses it.
 - **`idempotency: 'unsafe'`** — no protection exists. The framework forces
   `maximumAttempts: 1`, the catalogue flags it, and a written `unsafeBecause`
-  is required. Unsafe is legal but never silent — each flag names the ask that
-  would upgrade it (a service-side key → `'keyed'`; a dedupe identity →
-  `'natural'`).
+  is required. Unsafe is legal but never silent — and the flags are the running
+  inventory of what a future keyed mode would buy.
 
-The live harness fires every natural **and keyed** command **twice with one
-identity** and asserts a single effect — for a keyed command, that is the test
-that the service actually honors the key. That test is what turns
-"at-least-once" from a caveat into a guarantee.
+The live harness fires every natural command **twice with one identity** and
+asserts a single effect. That test is what turns "at-least-once" from a caveat
+into a guarantee.
 
 ### Triggers and watchers
 
@@ -263,14 +252,6 @@ keep watchers honest:
 - **A long-lived parent owns its history.** Each event is one signal in the
   parent's log; an unbounded stream pairs its watcher with `continueAsNew`,
   passing `{cursor}` forward as its `start`.
-
-And one guarantee runs the other way: **a dead poller is loud, not deaf.** If
-the poll fails terminally (a revoked token, a deleted resource — the retry
-budget spent on a persistent problem), the child's last act is a failure
-marker on its own signal, and the handle throws a typed `WatcherFailedError`
-from `next()`/iteration. A workflow parked on a watch learns its subscription
-ended at the exact `await` that depended on it, with the cause in the message
-— never by waiting forever.
 
 ### Errors
 
@@ -394,58 +375,11 @@ managed, not forbidden. A generated final case fails naming every uncertified
 operation, so **the suite being green is the definition of done.** Run it on
 connector PRs and nightly: the nightly is also your drift monitor — a service
 team's breaking change turns a test red before it surprises a workflow.
-(`.github/workflows/connector-drift.yml` is that nightly for this repo; it
-arms itself the day the fixture credentials are configured, and reports "not
-configured" harmlessly until then.)
-
-## Evolving a connector
-
-A connector's names and schemas outlive any deploy: wire names sit in recorded
-histories, inputs are re-validated when a queued or retried activity finally
-runs, and carried cursors ride `continueAsNew` props. Evolution is therefore a
-policy, not a refactor. The rules, in order of how much they can break:
-
-**Wire names are forever.** `cnx.<name>.<op>` (and `cnx.<name>.watch.<trigger>`)
-appear in histories and in workers' registrations. Renaming an operation — or
-the connector — strands every in-flight execution that references the old
-name. Changed semantics get a **new operation name**; the old one stays,
-marked deprecated in its description, until no live history references it.
-Never repurpose a name to mean something different.
-
-**Inputs may only widen.** A retried or queued activity re-validates the input
-recorded in history against the _current_ schema, so every input that ever
-parsed must keep parsing. New fields arrive as `t.optional` or `t.defaulted`;
-required fields are never added, removed, or re-typed on an existing
-operation. Tightening a constraint (a narrower enum, a lower `max`) is a
-breaking change — new name.
-
-**Outputs may only add optional fields.** Old histories hold old-shaped
-results, and replay hands them to workflow code verbatim — a workflow typed to
-expect a new required field will read `undefined` from a result recorded
-before the field existed. New output fields are declared optional (or the
-operation gets a new name), and the live certification is what forces the
-declaration to keep matching the service.
-
-**Idempotency only strengthens in place.** `unsafe → keyed → natural` is a
-safe upgrade once the certification passes — callers only gain retries.
-Weakening (`natural → unsafe`) changes behavior under failure and is a new
-operation.
-
-**A trigger's cursor semantics are frozen.** Workflows carry `{cursor}` across
-`continueAsNew`; changing what `eventId` means or how the feed orders it makes
-every carried cursor lie. A feed change means a new trigger.
-
-**Error mappings are behavior.** Reclassifying a failure across the
-retryable/non-retryable line (say, a 409 from `conflict` to `upstream`)
-changes what workflows do under failure — call it out like an API change.
-
-**When the nightly run reports `drift`,** the service moved first. Widen the
-schema per the rules above and re-certify; if the service's change is not
-additive, that is the new-name case, and the drift failure is the alarm doing
-its job.
 
 ## Deferred, deliberately
 
+- **Keyed idempotency** — a derived key for commands that are not naturally
+  idempotent; today they ship as `unsafe`, and the flags are the backlog.
 - **Trigger-starts-workflow** — a scheduler entrypoint dispatching a fresh
   workflow per event; watchers are the one trigger surface for now.
 - **Push transport** — webhooks feeding watcher streams.
@@ -578,12 +512,7 @@ Changes state → command (imperative verb). A fact to react to → trigger
    ```
    (Converge on the conflict — never check-then-act up front; that races.)
 3. **Naturally repeatable**: upsert, set, delete, cancel.
-4. **Keyed**: the service accepts an idempotency key (a header, a dedupe
-   field). Declare `idempotency: 'keyed'` with `key: (input) => string`
-   derived from a business identity the input carries (make that field
-   required), and send the handler's third argument to the service. The
-   double-fire certification proves the service honors it.
-5. **None of the above** → `idempotency: 'unsafe'` with an `unsafeBecause`
+4. **None of the above** → `idempotency: 'unsafe'` with an `unsafeBecause`
    naming the consequence and the fix
    (`'Comments have no identity; a retry would post a duplicate.'`). Unsafe is
    honest, never a workaround to avoid thinking.

@@ -8,13 +8,11 @@
  * 1. **Schema truth** — every operation's live response matches its declared
  *    output, and carries nothing undeclared (`strict.ts`, against the schema's
  *    own `toJsonSchema()` — the vendor-neutral spelling of "strict").
- * 2. **Retry safety** — every retryable command (`'natural'` and `'keyed'`
- *    alike) is fired **twice** with one identity and produces exactly one
- *    effect: the double delivery the engine's at-least-once contract will
- *    eventually produce, made routine. For a keyed command this is the test
- *    that the service actually honors the derived key. `'unsafe'` commands are
- *    refused a double-fire outright — one attempt *is* their certification,
- *    and the flag already carries the reason.
+ * 2. **Retry safety** — every `'natural'` command is fired **twice** with one
+ *    identity and produces exactly one effect: the double delivery the engine's
+ *    at-least-once contract will eventually produce, made routine. `'unsafe'`
+ *    commands are refused a double-fire outright — one attempt *is* their
+ *    certification, and the flag already carries the reason.
  * 3. **Delivery truth** — a caused event appears in the trigger's poll exactly
  *    once past the prior cursor, with a stable id, in increasing order, and not
  *    again once the cursor advances.
@@ -154,7 +152,7 @@ export interface LiveRegistrar<
       ctx: LiveCtx<FX, Q, C>,
     ) => In<Q[K]['input']> | Promise<In<Q[K]['input']>>,
   ): void;
-  /** Certify a `'natural'` or `'keyed'` command. Refused for `'unsafe'` ones. */
+  /** Certify a `'natural'` command. Refused for `'unsafe'` ones. */
   command<K extends keyof C & string, S = undefined>(
     name: K,
     certification: CommandCertification<FX, Q, C, S>,
@@ -264,15 +262,9 @@ export function planLiveSuite<
           if (!parsedIn.ok) {
             throw new ConnectorError('invalid', `${name}: ${parsedIn.message}`);
           }
-          // Keyed commands get their derived key here too — the harness path
-          // must exercise exactly what production activities run.
-          const idempotencyKey = (def as AnyCommandDef).key?.(
-            parsedIn.value as never,
-          );
           const raw = await def.handler(
             parsedIn.value as never,
             state.ctx as never,
-            idempotencyKey,
           );
           const parsedOut = await runSchema(def.output, raw);
           if (!parsedOut.ok) {
@@ -550,7 +542,7 @@ export function planLiveSuite<
     run: async () => {
       if (owed.length > 0) {
         throw new Error(
-          `uncertified operations: ${owed.join(', ')} — every query needs a t.query, every natural or keyed command a t.command, every trigger a t.trigger`,
+          `uncertified operations: ${owed.join(', ')} — every query needs a t.query, every natural command a t.command, every trigger a t.trigger`,
         );
       }
     },

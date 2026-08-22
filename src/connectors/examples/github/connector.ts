@@ -90,9 +90,9 @@ export const github = defineConnector({
       description: 'Open a new issue.',
       idempotency: 'unsafe',
       unsafeBecause:
-        'GitHub issue creation has no dedupe identity and accepts no ' +
-        "idempotency key, so a retry could file a duplicate. Declare 'keyed' " +
-        'the day GitHub accepts one.',
+        'GitHub issue creation has no dedupe identity, so a retry could file ' +
+        'a duplicate. Revisit if GitHub adds an idempotency key, or when ' +
+        'keyed idempotency lands.',
       input: t.object({
         ...repoRef,
         title: t.string({minLength: 1}),

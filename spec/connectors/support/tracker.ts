@@ -203,8 +203,8 @@ export const tracker = defineConnector({
       description: 'Add a comment to an issue.',
       idempotency: 'unsafe',
       unsafeBecause:
-        'Comments have no identity; a retry would post a duplicate. The ' +
-        "service accepts no idempotency key either, so 'keyed' cannot help.",
+        'Comments have no identity; a retry would post a duplicate. ' +
+        'Revisit when keyed idempotency lands.',
       input: t.object({issueKey: t.string(), body: t.string()}),
       output: t.object({commentId: t.string()}),
       handler: ({issueKey}, {svc}) => {

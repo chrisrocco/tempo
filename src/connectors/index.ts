@@ -47,9 +47,6 @@ export {
   type ConnectorErrorEnvelope,
   type ConnectorErrorKind,
 } from './errors';
-// A watch handle throws this when its poller child dies on a terminal poll
-// failure — the subscription ends loudly, at the `await` that depended on it.
-export {WatcherFailedError} from '../workflow';
 export {
   command,
   ops,

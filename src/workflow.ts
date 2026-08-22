@@ -165,7 +165,6 @@ export type {
   ActivityOptionsInput,
   RetryPolicyInput,
 } from './core/activity_options_input';
-export {durationToMs} from './libraries/walltime';
 export type {Duration} from './libraries/walltime';
 
 export type {ActivityProxy};
@@ -392,5 +391,4 @@ function toEveryMs(every: Duration | number): number {
   return typeof every === 'number' ? every : durationToMs(every);
 }
 
-export {WatcherFailedError} from './patterns/watcher';
 export type {WatcherHandle, WatcherProps} from './patterns/watcher';

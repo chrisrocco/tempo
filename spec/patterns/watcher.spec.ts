@@ -8,9 +8,8 @@
  * two histories (the child's `signalWorkflow` command, the parent's signal)
  * and comes out of `watch()` once, in order, with the watch's `input` having
  * reached the poll; the child is claimed under the documented deterministic
- * id; `start` defaults to `'new'`; `stop()` actually kills the poller; two
- * subscriptions on one watcher, told apart by `as`, do not cross wires; and a
- * poller that dies terminally fails its waiting parent instead of going deaf.
+ * id; `start` defaults to `'new'`; `stop()` actually kills the poller; and
+ * two subscriptions on one watcher, told apart by `as`, do not cross wires.
  *
  * ## Registration happens in `beforeAll`, deliberately
  *
@@ -73,7 +72,6 @@ describe('createWatcher', () => {
   const ticks: Msg[] = [];
   let tickPolls = 0;
   const dual: Msg[] = [];
-  let doomedPolls = 0;
 
   let streamWatcher: WatcherRef<Msg, number | undefined, {topic: string}>;
 
@@ -106,17 +104,6 @@ describe('createWatcher', () => {
       },
       diff: byCursor<Msg, number>((m) => m.id),
       every: 25,
-    });
-
-    const doomedWatcher = createWatcher('watcher-spec.doomed', {
-      poll: (): Msg[] => {
-        doomedPolls++;
-        throw new Error('the feed is gone');
-      },
-      diff: byCursor<Msg, number>((m) => m.id),
-      every: 25,
-      // Fail fast under test; the default budget takes most of a minute.
-      options: {retry: {maximumAttempts: 2, initialIntervalMs: 5}},
     });
 
     const dualWatcher = createWatcher('watcher-spec.dual', {
@@ -167,14 +154,6 @@ describe('createWatcher', () => {
       },
     });
 
-    const doomed = createWorkflow({
-      key: 'doomed',
-      async run() {
-        const sub = doomedWatcher.watch({start: 'all'});
-        return await sub.next(); // the feed never delivers; the failure must
-      },
-    });
-
     const bothParities = createWorkflow({
       key: 'bothParities',
       async run() {
@@ -207,7 +186,6 @@ describe('createWatcher', () => {
       freshWatcher,
       tickWatcher,
       dualWatcher,
-      doomedWatcher,
     ]) {
       const regs = watcher.registrations();
       for (const [name, fn] of Object.entries(regs.activities)) {
@@ -221,7 +199,6 @@ describe('createWatcher', () => {
     rt.registerWorkflow('firstFresh', firstFresh);
     rt.registerWorkflow('stopper', stopper);
     rt.registerWorkflow('bothParities', bothParities);
-    rt.registerWorkflow('doomed', doomed);
   });
 
   afterAll(() => {
@@ -293,20 +270,6 @@ describe('createWatcher', () => {
     expect(got.evenId).toBe(2);
     expect(got.oddId).toBe(1);
     expect(got.distinctSignals).toBe(true);
-  });
-
-  /**
-   * A poller that dies must not leave its parent parked forever on a signal
-   * that will never come: the child's last act is a failure marker on the same
-   * signal, and the handle turns it into a typed throw at the waiting `await`.
-   */
-  it('a terminal poll failure fails the waiting parent, loudly', async () => {
-    const handle = rt.start('doomed', undefined, {workflowId: 'doomed'});
-
-    await expectAsync(handle.result()).toBeRejectedWithError(
-      /watcher 'watcher-spec\.doomed' failed.*the feed is gone/,
-    );
-    expect(doomedPolls).toBe(2); // the retry budget was spent before giving up
   });
 
   it('declares its registrations for hosts that register explicitly', () => {
