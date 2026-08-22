@@ -1825,46 +1825,75 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // See the note in `pollWorkflowTask`: recorded before the queue is
     // consulted, so an idle poll still counts as liveness.
     workerRegistry.recordPoll('activity', taskQueue, identity, servesHash);
-    const task = activityTaskQueue.poll(taskQueue, identity);
-    if (!task) return undefined;
-    activityLeases.set(task.token, {
-      workflowId: task.workflowId,
-      seq: task.seq,
-    });
-    // A new attempt supersedes the last one's checkpoint, which now describes
-    // work being redone. This is the one path that ends an attempt without
-    // deleting its lease — the queue expiring it and redelivering — and the stale
-    // lease must stay: `completeActivityTask` relies on it to accept a late
-    // completion from the abandoned worker. So only the checkpoint is cleared.
-    for (const [token, lease] of activityLeases)
+    for (;;) {
+      const task = activityTaskQueue.poll(taskQueue, identity);
+      if (!task) return undefined;
+      // The queue redelivers on silence, and silence cannot tell a dead worker
+      // from a slow one — so a wrong guess leaves a copy of the task
+      // circulating after the original attempt settled the seq. The copy can
+      // never leave on its own: every attempt of an activity slower than the
+      // lease acks after redelivery, where the ack is a no-op. Unchecked, it
+      // loops forever — a phantom `activityStarted` per lease period, a real
+      // re-execution per loop. This is the one moment every copy passes back
+      // through the server's hands, so it is where the queue's guess is
+      // reconciled against history: same predicate as the result-side dedup in
+      // `reportActivityResult`, and terminal-events-only for the same reason a
+      // looser one would break retries — a retry reuses its seq, marked by
+      // `activityRetryScheduled`, never by a terminal event. Costs one store
+      // read per dispatch; idle polls return above without reading.
+      const rec = await historyStore.get(task.workflowId);
       if (
-        token !== task.token &&
-        lease.workflowId === task.workflowId &&
-        lease.seq === task.seq
-      )
-        lease.checkpoint = undefined;
-    // Stamped here rather than reported by the worker at completion, for two
-    // reasons. One clock: a `startedAt` from the worker is on the worker's clock,
-    // and a skewed one could claim to have started after the server recorded it
-    // finished. And it is written *now*, so an attempt still running is visible —
-    // a value carried on the completion event would say nothing until it was over,
-    // which is the half of the question an operator actually asks first.
-    await appendEvent(task.workflowId, {
-      type: 'activityStarted',
-      seq: task.seq,
-      identity,
-    });
-    // Armed on poll, not on dispatch: both deadlines bound the attempt, and the
-    // attempt begins when a worker takes the task, not when it was queued.
-    const {startToCloseTimeoutMs, heartbeatTimeoutMs} = task.options;
-    if (startToCloseTimeoutMs !== undefined && startToCloseTimeoutMs > 0)
-      armAttemptTimer(task, 'startToClose', startToCloseTimeoutMs);
-    // The heartbeat clock starts now, so an attempt that never beats at all is
-    // caught just as surely as one that stops partway.
-    if (heartbeatTimeoutMs !== undefined && heartbeatTimeoutMs > 0)
-      armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
-    heartbeatTasks.set(task.token, task);
-    return task;
+        !rec ||
+        rec.status !== 'running' ||
+        completedSeqs(rec.history).activities.has(task.seq)
+      ) {
+        activityTaskQueue.complete(task.token); // ack the fresh lease — the copy dies here
+        log('activity.stale_delivery_dropped', {
+          workflowId: task.workflowId,
+          seq: task.seq,
+          name: task.name,
+        });
+        continue;
+      }
+      activityLeases.set(task.token, {
+        workflowId: task.workflowId,
+        seq: task.seq,
+      });
+      // A new attempt supersedes the last one's checkpoint, which now describes
+      // work being redone. This is the one path that ends an attempt without
+      // deleting its lease — the queue expiring it and redelivering — and the stale
+      // lease must stay: `completeActivityTask` relies on it to accept a late
+      // completion from the abandoned worker. So only the checkpoint is cleared.
+      for (const [token, lease] of activityLeases)
+        if (
+          token !== task.token &&
+          lease.workflowId === task.workflowId &&
+          lease.seq === task.seq
+        )
+          lease.checkpoint = undefined;
+      // Stamped here rather than reported by the worker at completion, for two
+      // reasons. One clock: a `startedAt` from the worker is on the worker's clock,
+      // and a skewed one could claim to have started after the server recorded it
+      // finished. And it is written *now*, so an attempt still running is visible —
+      // a value carried on the completion event would say nothing until it was over,
+      // which is the half of the question an operator actually asks first.
+      await appendEvent(task.workflowId, {
+        type: 'activityStarted',
+        seq: task.seq,
+        identity,
+      });
+      // Armed on poll, not on dispatch: both deadlines bound the attempt, and the
+      // attempt begins when a worker takes the task, not when it was queued.
+      const {startToCloseTimeoutMs, heartbeatTimeoutMs} = task.options;
+      if (startToCloseTimeoutMs !== undefined && startToCloseTimeoutMs > 0)
+        armAttemptTimer(task, 'startToClose', startToCloseTimeoutMs);
+      // The heartbeat clock starts now, so an attempt that never beats at all is
+      // caught just as surely as one that stops partway.
+      if (heartbeatTimeoutMs !== undefined && heartbeatTimeoutMs > 0)
+        armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
+      heartbeatTasks.set(task.token, task);
+      return task;
+    }
   }
 
   async function heartbeatActivityTask(
