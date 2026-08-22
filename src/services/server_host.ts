@@ -150,6 +150,12 @@ export interface ServerHostOptions {
   /** Lease timeout for activity tasks (ms). Default 30s. A short value forces redelivery. */
   activityLeaseMs?: number;
   /**
+   * Start-to-close deadline for activities that configured no deadline of their
+   * own. Default 10 minutes — see `ServerCoreDeps.defaultStartToCloseTimeoutMs`
+   * for the policy and the opt-outs (`startToCloseTimeoutMs: 0`, heartbeats).
+   */
+  defaultStartToCloseTimeoutMs?: number;
+  /**
    * How long a closed execution is kept before the retention sweep deletes it —
    * record, history, and outcome. **Unset means keep forever**, which is the
    * only correct default: how long a result stays claimable is a contract with
@@ -231,6 +237,7 @@ export function createServerHost(
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
     log,
+    defaultStartToCloseTimeoutMs: options.defaultStartToCloseTimeoutMs,
   });
   timerService.recover();
 
