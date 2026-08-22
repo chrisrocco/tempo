@@ -18,13 +18,13 @@
  * | --- | --- |
  * | create | `start` the scheduler workflow under a chosen id |
  * | pause / resume / trigger / update | `signal` |
- * | describe | `describeExecution` — args are the definition, carryover the status |
+ * | describe | `describeExecution` — props are the definition, carryover the status |
  * | list | `listExecutions({name})` |
  * | delete | `cancel` |
  *
  * So this is a *vocabulary* over the existing seam rather than an extension of it,
  * which is what lets the whole slice live in one directory importing only
- * `protocol/`. It works against a local runtime and a remote server without knowing
+ * `protocol/` and the `walltime/` library. It works against a local runtime and a remote server without knowing
  * which it has, because `WorkflowService` is the seam both implement.
  *
  * The one thing an RPC layer would have bought — rejecting a bad spec before it becomes
@@ -39,7 +39,9 @@
  */
 
 import {DEFAULT_TASK_QUEUE, isNameServed} from '../protocol';
+import {durationToMs, type Duration} from '../libraries/walltime';
 import type {
+  CalendarSpec,
   ExecutionDetail,
   ExecutionPage,
   ExecutionSummary,
@@ -47,6 +49,7 @@ import type {
   ScheduleDefinition,
   ScheduleSpec,
   ScheduleStatus,
+  ScheduleTarget,
   WorkflowService,
 } from '../protocol';
 import {scheduleSpecProblems} from './next_fire';
@@ -60,6 +63,108 @@ import {scheduleSpecProblems} from './next_fire';
  */
 export const SCHEDULER_WORKFLOW_NAME = 'scheduler';
 
+/**
+ * An interval spec as a caller may write one: the wire fields, or `Duration`
+ * spellings of them — `{type: 'interval', every: '1 hour', offset: '15 min'}`.
+ * Exactly one spelling of the period; the offset is optional in either.
+ */
+export interface IntervalSpecInput {
+  type: 'interval';
+  /** `everyMs`, as a `Duration`. Set one or the other, not both. */
+  every?: Duration;
+  everyMs?: number;
+  /** `offsetMs`, as a `Duration`. Set one or the other, not both. */
+  offset?: Duration;
+  offsetMs?: number;
+}
+
+/** A spec as `create`/`update` accept it. Calendar specs have no `…Ms` fields to sweeten. */
+export type ScheduleSpecInput = IntervalSpecInput | CalendarSpec;
+
+/** A definition as `create`/`update` accept it: `ScheduleDefinition`, spec sugar included. */
+export interface ScheduleDefinitionInput {
+  spec: ScheduleSpecInput;
+  bounds?: ScheduleBounds;
+  target: ScheduleTarget;
+  paused?: boolean;
+}
+
+/**
+ * The stored spec a spec input means. Throws on a contradiction (both spellings
+ * of one field) or a missing period, with the schedule id added by the caller —
+ * these are refused-call errors, same as a failed validation.
+ *
+ * What gets stored — and therefore what `describe` reports and the scheduler
+ * replays — is always the wire form in milliseconds. The sugar exists only at
+ * this seam, for the same reason duration strings never reach a timer command:
+ * one representation once it is durable.
+ */
+function normalizeSpec(spec: ScheduleSpecInput): ScheduleSpec {
+  if (spec.type === 'calendar') return spec;
+
+  function pickMs(
+    name: string,
+    duration: Duration | undefined,
+    msName: string,
+    ms: number | undefined,
+  ): number | undefined {
+    if (duration !== undefined && ms !== undefined)
+      throw new Error(
+        `set ${name} or ${msName}, not both — they are the same field in two spellings`,
+      );
+    return duration === undefined ? ms : durationToMs(duration);
+  }
+
+  const everyMs = pickMs('every', spec.every, 'everyMs', spec.everyMs);
+  if (everyMs === undefined)
+    throw new Error(`an interval spec needs a period — set every or everyMs`);
+  const offsetMs = pickMs('offset', spec.offset, 'offsetMs', spec.offsetMs);
+  return {
+    type: 'interval',
+    everyMs,
+    ...(offsetMs === undefined ? {} : {offsetMs}),
+  };
+}
+
+/**
+ * Spec sugar resolved, spec validated, queue named — the one path a definition
+ * takes on its way to being stored, shared by `create` and `update` so the two
+ * cannot drift on what a valid definition is.
+ */
+function normalizeDefinition(
+  scheduleId: string,
+  verb: 'create' | 'update',
+  definition: ScheduleDefinitionInput,
+): ScheduleDefinition {
+  function refuse(reason: string): never {
+    throw new Error(`cannot ${verb} schedule "${scheduleId}": ${reason}`);
+  }
+
+  let spec: ScheduleSpec;
+  try {
+    spec = normalizeSpec(definition.spec);
+  } catch (error) {
+    return refuse((error as Error).message);
+  }
+  const problems = scheduleSpecProblems(spec, definition.bounds ?? {});
+  if (problems.length > 0) refuse(problems.join('; '));
+
+  // The queue is normalised here rather than left undefined, so that what gets
+  // stored — and therefore what `describe` reports — always names the queue the
+  // runs will go to. An undefined queue reaching the scheduler would be resolved
+  // by the server as "inherit the starter's queue", which is right only while the
+  // scheduler happens to be colocated with the target's workers and silently
+  // changes meaning if it ever is not.
+  return {
+    ...definition,
+    spec,
+    target: {
+      ...definition.target,
+      taskQueue: definition.target.taskQueue ?? DEFAULT_TASK_QUEUE,
+    },
+  };
+}
+
 /** A schedule as a listing shows it. */
 export interface ScheduleSummary {
   scheduleId: string;
@@ -72,7 +177,7 @@ export interface ScheduleView {
   scheduleId: string;
   status: ExecutionSummary['status'];
   /**
-   * The definition currently in force — the args of the run in progress, so an
+   * The definition currently in force — the props of the run in progress, so an
    * `update` is reflected here from its next rollover.
    */
   definition: ScheduleDefinition | undefined;
@@ -122,7 +227,7 @@ export interface ScheduleClient {
    */
   create(
     scheduleId: string,
-    definition: ScheduleDefinition,
+    definition: ScheduleDefinitionInput,
   ): Promise<ScheduleCreation>;
   /** Every schedule, live or finished. */
   list(): Promise<ScheduleSummary[]>;
@@ -152,8 +257,13 @@ export interface ScheduleClient {
   /**
    * Replace the definition. Takes effect at the schedule's next rollover, which is its
    * next fire or its next signal.
+   *
+   * Validated like `create`, and a bad definition **throws** before anything is
+   * sent — the alternative is a signal that reaches the scheduler, rolls over
+   * into arguments its `nextFire` activity rejects, and fails the schedule
+   * itself, which is strictly worse than a refused call.
    */
-  update(scheduleId: string, definition: ScheduleDefinition): void;
+  update(scheduleId: string, definition: ScheduleDefinitionInput): void;
   /**
    * Stop the schedule for good.
    *
@@ -200,7 +310,7 @@ async function unservedWarnings(
     warnings.push(
       `no worker on task queue "${schedulerTaskQueue}" runs "${SCHEDULER_WORKFLOW_NAME}", ` +
         `so this schedule will not fire. Register it: ` +
-        `Tempo.startWorker({workflows: {...yours, ...scheduleWorkflows}}).`,
+        `startWorker({workflows: {...yours, ...scheduleWorkflows}}).`,
     );
 
   // The schedule fires correctly and its runs pile up unstarted.
@@ -246,30 +356,9 @@ export function createScheduleClient(
 
   return {
     async create(scheduleId, definition) {
-      const problems = scheduleSpecProblems(
-        definition.spec as ScheduleSpec,
-        (definition.bounds ?? {}) as ScheduleBounds,
-      );
-      if (problems.length > 0)
-        throw new Error(
-          `cannot create schedule "${scheduleId}": ${problems.join('; ')}`,
-        );
+      const normalized = normalizeDefinition(scheduleId, 'create', definition);
 
-      // Normalised here rather than left undefined, so that what gets stored — and
-      // therefore what `describe` reports — always names the queue the runs will go to.
-      // An undefined queue reaching the scheduler would be resolved by the server as
-      // "inherit the starter's queue", which is right only while the scheduler happens
-      // to be colocated with the target's workers and silently changes meaning if it
-      // ever is not.
-      const normalized: ScheduleDefinition = {
-        ...definition,
-        target: {
-          ...definition.target,
-          taskQueue: definition.target.taskQueue ?? DEFAULT_TASK_QUEUE,
-        },
-      };
-
-      service.start(SCHEDULER_WORKFLOW_NAME, [normalized], {
+      service.start(SCHEDULER_WORKFLOW_NAME, normalized, {
         workflowId: scheduleId,
         // **The scheduler's queue, not the target's.** These were the same value until
         // it became clear they answer different questions: this one asks where the
@@ -321,7 +410,7 @@ export function createScheduleClient(
       return {
         scheduleId,
         status: detail.status,
-        definition: detail.args[0] as ScheduleDefinition | undefined,
+        definition: detail.props as ScheduleDefinition | undefined,
         schedule: detail.carryover?.['schedule'] as ScheduleStatus | undefined,
       };
     },
@@ -352,7 +441,11 @@ export function createScheduleClient(
       send(scheduleId, 'triggerSchedule');
     },
     update(scheduleId, definition) {
-      send(scheduleId, 'updateSchedule', definition);
+      send(
+        scheduleId,
+        'updateSchedule',
+        normalizeDefinition(scheduleId, 'update', definition),
+      );
     },
     delete(scheduleId) {
       service.cancel(scheduleId);

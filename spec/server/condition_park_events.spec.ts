@@ -20,7 +20,7 @@ import type {
   ConditionParkedEvent,
   ConditionUnparkedEvent,
 } from '../../src/protocol';
-import {condition, defineSignal, setHandler} from '../../src/workflow';
+import {condition, setHandler} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -35,8 +35,8 @@ function parkEvents(
   );
 }
 
-const go = defineSignal('go');
-const nudge = defineSignal('nudge');
+const go = 'go';
+const nudge = 'nudge';
 
 describe('a parked condition in history', () => {
   it('records the park while the workflow is still waiting', async () => {
@@ -46,7 +46,7 @@ describe('a parked condition in history', () => {
         await condition(() => false);
         return 'never';
       })
-      .start('waiter', [], {workflowId: 'cp-1'});
+      .start('waiter', undefined, {workflowId: 'cp-1'});
     await wait(150);
 
     // The state this whole pair exists for: running, nothing pending, nothing
@@ -74,7 +74,7 @@ describe('a parked condition in history', () => {
         return 'went';
       },
     );
-    const handle = rt.start<string>('waiter', [], {workflowId: 'cp-2'});
+    const handle = rt.start<string>('waiter', undefined, {workflowId: 'cp-2'});
     await wait(150);
     handle.signal('go');
     await expectAsync(handle.result()).toBeResolvedTo('went');
@@ -109,7 +109,7 @@ describe('a parked condition in history', () => {
         return `went after ${nudges}`;
       },
     );
-    const handle = rt.start<string>('patient', [], {workflowId: 'cp-3'});
+    const handle = rt.start<string>('patient', undefined, {workflowId: 'cp-3'});
     await wait(120);
     for (let i = 0; i < 5; i++) {
       handle.signal('nudge');
@@ -134,7 +134,7 @@ describe('a parked condition in history', () => {
         await Promise.all([condition(() => false), condition(() => false)]);
         return 'never';
       })
-      .start('two', [], {workflowId: 'cp-4'});
+      .start('two', undefined, {workflowId: 'cp-4'});
     await wait(150);
 
     const events = parkEvents(await store.get('cp-4'));
@@ -142,6 +142,51 @@ describe('a parked condition in history', () => {
     // Distinct ids, from `condSeq` — which is not the command counter, so these
     // two events share no numbering with any marker in the same history.
     expect(new Set(events.map((e) => e.condSeq)).size).toBe(2);
+  });
+
+  it('stamps the declared awaiting on the park, and appends nothing while it survives', async () => {
+    // The live parked state forgets an answered wait; this is where "what was
+    // it waiting for" survives for the reader asking after the fact. And the
+    // stamp must inherit the transition rule: an awaiting is re-reported on
+    // every task the park survives, and must compare equal each time rather
+    // than reopening the span.
+    const store = new MemoryHistoryStore();
+    const rt = createLocalRuntime({historyStore: store}).registerWorkflow(
+      'gate',
+      async () => {
+        let ready = false;
+        let nudges = 0;
+        setHandler(go, () => {
+          ready = true;
+        });
+        setHandler(nudge, () => {
+          nudges += 1;
+        });
+        await condition(() => ready, {
+          awaiting: {kind: 'approval', signal: 'go'},
+        });
+        return `went after ${nudges}`;
+      },
+    );
+    const handle = rt.start<string>('gate', undefined, {workflowId: 'cp-6'});
+    await wait(120);
+    for (let i = 0; i < 3; i++) {
+      handle.signal('nudge');
+      await wait(20);
+    }
+    handle.signal('go');
+    await expectAsync(handle.result()).toBeResolvedTo('went after 3');
+
+    const events = parkEvents(await store.get('cp-6'));
+    // One span, not one per wake-up — same guarantee as an undeclared park.
+    expect(events.map((e) => e.type)).toEqual([
+      'conditionParked',
+      'conditionUnparked',
+    ]);
+    expect((events[0] as ConditionParkedEvent).awaiting).toEqual({
+      kind: 'approval',
+      signal: 'go',
+    });
   });
 
   it('writes nothing at all for a workflow that never parks', async () => {
@@ -153,7 +198,7 @@ describe('a parked condition in history', () => {
       async () => 'done',
     );
     await expectAsync(
-      rt.start<string>('plain', [], {workflowId: 'cp-5'}).result(),
+      rt.start<string>('plain', undefined, {workflowId: 'cp-5'}).result(),
     ).toBeResolvedTo('done');
 
     expect(parkEvents(await store.get('cp-5')).length).toBe(0);
@@ -177,7 +222,7 @@ describe('what the park events must not disturb', () => {
         return 'went';
       },
     );
-    const handle = rt.start<string>('mixed', [], {workflowId: 'cq-1'});
+    const handle = rt.start<string>('mixed', undefined, {workflowId: 'cq-1'});
     await wait(150);
     handle.signal('go');
     await expectAsync(handle.result()).toBeResolvedTo('went');
@@ -209,7 +254,7 @@ describe('what the park events must not disturb', () => {
         return 'both';
       },
     );
-    const handle = rt.start<string>('twice', [], {workflowId: 'cq-2'});
+    const handle = rt.start<string>('twice', undefined, {workflowId: 'cq-2'});
     await wait(120);
     handle.signal('go');
     await wait(80);

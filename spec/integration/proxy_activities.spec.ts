@@ -141,7 +141,7 @@ describe('proxyActivities — precedence and collisions', () => {
     });
 
     try {
-      const {workflowId} = server.service.start('greeter', []);
+      const {workflowId} = server.service.start('greeter');
       await expectAsync(server.service.getResult(workflowId)).toBeResolvedTo(
         'passed explicitly',
       );

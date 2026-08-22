@@ -112,10 +112,9 @@ describe('worker identity — naming workers', () => {
   });
 
   // Whether a worker holds a lease is `server_core`'s join to make; this table
-  // watches polls and nothing else. It used to report `busy: false` — honest but
-  // still an assertion it had not observed — and now does not carry the field at
-  // all, so a caller cannot read a claim that was never made. `ObservedWorker`
-  // is what enforces that; this case is what says why.
+  // watches polls and nothing else, so it does not carry the field at all and a
+  // caller cannot read a claim that was never made. `ObservedWorker` is what
+  // enforces that; this case is what says why.
   it('does not report whether a worker is busy, because it cannot know', () => {
     const registry = createWorkerRegistry(() => 1_000);
 
@@ -265,7 +264,7 @@ describe('worker identity — a busy worker still serves its queue', () => {
 describe('worker identity — end to end through a server host', () => {
   it('reports a worker holding a task as busy, and as idle once it reports back', async () => {
     const host = createServerHost();
-    await host.start('greeter', [], {taskQueue: 'email'});
+    await host.start('greeter', undefined, {taskQueue: 'email'});
 
     const task = await host.pollWorkflowTask({
       taskQueue: 'email',

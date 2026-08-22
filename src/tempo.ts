@@ -2,7 +2,7 @@
  * @fileoverview
  * ★ WORKER ENTRYPOINT — the single call a deployable worker binary makes.
  *
- * `Tempo.startWorker({name, workflows, activities})` wires a service to the
+ * `startWorker({name, workflows, activities})` wires a service to the
  * registries it builds from imported module namespaces (`import * as activities
  * from './activities'`). The export name is the registered name, so there is no
  * registration boilerplate.
@@ -14,8 +14,9 @@
  *   --server=URL   overrides `serverUrl` (else 127.0.0.1:7777)
  *   --queue=NAME   overrides `taskQueue` (else `default`)
  *   --role=ROLE    overrides `role` — unset runs every role it can
+ *   --activity-concurrency=N  how many activities run at once (default 1)
  *   --local=NAME   run that workflow once with no server, print, exit
- *   --args=JSON    its arguments, as a JSON array (with `--local` only)
+ *   --props=JSON   its props, as a JSON object (with `--local` only)
  *
  * Running the *same* binary twice with a different `--role` is how the two worker
  * tiers are deployed: workflow workers replay workflow code, activity workers run
@@ -42,32 +43,28 @@
  *
  * ## `--local=NAME` runs one workflow and exits
  *
- *   node worker.js --local=greeter --args='["world"]'
+ *   node worker.js --local=greeter --props='{"name":"world"}'
  *
  * No server, no port, no data directory, no poll loops: `createLocalRuntime()`
  * gets the same registries `startWorker` was handed, runs the named workflow to
  * completion, prints its result as JSON on stdout, and the process exits — 0 on
  * success, 1 on failure.
  *
- * **This is deliberately a second composition inside a deployable artifact,
- * which an earlier version of this file removed for being exactly that.** The
- * removal was right at the time and the reasoning is worth keeping, because what
- * changed is the circumstances rather than the argument:
+ * **This is deliberately a second composition inside a deployable artifact**,
+ * which is normally the thing to refuse. Three objections stand against it, and
+ * each has an answer:
  *
- * - The old `--runtime=local` made the artifact *become* a long-lived local
- *   runtime — two services to keep working, and a startup path that branched on
- *   which one it was. This one is **terminal**: it runs, it prints, it exits.
- *   There is no second long-lived thing, and no state in which a process is half
- *   a worker.
- * - The capability was going to come back as `tempo run-local`, a command of the
- *   CLI. That CLI is gone for good (#64), so there is no other home left. The
- *   choice is this or nothing.
- * - The objection that it "can only run what its own binary compiled in" still
- *   stands, and is now the *point*: it runs the shipped artifact, so it proves
- *   the workflow is registered in the bundle a deployment would install. That
- *   check had no home after `--runtime=local` went, and an artifact whose
- *   workflows were never registered otherwise reports nothing until executions
- *   park on a queue whose workers reject every task.
+ * - **"It makes the artifact two services."** A long-lived local runtime would —
+ *   two things to keep working, and a startup path that branches on which one it
+ *   is. This one is **terminal**: it runs, it prints, it exits. There is no
+ *   second long-lived thing, and no state in which a process is half a worker.
+ * - **"It belongs in the CLI."** There is no CLI and there will not be one
+ *   (#64), so there is no other home. The choice is this or nothing.
+ * - **"It can only run what its own binary compiled in."** True, and that is the
+ *   *point*: it runs the shipped artifact, so it proves the workflow is
+ *   registered in the bundle a deployment would install. Nothing else checks
+ *   that, and an artifact whose workflows were never registered reports nothing
+ *   until executions park on a queue whose workers reject every task.
  *
  * **It refuses `--server` and `--role`** rather than quietly winning over them.
  * Both are contradictions at the launch site: there is no server to dial, and one
@@ -119,12 +116,8 @@
  * override — so code supplies the default the application ships with and the
  * launch site supplies the deviation.
  *
- * They used to be `TEMPO_SERVER_URL`, `TEMPO_TASK_QUEUE`, and `TEMPO_ROLE`. The
- * reason they are flags is in `process_flags.ts` and is the same reason the
- * `--runtime` flag that used to live here was a flag: **an environment variable
- * is inherited and a flag is not**, and one stale `TEMPO_SERVER_URL` in a shell
- * turns the next worker launched from it into a process that serves nobody while
- * printing `WORKER_READY` and looking healthy to its supervisor.
+ * They are flags rather than environment variables for the reasons in
+ * `process_flags.ts`, which owns that argument.
  *
  * Everything else is code only, deliberately. A value that changes only when the
  * code changes has no business being ambient, where it is invisible at the call
@@ -135,8 +128,8 @@
  * deployments set.
  *
  * The shape follows Temporal's client, where the address is a connection
- * argument rather than ambient state — and it is what the older "deployment
- * config is never passed in code" rule was really protecting, since the launch
+ * argument rather than ambient state — and it keeps what a strict "deployment
+ * config is never passed in code" rule is really protecting, since the launch
  * site still overrides the three values a redeploy needs.
  */
 
@@ -151,6 +144,12 @@ import {DEFAULT_TASK_QUEUE} from './protocol';
 import {createJsonLogger} from './server';
 import {createRemoteService} from './services';
 import {workflowDescriptor} from './workflow_descriptor';
+import {
+  registeredWorkflowImpls,
+  resolveListedWorkflow,
+  resolveWorkflowRegistration,
+  workflowNameConflicts,
+} from './workflow_registry';
 import {
   createActivityRegistry,
   createActivityWorker,
@@ -212,6 +211,28 @@ export interface StartWorkerOptions {
    */
   role?: WorkerRole;
   /**
+   * How many activities this process runs at once.
+   * `--activity-concurrency` overrides. Default 1 — the sequential loop.
+   *
+   * The knob exists because an activity is the consumer's own I/O, and a
+   * sequential worker is idle for the whole of every call it makes: one model
+   * request that thinks for thirty seconds occupies a process that could have
+   * been running dozens. Raising this is the cheapest throughput there is for
+   * an I/O-bound fleet, and it changes nothing about correctness — each task is
+   * still leased, heartbeated and completed exactly as before.
+   *
+   * What it does *not* do is make a CPU-bound activity faster. Node runs one
+   * thread; concurrency overlaps waiting, not computing. For work that burns
+   * CPU, more processes remain the answer — which is what `role` is for.
+   *
+   * **Activity loop only, deliberately.** Workflow replay is CPU-bound and gains
+   * little from overlap, and the two roles are scaled separately anyway (see
+   * `role`), so one number covering both would be the wrong number for one of
+   * them. `WorkerLoopOptions.maxConcurrentTasks` is the lower-level knob for
+   * anyone composing loops directly.
+   */
+  activityConcurrency?: number;
+  /**
    * What this worker calls itself on every poll, so `Client.queues()` can count
    * and name the fleet. Defaults to `${pid}@${hostname}`.
    *
@@ -231,8 +252,27 @@ export interface StartWorkerOptions {
   errorBackoffMs?: number;
   /** Ceiling for that doubling. */
   maxErrorBackoffMs?: number;
-  /** Module namespace of workflow functions, keyed by export name. */
-  workflows?: object;
+  /**
+   * The roots this deployment serves directly, either way round:
+   *
+   * - **A list of references** — `{workflows: [order, refund]}`. Each carries
+   *   its own wire name, so nothing here supplies one. Prefer this where the
+   *   workflows are declared with `createWorkflow`.
+   * - **A module namespace**, keyed by export name — `{workflows: modules}`.
+   *   The key names a plain function, which is how a workflow that is just a
+   *   function gets a wire name at all. A `WorkflowRef` in a namespace still
+   *   registers under its *own* name rather than the export key, so an alias
+   *   cannot become a second name for one workflow.
+   *
+   * A plain function in the **list** form throws, because a list has no key to
+   * give it; the error names both fixes.
+   *
+   * Everything `createWorkflow` registered is included automatically, so
+   * children invoked through their references need no entry here. This doubles
+   * as the escape hatch when two `createWorkflow` calls claim one name — an
+   * entry here wins.
+   */
+  workflows?: object | readonly AnyFn[];
   /** Module namespace of activity functions, keyed by export name. */
   activities?: object;
 }
@@ -297,6 +337,31 @@ interface RequestedRole {
  * was written — a unit file or a source file are very different things to go and
  * fix.
  */
+/**
+ * How many activities to run at once: `--activity-concurrency`, else the option,
+ * else the sequential default the loop applies for itself.
+ *
+ * The same precedence every other knob here has — the launch site outranks the
+ * artifact, because how much concurrency a host can stand is a fact about the
+ * deployment rather than about the code. Rejects a value that is not a positive
+ * integer instead of clamping it: `--activity-concurrency=abc` is a typo in a
+ * unit file, and a worker that silently ran one at a time would look healthy
+ * while delivering none of the throughput it was redeployed for.
+ */
+export function resolveActivityConcurrency(
+  argv: readonly string[],
+  option: number | undefined,
+): number | undefined {
+  const raw = flagValue(argv, WORKER_FLAG.activityConcurrency);
+  if (raw === undefined) return option;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1)
+    throw new Error(
+      `--${WORKER_FLAG.activityConcurrency} needs a positive integer, got ${raw}`,
+    );
+  return value;
+}
+
 export function requestedRole(
   argv: readonly string[],
   option: WorkerRole | undefined,
@@ -341,10 +406,10 @@ function resolveRoles(
   return roles;
 }
 
-/** What `--local` asked for: one workflow, and the arguments to run it with. */
+/** What `--local` asked for: one workflow, and the props to run it with. */
 export interface LocalRun {
   workflow: string;
-  args: readonly unknown[];
+  props: unknown;
 }
 
 /**
@@ -359,10 +424,11 @@ export interface LocalRun {
  * - **`--role` with `--local`** — a local run has one in-process pair serving
  *   every queue, so a role could only narrow it into parking the execution on
  *   work nothing will claim.
- * - **`--args` that is not a JSON array** — the arguments are spread into the
- *   workflow's parameters, so a bare string or an object is a workflow called
- *   with one argument it did not expect, failing somewhere inside rather than
- *   here.
+ * - **`--props` that is not a JSON object** — a workflow takes one props object,
+ *   so an array or a bare string is a workflow called with something it cannot
+ *   destructure, failing somewhere inside rather than here. An array is worth
+ *   naming separately: it is what a command line written against the older
+ *   `--args` spelling still passes.
  *
  * The options object is deliberately not consulted: `--local` says this run is
  * not a deployment, and `serverUrl`/`role` in code are the deployment's defaults.
@@ -380,20 +446,24 @@ export function resolveLocalRun(argv: readonly string[]): LocalRun | undefined {
         `--${contradicted} cannot be combined with --local: a local run has no server and runs every role in one process`,
       );
 
-  const raw = flagValue(argv, WORKER_FLAG.args);
-  if (raw === undefined) return {workflow, args: []};
+  const raw = flagValue(argv, WORKER_FLAG.props);
+  if (raw === undefined) return {workflow, props: undefined};
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error(`--args must be JSON (got ${raw})`);
+    throw new Error(`--props must be JSON (got ${raw})`);
   }
-  if (!Array.isArray(parsed))
+  if (Array.isArray(parsed))
     throw new Error(
-      `--args must be a JSON array of the workflow's arguments, as --args='["world"]' (got ${raw})`,
+      `--props must be a JSON object, not an array: a workflow takes one props object, as --props='{"name":"world"}' (got ${raw})`,
     );
-  return {workflow, args: parsed};
+  if (typeof parsed !== 'object' || parsed === null)
+    throw new Error(
+      `--props must be a JSON object, as --props='{"name":"world"}' (got ${raw})`,
+    );
+  return {workflow, props: parsed};
 }
 
 /**
@@ -422,7 +492,7 @@ export async function runLocally(
   try {
     // `start` throws "no workflow registered as …" for a name the artifact does
     // not have, which is the smoke test this whole flag exists to make possible.
-    return await runtime.start(run.workflow, [...run.args]).result();
+    return await runtime.start(run.workflow, run.props).result();
   } finally {
     runtime.shutdown();
   }
@@ -448,6 +518,8 @@ function composeRemote(args: {
   taskQueue: string;
   roles: readonly WorkerRole[];
   loop: WorkerLoopTuning;
+  /** In-flight activity limit; see `StartWorkerOptions.activityConcurrency`. */
+  activityConcurrency: number | undefined;
   workflows: readonly [string, AnyFn][];
   activities: readonly [string, AnyFn][];
 }): {stop(): Promise<void>} {
@@ -509,6 +581,9 @@ function composeRemote(args: {
         ...args.loop,
         onError,
         taskQueue: args.taskQueue,
+        ...(args.activityConcurrency === undefined
+          ? {}
+          : {maxConcurrentTasks: args.activityConcurrency}),
       }),
     );
   }
@@ -524,7 +599,20 @@ function composeRemote(args: {
 }
 
 export function startWorker(options: StartWorkerOptions): Worker {
-  const workflows = callableEntries(options.workflows);
+  // What `createWorkflow` registered first, then what this call was handed, so
+  // an explicit entry wins over a registered one of the same name — the same
+  // precedence, and the same escape hatch, as `activities` below. An entry that
+  // is a `WorkflowRef` registers its implementation under its own wire name:
+  // the reference only dispatches, and the engine invoking it would be a
+  // workflow forever starting itself as its own child.
+  const explicitWorkflows = Array.isArray(options.workflows)
+    ? (options.workflows as readonly AnyFn[]).map(resolveListedWorkflow)
+    : callableEntries(options.workflows).map(([exported, fn]) =>
+        resolveWorkflowRegistration(exported, fn),
+      );
+  const workflows = [
+    ...new Map([...registeredWorkflowImpls(), ...explicitWorkflows]),
+  ];
   // What the workflows declared via `proxyActivities` first, then what this call
   // was handed, so an explicitly-passed activity wins over a declared one of the
   // same name — a caller that supplies its own set (a spec, a test double) is
@@ -568,6 +656,23 @@ export function startWorker(options: StartWorkerOptions): Worker {
         `Rename one of them, or name the intended implementation in startWorker({activities}), which overrides anything declared.`,
     );
 
+  // The same refusal for workflow names, for the same reason: two
+  // `createWorkflow` calls claiming one name leaves the registry holding
+  // whichever module loaded last, and a worker that started anyway would replay
+  // the wrong body — silently, forever, and looking healthy.
+  const explicitWorkflowNames = new Set(
+    explicitWorkflows.map(([name]) => name),
+  );
+  const unresolvedWorkflows = workflowNameConflicts().filter(
+    (name) => !explicitWorkflowNames.has(name),
+  );
+  if (unresolvedWorkflows.length > 0)
+    throw new Error(
+      `worker "${options.name}" has ${unresolvedWorkflows.length} workflow name${unresolvedWorkflows.length === 1 ? '' : 's'} claimed by more than one createWorkflow call: ${unresolvedWorkflows.join(', ')}. ` +
+        `Whichever module loaded last would win, so this worker refuses to start rather than replay a body nobody chose. ` +
+        `Rename one of them, or name the intended workflow in startWorker({workflows}), which overrides anything registered.`,
+    );
+
   // Read once, from the process's own arguments past the interpreter and script.
   const argv = process.argv.slice(2);
 
@@ -598,6 +703,10 @@ export function startWorker(options: StartWorkerOptions): Worker {
       errorBackoffMs: options.errorBackoffMs,
       maxErrorBackoffMs: options.maxErrorBackoffMs,
     },
+    activityConcurrency: resolveActivityConcurrency(
+      argv,
+      options.activityConcurrency,
+    ),
     workflows,
     activities,
   });
@@ -682,6 +791,3 @@ function startLocalRun(
     stop: () => Promise.resolve(),
   };
 }
-
-/** The namespace a worker entrypoint imports: `Tempo.startWorker({...})`. */
-export const Tempo = {startWorker};

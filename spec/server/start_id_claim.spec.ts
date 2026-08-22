@@ -46,10 +46,12 @@ describe('starting under an id that is already taken', () => {
     const host = createServerHost(store);
     try {
       expect(
-        (await host.start('order', [], {workflowId: 'order-43'})).created,
+        (await host.start('order', undefined, {workflowId: 'order-43'}))
+          .created,
       ).toBeTrue();
       expect(
-        (await host.start('order', [], {workflowId: 'order-43'})).created,
+        (await host.start('order', undefined, {workflowId: 'order-43'}))
+          .created,
       ).toBeFalse();
     } finally {
       host.shutdown();
@@ -65,7 +67,7 @@ describe('starting under an id that is already taken', () => {
       await host.start('order', [{amount: 100}], {workflowId: 'order-44'});
       await host.start('order', [{amount: 500}], {workflowId: 'order-44'});
 
-      expect((await store.get('order-44'))?.args).toEqual([{amount: 100}]);
+      expect((await store.get('order-44'))?.props).toEqual([{amount: 100}]);
     } finally {
       host.shutdown();
     }
@@ -99,11 +101,11 @@ describe('starting under an id that is already taken', () => {
     const store = new MemoryHistoryStore();
     const host = createServerHost(store);
     try {
-      await host.start('order', [], {workflowId: 'order-46'});
+      await host.start('order', undefined, {workflowId: 'order-46'});
       await wait(20);
       const versionBefore = (await store.get('order-46'))!.version;
 
-      await host.start('order', [], {workflowId: 'order-46'});
+      await host.start('order', undefined, {workflowId: 'order-46'});
       await wait(20);
 
       expect((await store.get('order-46'))!.version).toBe(versionBefore);

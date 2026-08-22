@@ -2,8 +2,8 @@
  * @fileoverview
  * LocalService: the whole server in-process. It composes `server_core` with the
  * in-memory ports and runs the two worker poll loops in-proc — a workflow-worker
- * loop that drains the workflow-task queue (replacing the old `pump`+`kick`) and
- * an activity-worker loop that drains the activity-task queue. Distributed mode
+ * loop that drains the workflow-task queue and an activity-worker loop that
+ * drains the activity-task queue. Distributed mode
  * runs those same loops in separate processes against `RemoteService`.
  *
  * ## The loops go through the worker-facing seam, deliberately
@@ -105,8 +105,8 @@ export function createLocalService(
     timerService,
     // The core supplies the child's id; it is derived from lineage so it stays
     // stable across a restart (see `server_core.childExecutionId`).
-    launch: (workflowId, name, args, taskQueue, parent) => {
-      launch(name, args, {workflowId, taskQueue}, parent);
+    launch: (workflowId, name, props, taskQueue, parent) => {
+      launch(name, props, {workflowId, taskQueue}, parent);
     },
     kickWorkflowWorker,
     kickActivityWorker,
@@ -201,8 +201,8 @@ export function createLocalService(
             // Retry is the server's decision now, so both modes get the same
             // policy from the same code — and the attempt count survives this
             // process dying, which an in-loop retry never could.
-            const result = await activityWorker.runTask(task, () => {
-              void core.heartbeatActivityTask(task.token);
+            const result = await activityWorker.runTask(task, (checkpoint) => {
+              void core.heartbeatActivityTask(task.token, checkpoint);
             });
             await core.completeActivityTask(task.token, result); // acks + reports
           }
@@ -258,7 +258,7 @@ export function createLocalService(
    */
   function launch(
     name: string,
-    args: unknown[],
+    props: unknown,
     opts: StartWorkflowOptions = {},
     parent?: ExecutionParent,
   ): string {
@@ -270,7 +270,7 @@ export function createLocalService(
     statusMirror.set(workflowId, 'running');
     ensureWaiter(workflowId);
     void historyStore
-      .create(workflowId, name, args, taskQueue, parent)
+      .create(workflowId, name, props, taskQueue, parent)
       .then(() => {
         workflowTaskQueue.enqueue(workflowId, taskQueue);
         kickWorkflowWorker();
@@ -280,8 +280,8 @@ export function createLocalService(
   }
 
   return {
-    start(name, args = [], opts = {}) {
-      return {workflowId: launch(name, args, opts)};
+    start(name, props, opts = {}) {
+      return {workflowId: launch(name, props, opts)};
     },
     signal(workflowId, signalName, payload) {
       if (!statusMirror.has(workflowId))
@@ -298,8 +298,8 @@ export function createLocalService(
         throw new Error(`no execution ${workflowId}`);
       // Voided: the settle is reported through `onSettled` above, which is what
       // makes this work for a terminate the *server* initiated as well as one a
-      // client asked for. This used to patch the mirror and the waiter by hand
-      // here, which only ever covered the client's half.
+      // client asked for. Patching the mirror and the waiter by hand here would
+      // cover only the client's half.
       void core.terminate(workflowId, reason);
     },
     reset(workflowId, keep) {
@@ -327,7 +327,10 @@ export function createLocalService(
     // truth. One fewer thing that can disagree with history.
     async describeExecution(workflowId, options) {
       const rec = await historyStore.get(workflowId);
-      return rec && describeExecution(rec, options);
+      return (
+        rec &&
+        describeExecution(rec, options, core.activityCheckpoints(workflowId))
+      );
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
@@ -371,8 +374,11 @@ export function createLocalService(
     ): Promise<void> {
       return core.completeActivityTask(token, result);
     },
-    heartbeatActivityTask(token: TaskToken): Promise<void> {
-      return core.heartbeatActivityTask(token);
+    heartbeatActivityTask(
+      token: TaskToken,
+      checkpoint?: unknown,
+    ): Promise<void> {
+      return core.heartbeatActivityTask(token, checkpoint);
     },
     async resume() {
       const records = await historyStore.list();

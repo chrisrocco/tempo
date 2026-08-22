@@ -12,8 +12,9 @@
  *
  * Note what is deliberately absent: no `shutdown()`, no keepalive interval, and
  * nothing awaiting the result. That is the shape of a scratch script someone
- * writes to try the engine out, and it is exactly the shape that used to exit
- * silently with code 0 before the timer ever fired.
+ * writes to try the engine out, and it is exactly the shape that exits silently
+ * with code 0 before the timer ever fires if a parked timer cannot hold the
+ * process open.
  */
 
 import {createLocalRuntime} from '../../src';
@@ -32,6 +33,6 @@ const rt = createLocalRuntime()
     return 'done';
   });
 
-rt.start('parked', [], {workflowId: 'parked-1'});
+rt.start('parked', undefined, {workflowId: 'parked-1'});
 
 process.stdout.write('SCRIPT_ENDED\n');

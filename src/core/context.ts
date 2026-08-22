@@ -28,6 +28,14 @@ import type {
 interface Waiter {
   resolve: (v: unknown) => void;
   reject: (e: unknown) => void;
+  /**
+   * Where the command was issued, captured unformatted — the frames a failure
+   * completion stitches onto the rebuilt error so a recorded stack from another
+   * process connects to the workflow line that awaited it. The same diagnostic
+   * side-channel as `BlockedCondition.site` below, with the same guarantee:
+   * never read by replay, never reaches a command.
+   */
+  site?: Error;
 }
 interface BlockedCondition {
   fn: () => boolean;
@@ -44,19 +52,26 @@ interface BlockedCondition {
    * Absent outside V8, where the capture API does not exist.
    */
   site?: Error;
+  /**
+   * What the workflow declared it is waiting for, verbatim from the
+   * `condition()` call. Unlike `site` this is workflow-authored and therefore
+   * deterministic — but it is still only a diagnostic side-channel: never read
+   * by replay, never reaches a command, reported at task end and nowhere else.
+   */
+  awaiting?: unknown;
 }
 
 /**
- * A registered workflow function. The `any[]` rest parameter is deliberate and
- * cannot be `unknown[]`: `strictFunctionTypes` makes parameters contravariant, so
- * an author's `(name: string) => Promise<string>` would not be assignable to a
- * registry of `(...args: unknown[]) => …`. Arguments arrive from history as
- * `unknown[]` and are checked by the workflow's own signature.
+ * A registered workflow function: one props object in, a promise out.
+ *
+ * `core/` cannot import the author-facing `AnyWorkflowFn`, so this restates it —
+ * see `src/workflow_descriptor.ts` for why the parameter is `any`, and for what
+ * the single parameter does and does not enforce.
  */
-export type WorkflowFn = (...args: any[]) => Promise<unknown>;
+export type WorkflowFn = (props?: any) => Promise<unknown>;
 
 export interface WorkflowContext {
-  args: unknown[];
+  props: unknown;
   events: HistoryEvent[];
   idx: number;
   seq: number; // command id counter (activities, timers, children) — recorded in history
@@ -213,7 +228,7 @@ function patchesInHistory(events: HistoryEvent[]): Map<number, string> {
  * about.
  */
 export function createContext(
-  args: unknown[],
+  props: unknown,
   events: HistoryEvent[],
   continueAsNewSuggested = false,
   carryover: Carryover = {},
@@ -221,7 +236,7 @@ export function createContext(
   workflowId = '',
 ): WorkflowContext {
   return {
-    args,
+    props,
     events,
     // Both copied, not aliased: the task's carryover belongs to the caller, and
     // a replay that mutated it in place would leave the caller's copy holding

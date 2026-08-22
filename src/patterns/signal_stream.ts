@@ -2,7 +2,7 @@
  * @fileoverview
  * Signal consumption as ordinary control flow:
  *
- *     for await (const comment of signalStream(clComment, { until: submitted })) {
+ *     for await (const comment of signalStream('clComment', { until: submitted })) {
  *       await postReply(comment);          // the body may await freely
  *     }
  *
@@ -39,12 +39,13 @@
  * is a child poller relaying items to a parent parked on `for await`, and the
  * consumer reads identically whether the producer is inside the engine or not.
  *
- * ## One consumer per signal
+ * ## One consumer per signal, and nothing enforces it
  *
  * Only one handler exists per signal name, so two concurrent streams on the same
- * signal cannot both be served — `claimSignal` rejects the second rather than
- * letting it silently displace the first. Fan out inside a single consumer, or
- * consume the signal in one place and share the result through a local variable.
+ * signal cannot both be served: the second silently displaces the first, which
+ * then hangs rather than failing. See `setHandler`. Fan out inside a single
+ * consumer, or consume the signal in one place and share the result through a
+ * local variable.
  *
  * ## Two consumers with different lifetimes
  *
@@ -55,7 +56,7 @@
  *     let finished = false;
  *
  *     const watcher = background(async () => {
- *       for await (const c of signalStream(bugComment, {
+ *       for await (const c of signalStream('bugComment', {
  *         until: condition(() => finished),          // a condition IS the stop signal
  *       })) {
  *         directive = await triage(c);
@@ -78,12 +79,7 @@
  */
 
 import {condition} from '../core/condition';
-import {
-  claimSignal,
-  clearHandler,
-  setHandler,
-  type SignalDef,
-} from '../core/signals';
+import {clearHandler, setHandler} from '../core/signals';
 
 /** How a `signalStream` starts and how it ends. */
 export interface StreamOptions {
@@ -114,15 +110,13 @@ export interface StreamOptions {
  * the claim is released when iteration ends.
  */
 export function signalStream<T = unknown>(
-  def: SignalDef,
+  name: string,
   opts: StreamOptions = {},
 ): AsyncIterable<T> {
-  claimSignal(def);
-
   const queue: T[] = [];
   let ended = false;
 
-  setHandler(def, (payload: T) => {
+  setHandler(name, (payload: T) => {
     queue.push(payload);
   });
   // `setHandler` flushes the pre-registration buffer into `queue`; for 'now' that
@@ -151,7 +145,7 @@ export function signalStream<T = unknown>(
           return; // ended, and the backlog is drained
         }
       } finally {
-        clearHandler(def);
+        clearHandler(name);
       }
     },
   };
@@ -162,12 +156,10 @@ export function signalStream<T = unknown>(
  * name. Registers eagerly, so it is safe to create before the window it observes
  * — which is the usual shape: build it, then pass it as another stream's `until`.
  */
-export function firstSignal<T = unknown>(def: SignalDef): Promise<T> {
-  claimSignal(def);
-
+export function firstSignal<T = unknown>(name: string): Promise<T> {
   let value: T | undefined;
   let received = false;
-  setHandler(def, (payload: T) => {
+  setHandler(name, (payload: T) => {
     if (!received) {
       value = payload;
       received = true;
@@ -175,7 +167,7 @@ export function firstSignal<T = unknown>(def: SignalDef): Promise<T> {
   });
 
   return condition(() => received).then(() => {
-    clearHandler(def);
+    clearHandler(name);
     return value as T;
   });
 }

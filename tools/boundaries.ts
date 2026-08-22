@@ -12,7 +12,7 @@
  * codebase that already passes (see spec/architecture.spec.ts). Reading the disk
  * lives separately in `readSourceFiles`.
  *
- * Three rules, each mapping to a claim made elsewhere in the docs:
+ * Five rules, each mapping to a claim made elsewhere in the docs:
  *
  * 1. **Layering** — dependencies point strictly down, and each layer declares what
  *    it may reach. Two are worth calling out: `server/` may NOT import `core/`,
@@ -27,12 +27,25 @@
  * 3. **The author entrypoint** — workflow modules import only `workflow.ts` at
  *    runtime, and obey the same purity rule as the core they run inside. A
  *    statement-level `import type` is exempt; see `checkAuthorEntrypoint`.
+ * 4. **Browser safety** — the published entrypoints a dashboard is invited to
+ *    import reach neither a Node builtin nor a workflow module through a value
+ *    import, transitively. The only rule here that reads the import graph; see
+ *    `BROWSER_SAFE_ENTRYPOINTS`.
+ * 5. **Library boundary** — every package under `src/libraries/` imports only
+ *    its own files. Location is the declaration: see `internalLibraries` and
+ *    `checkLibraryBoundary`.
  *
- * There was a fourth — package direction, forbidding any mention of `dashboard/`
- * from `src/`. It guarded a one-way edge between two packages in this repo, and
- * there is now one package. A rule that can no longer fail is not a weaker rule,
- * it is a rule about nothing; the boundary it protected is now the published
- * `exports` map, which a consumer's resolver enforces rather than this file.
+ * A different fourth rule used to exist — package direction, forbidding any
+ * mention of `dashboard/` from `src/`. It guarded a one-way edge between two
+ * packages in this repo, and there is now one package. A rule that can no longer
+ * fail is not a weaker rule, it is a rule about nothing; the boundary it protected
+ * became the published `exports` map, which a consumer's resolver enforces rather
+ * than this file.
+ *
+ * Rule 4 is not that rule returning. A resolver enforces which *paths* a consumer
+ * may import and can say nothing about what those paths pull in behind them —
+ * which is the half that actually broke, twice, and the half no consumer discovers
+ * until their bundler does.
  */
 
 import {readdirSync, readFileSync, statSync} from 'node:fs';
@@ -48,8 +61,35 @@ export interface SourceFile {
 export interface Violation {
   path: string;
   line: number;
-  rule: 'layering' | 'core-purity' | 'author-entrypoint';
+  rule:
+    | 'layering'
+    | 'core-purity'
+    | 'author-entrypoint'
+    | 'browser-safety'
+    | 'library-boundary';
   message: string;
+}
+
+/**
+ * The internal libraries, derived from the tree: every directory under
+ * `src/libraries/` is one. **Location is the declaration** — there is no list
+ * to join and none to forget, which closes the gap the old `INTERNAL_LIBRARIES`
+ * constant left open (a library-shaped directory that never signed up).
+ *
+ * Being under `src/libraries/` is a contract with three enforced halves: the
+ * `library-boundary` rule below pins every file to its own package (it imports
+ * nothing — not other layers, not Node, not a sibling library); the package's
+ * `index.ts` states its contract and a seam spec built on
+ * `spec/support/library_seam.ts` pins every call site — both of whose existence
+ * `spec/architecture.spec.ts` asserts against the real tree.
+ */
+export function internalLibraries(files: SourceFile[]): string[] {
+  const names = new Set<string>();
+  for (const file of files) {
+    const m = /^src\/libraries\/([^/]+)\//.exec(file.path);
+    if (m?.[1]) names.add(m[1]);
+  }
+  return [...names].sort();
 }
 
 /**
@@ -58,24 +98,48 @@ export interface Violation {
  */
 const LAYER_IMPORTS: Record<string, readonly string[]> = {
   protocol: [],
-  core: ['protocol'],
+  core: ['protocol', 'walltime'],
   patterns: ['protocol', 'core'],
-  schedule: ['protocol'],
+  schedule: ['protocol', 'walltime'],
   server: ['protocol'],
   worker: ['protocol', 'core'],
   client: ['protocol', 'core'],
   services: ['protocol', 'core', 'server', 'worker'],
+  // Everything connectors/ builds on — proxyActivities, createWorkflow,
+  // pollForever, signalStream — is re-exported by the author entrypoint, so the
+  // layer declares that dependency plus the schema/ internal library, and the
+  // entrypoint stays the single account of what connector machinery may reach.
+  connectors: ['workflow', 'schema'],
+  // `workflow_descriptor` (below) is a top-level module rather than a directory,
+  // but `layerOf` reads the first path segment under `src/` either way, so
+  // importing one from inside a layer has to be declared like a layer.
+  // `tempo.ts` reaches the same module unchecked, being top-level itself — which
+  // is the asymmetry that entry pays for, not a second kind of dependency.
+  testing: [
+    'protocol',
+    'core',
+    'client',
+    'services',
+    'worker',
+    'workflow_descriptor',
+    // The harness registers `scheduleWorkflows` and seeds schedules through the
+    // schedule client, because a schedule is a state a dashboard has to render
+    // and the catalogue's rule is that a state it cannot produce is a state no
+    // dashboard should claim to handle. Same seam discipline as everything
+    // else here: the client half, never `server/`.
+    'schedule',
+  ],
 };
 
 /** Why a given layer may not reach another — stated so the failure teaches. */
 const LAYER_RATIONALE: Record<string, string> = {
   protocol:
     'protocol/ is pure data with no dependencies — it is what lets core and server share types without depending on each other',
-  core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/ — and never patterns/, which is built on top of it',
+  core: 'core/ is the deterministic engine: (history) -> (commands). It may import only protocol/ and walltime/ (whose deterministic half it uses) — and never patterns/, which is built on top of it',
   patterns:
     'patterns/ is workflow-authoring helpers built from the primitives core/ exports; it depends on core/, never the reverse',
   schedule:
-    'schedule/ is when-does-this-fire arithmetic over protocol/ spec types. It must not reach core/: it runs inside an activity, on the I/O side of the determinism boundary, which is the whole reason calendar work lives here — a timezone database may eventually be a dependency here and must never become one of core/',
+    'schedule/ is when-does-this-fire arithmetic over protocol/ spec types, plus the seam to the walltime/ library. It must not reach core/: it runs inside an activity, on the I/O side of the determinism boundary',
   server:
     'server/ runs NO user code — workflow replay happens in the workflow worker, so it must not reach into core/',
   worker: 'worker/ is written against protocol/ and runs core/',
@@ -83,6 +147,10 @@ const LAYER_RATIONALE: Record<string, string> = {
     'client/ turns a WorkflowService into handles; it needs only protocol/ and core/',
   services:
     'services/ composes server/ and worker/ behind the WorkflowService seam',
+  testing:
+    'testing/ composes a server and its workers into named fixture states, so it reaches almost everything — but not server/ directly, because a fixture that reached past the service seam could build a state no deployment can reach, which is the one thing a shared fixture must not do',
+  connectors:
+    'connectors/ is service-wrapping machinery built for workflow authors, so it may import only workflow.ts — the same deterministic surface its consumers use. Needing anything the author entrypoint does not re-export would mean a connector concept the author surface cannot express, which is a gap to fix there, not a dependency to add here',
 };
 
 /** Constructs that make replay irreproducible, so they cannot appear on the deterministic side. */
@@ -98,14 +166,55 @@ const NONDETERMINISTIC = [
 ] as const;
 
 /**
- * The single sanctioned piece of host coupling in the core. `drainMicrotasks` needs
- * a macrotask boundary to flush the microtask queue; it reads nothing host-specific,
- * so replay stays reproducible. Keeping the exception here — rather than as a
- * blanket rule — means any second one has to be argued for in a diff.
+ * The sanctioned pieces of host coupling on the checked-for-purity side. Each is
+ * an argument that had to be made in a diff, which is the point of listing files
+ * rather than blanket-exempting a layer:
+ *
+ * - `drainMicrotasks` needs a macrotask boundary to flush the microtask queue;
+ *   it reads nothing host-specific, so replay stays reproducible.
+ * - `walltime/wall_clock.ts` reads the platform's timezone data (`Intl`, plus
+ *   `new Date` for calendar math on its wall encoding) and is **not**
+ *   replay-safe — its own fileoverview says so. It is exempted rather than left
+ *   unchecked so that its sibling `duration.ts`, which the deterministic core
+ *   calls during replay, stays machine-held to purity: a `Date.now()` slipped
+ *   into the parser must fail lint, not diverge a replay.
  */
 const ALLOWED_HOST_COUPLING: Record<string, readonly string[]> = {
   'src/core/microtask_scheduler.ts': ['setImmediate'],
+  'src/libraries/walltime/wall_clock.ts': ['new Date()'],
 };
+
+/**
+ * Published entrypoints that must stay importable in a browser.
+ *
+ * Each is a path in the `exports` map that a dashboard, a CLI, or any other
+ * out-of-repo consumer is invited to import, and none of them may reach a Node
+ * builtin through a value import. The rule walks the graph rather than reading
+ * one file, because the failure it prevents is always transitive: every one of
+ * these files is browser-safe on its own, and it is what they pull in behind
+ * them that breaks a bundle.
+ *
+ * This has now gone wrong twice for the same reason — a *barrel* re-exporting a
+ * neighbour that opens a port or reads a disk. `schedule/index.ts` was split from
+ * `schedule/worker.ts` after a dashboard importing `createScheduleClient` got the
+ * workflow runtime with it, and `src/remote_client.ts` exists because
+ * `createRemoteService` was reachable only through the host entrypoint, next to
+ * `startServer` and `FileHistoryStore`. Both were found by someone bundling the
+ * result; neither could fail a check, because there was none.
+ *
+ * Exported, and **asserted to exist** by `spec/architecture.spec.ts` rather than
+ * by the checker. A renamed entrypoint left behind in this list would otherwise
+ * make the rule silently check nothing, which is the failure mode this whole file
+ * exists to avoid. It is not checked here because `checkBoundaries` is pure over
+ * whatever file set it is handed — the planted-breakage tests pass two or three
+ * synthetic files — so "this path is absent" is a fact about the real tree and
+ * belongs to the test that reads the real tree.
+ */
+export const BROWSER_SAFE_ENTRYPOINTS: readonly string[] = [
+  'src/remote_client.ts',
+  'src/protocol/index.ts',
+  'src/schedule/index.ts',
+];
 
 /** True for files that hold workflow code and must obey the author-entrypoint rule. */
 export function isWorkflowModule(filePath: string): boolean {
@@ -299,8 +408,16 @@ function extractImports(strippedText: string): ImportRef[] {
   return refs;
 }
 
-/** The layer a repo-relative path belongs to, or undefined if it is not layered. */
+/**
+ * The layer a repo-relative path belongs to, or undefined if it is not layered.
+ * A file under `src/libraries/<name>/` belongs to layer `<name>`, so consumer
+ * declarations keep the short spelling (`core: ['protocol', 'walltime']`) and
+ * the purity list can keep naming `walltime` — the `libraries/` segment is
+ * where a package lives, not what it is called.
+ */
 function layerOf(repoPath: string): string | undefined {
+  const lib = /^src\/libraries\/([^/]+)\//.exec(repoPath);
+  if (lib) return lib[1];
   const m = /^src\/([^/]+)\//.exec(repoPath);
   return m ? m[1] : undefined;
 }
@@ -311,6 +428,44 @@ function resolveSpecifier(fromPath: string, specifier: string): string | null {
     path.posix.join(path.posix.dirname(fromPath), specifier),
   );
   return resolved;
+}
+
+/**
+ * Rule 5: a file under `src/libraries/<name>/` may import only its own
+ * package's files — not engine layers, not Node builtins, not packages, not a
+ * sibling library. Type-only imports count: a type is still knowledge, and
+ * still breaks compilation when the library is removed. Applied by location,
+ * so putting code under `libraries/` *is* accepting the contract; there is no
+ * declaration to skip. A loose file directly in `src/libraries/` belongs to no
+ * package and is refused outright.
+ */
+function checkLibraryBoundary(file: SourceFile, stripped: string): Violation[] {
+  if (!file.path.startsWith('src/libraries/')) return [];
+  const m = /^src\/libraries\/([^/]+)\//.exec(file.path);
+  if (!m) {
+    return [
+      {
+        path: file.path,
+        line: 1,
+        rule: 'library-boundary',
+        message:
+          'src/libraries/ holds library packages only — a loose file here belongs to no package and escapes the library contract; move it into a package directory',
+      },
+    ];
+  }
+  const home = `src/libraries/${m[1]}/`;
+  const violations: Violation[] = [];
+  for (const ref of extractImports(stripped)) {
+    const resolved = resolveSpecifier(file.path, ref.specifier);
+    if (resolved !== null && `${resolved}/`.startsWith(home)) continue;
+    violations.push({
+      path: file.path,
+      line: ref.line,
+      rule: 'library-boundary',
+      message: `libraries/${m[1]} may import only its own files, not '${ref.specifier}' — an internal library is treated like a third-party dependency: it knows nothing, not even Node, which is what keeps it removable`,
+    });
+  }
+  return violations;
 }
 
 function checkLayering(file: SourceFile, stripped: string): Violation[] {
@@ -371,9 +526,9 @@ function checkPurity(
  * `proxyActivities<typeof activities>` needs the activities module's *shape* in the
  * workflow module, and the only way to get it without a runtime edge is
  * `import type * as activities from './activities'`. That is precisely what
- * `examples/greeter.ts` tells authors to do, and this checker used to reject it —
- * so following the documented advice failed `npm run lint`, and there was no other
- * way to write a typed workflow module that the convention would accept.
+ * `spec/support/greeter_worker.ts` tells authors to do. Without the exemption,
+ * following the documented advice fails `npm run lint`, and there is no other way
+ * to write a typed workflow module that the convention accepts.
  *
  * The layering rule is deliberately *not* given the same exemption. That one is
  * about which layers may know about which, and a type dependency is still
@@ -397,8 +552,8 @@ function checkPurity(
  *
  * Nothing else in the repo catches the second line. Activities modules are not
  * purity-checked — I/O is their whole job — and the call site matches no
- * nondeterministic pattern. The type-only import used to prevent it by making the
- * binding not exist.
+ * nondeterministic pattern. A type-only import prevents it by making the binding
+ * not exist.
  *
  * So the value import is allowed **only in the shape that cannot be misused**:
  * `import * as NAME from '…'` where every occurrence of `NAME` in the file is an
@@ -454,6 +609,100 @@ function checkAuthorEntrypoint(
 }
 
 /**
+ * What a browser-safe entrypoint may reach at runtime: no bare specifier, and no
+ * workflow module.
+ *
+ * The only rule here that reads the **graph** rather than a file. The other three
+ * are local questions — this layer's imports, this file's constructs — and this
+ * one cannot be: `src/remote_client.ts` contains no `node:` import and never
+ * will, because the way it breaks is that something three hops down does.
+ *
+ * Two conditions, because there are two ways the same promise breaks. A builtin
+ * breaks the *bundle* — the consumer finds out when their build fails, loudly. A
+ * workflow module breaks the *process* — importing one registers activities into
+ * a process-global registry, and the consumer finds out never, because nothing
+ * about it fails.
+ *
+ * ## Any bare specifier, not just `node:`
+ *
+ * A specifier that does not start with `.` is either a Node builtin or a package,
+ * and both fail the test for the same reason: the entrypoint stops being
+ * self-contained. Today the second case cannot arise — the runtime dependency
+ * allowlist in `tools/dependencies.ts` is empty and enforced — so in practice
+ * every failure here is a builtin. If a browser-safe dependency is ever added,
+ * this is the rule that has to be taught about it, deliberately, in that diff.
+ *
+ * ## Value imports only
+ *
+ * A statement-level `import type` is erased: the emitted JavaScript names no
+ * module, so no bundler follows it. That is what lets `remote_service.ts` name
+ * a dozen protocol types without pulling anything into a browser build. The
+ * same exemption, and the same reasoning, as `checkAuthorEntrypoint`.
+ */
+function checkBrowserSafety(files: SourceFile[]): Violation[] {
+  const byPath = new Map(files.map((file) => [file.path, file]));
+  const violations: Violation[] = [];
+
+  /** A resolved specifier names either the module itself or a directory barrel. */
+  function fileAt(resolved: string): SourceFile | undefined {
+    return byPath.get(`${resolved}.ts`) ?? byPath.get(`${resolved}/index.ts`);
+  }
+
+  for (const entrypoint of BROWSER_SAFE_ENTRYPOINTS) {
+    // Absent from *this* set is not a failure: a planted-breakage test hands over
+    // two synthetic files and means nothing by the other seventy-three. Absent
+    // from the real tree is a failure, and the spec is what says so.
+    const start = byPath.get(entrypoint);
+    if (!start) continue;
+    // Breadth-first, carrying the chain that got here so the failure names the
+    // route and not merely the destination. Which barrel pulled the builtin in is
+    // the entire diagnosis; the builtin itself is never the surprise.
+    const seen = new Set<string>([start.path]);
+    const queue: Array<{file: SourceFile; via: readonly string[]}> = [
+      {file: start, via: [start.path]},
+    ];
+    for (let i = 0; i < queue.length; i++) {
+      const step = queue[i];
+      if (!step) continue;
+      const stripped = stripCommentsAndStrings(step.file.text);
+      for (const ref of extractImports(stripped)) {
+        if (ref.typeOnly) continue;
+        const resolved = resolveSpecifier(step.file.path, ref.specifier);
+        if (resolved === null) {
+          violations.push({
+            path: step.file.path,
+            line: ref.line,
+            rule: 'browser-safety',
+            message: `'${ref.specifier}' is not available in a browser, and ${entrypoint} reaches it: ${step.via.join(' -> ')}. Import the module that has what you need directly, rather than a barrel that also re-exports host code.`,
+          });
+          continue;
+        }
+        const next = fileAt(resolved);
+        if (!next || seen.has(next.path)) continue;
+        // Reaching workflow code is the other way a safe-looking entrypoint goes
+        // wrong, and it is not about builtins at all: a workflow module calls
+        // `proxyActivities` at module scope, so importing one registers activities
+        // into a process-global registry as an import side effect. Correct in a
+        // worker binary, wrong in anything else — and it is what
+        // `src/schedule/index.ts` did for a day without anything failing.
+        if (isWorkflowModule(next.path)) {
+          violations.push({
+            path: step.file.path,
+            line: ref.line,
+            rule: 'browser-safety',
+            message: `${entrypoint} must stay importable outside a worker, and reaches the workflow module '${next.path}': ${step.via.join(' -> ')}. Importing one evaluates it, which registers its activities as a side effect. Import its types instead, or move the value import to a worker-only path.`,
+          });
+          continue;
+        }
+        seen.add(next.path);
+        queue.push({file: next, via: [...step.via, next.path]});
+      }
+    }
+  }
+  return violations;
+}
+
+/**
  * Check every supplied file against the boundary rules. Pure: it takes file
  * contents and returns violations, so the rules themselves can be tested against
  * planted breakage instead of only against code that already passes.
@@ -467,16 +716,25 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
       violations.push(...checkPurity(file, stripped, 'author-entrypoint'));
       continue;
     }
+    violations.push(...checkLibraryBoundary(file, stripped));
     violations.push(...checkLayering(file, stripped));
-    // Both layers run inside a replay, so both are held to determinism. Keying
+    // These layers run inside a replay, so they are held to determinism. Keying
     // this on `core` alone was safe only while `core` was the only thing that
     // ran there: a helper in `patterns/` is called from workflow code just the
-    // same, and a `Date.now()` in one is exactly as fatal.
+    // same, and a `Date.now()` in one is exactly as fatal. `walltime` is on the
+    // list because `core` calls its duration parser during replay — its one
+    // legitimately host-coupled file is exempted by name in
+    // `ALLOWED_HOST_COUPLING`, which is what keeps the rest of the library
+    // checked rather than trusted.
     const layer = layerOf(file.path);
-    if (layer === 'core' || layer === 'patterns') {
+    if (layer === 'core' || layer === 'patterns' || layer === 'walltime') {
       violations.push(...checkPurity(file, stripped, 'core-purity'));
     }
   }
+  // Once, over the whole set rather than per file: it is the only rule that is a
+  // question about the import graph, so it has nothing to say about a file in
+  // isolation.
+  violations.push(...checkBrowserSafety(files));
   return violations;
 }
 

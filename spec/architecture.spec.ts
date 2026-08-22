@@ -9,7 +9,9 @@
 
 import {checkDependencies, checkRepoDependencies} from '../tools/dependencies';
 import {
+  BROWSER_SAFE_ENTRYPOINTS,
   checkBoundaries,
+  internalLibraries,
   isWorkflowModule,
   readSourceFiles,
   stripCommentsAndStrings,
@@ -26,17 +28,13 @@ function file(filePath: string, text: string): SourceFile {
 }
 
 describe('architecture — the repo obeys its own boundary', () => {
-  it('has no boundary violations anywhere in src or examples', () => {
-    const violations = checkBoundaries(
-      readSourceFiles(repoRoot, ['src', 'examples']),
-    );
+  it('has no boundary violations anywhere in src', () => {
+    const violations = checkBoundaries(readSourceFiles(repoRoot, ['src']));
     expect(violations).toEqual([]);
   });
 
   it('checks a non-trivial number of files, so "clean" means something', () => {
-    expect(
-      readSourceFiles(repoRoot, ['src', 'examples']).length,
-    ).toBeGreaterThan(40);
+    expect(readSourceFiles(repoRoot, ['src']).length).toBeGreaterThan(40);
   });
 });
 
@@ -66,12 +64,11 @@ describe('architecture — layering', () => {
   });
 
   /**
-   * The direction that used to be unenforceable. `poller` and `signal_stream`
-   * lived in `core/` and were reached through the same relative imports as the
-   * engine, and same-layer imports are not checked — so `replay.ts` importing a
-   * helper built *on* replay would have passed. Splitting the layer is what
-   * turns "the engine does not depend on the patterns" from a convention into a
-   * rule.
+   * The direction the layer split exists to make enforceable. With `poller` and
+   * `signal_stream` inside `core/`, they are reached through the same relative
+   * imports as the engine, and same-layer imports are not checked — so `replay.ts`
+   * importing a helper built *on* replay would pass. The split is what turns "the
+   * engine does not depend on the patterns" from a convention into a rule.
    */
   it('rejects the engine depending on the patterns built from it', () => {
     const violations = checkBoundaries([
@@ -269,9 +266,9 @@ describe('architecture — the author entrypoint', () => {
    * The exemption that makes the documented typing pattern expressible.
    * `proxyActivities<typeof activities>` needs the activities module's shape inside
    * the workflow module, and `import type * as` is the only way to get it without a
-   * runtime edge. This checker used to reject it, so following the advice in
-   * `examples/greeter.ts` failed `npm run lint` and a properly-named workflow module
-   * could not be typed at all.
+   * runtime edge. Without the exemption, following the advice in
+   * `spec/support/greeter_worker.ts` fails `npm run lint` and a properly-named
+   * workflow module cannot be typed at all.
    */
   it('allows a type-only import, which is erased and cannot run', () => {
     const violations = checkBoundaries([
@@ -320,6 +317,118 @@ describe('architecture — the author entrypoint', () => {
   });
 });
 
+describe('architecture — browser safety', () => {
+  it('lists only entrypoints that exist, so the rule cannot check nothing', () => {
+    const paths = new Set(
+      readSourceFiles(repoRoot, ['src']).map((source) => source.path),
+    );
+
+    for (const entrypoint of BROWSER_SAFE_ENTRYPOINTS) {
+      expect(paths.has(entrypoint)).toBe(true);
+    }
+  });
+
+  it('rejects an entrypoint importing a node builtin directly', () => {
+    const violations = checkBoundaries([
+      file('src/remote_client.ts', `import * as http from 'node:http';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('browser-safety');
+    expect(violations[0].message).toContain('node:http');
+  });
+
+  /**
+   * The failure this rule exists for, and the one no single-file check can see:
+   * every file in the chain is innocent on its own. `remote_client.ts` imports
+   * `services/remote_service` directly for exactly this reason — routing it
+   * through `services/index.ts` would re-export `rpc_server` and put `node:http`
+   * in a dashboard's bundle.
+   */
+  it('follows a barrel to the host module it re-exports', () => {
+    const violations = checkBoundaries([
+      file('src/remote_client.ts', `export * from './services';`),
+      file('src/services/index.ts', `export * from './rpc_server';`),
+      file('src/services/rpc_server.ts', `import * as http from 'node:http';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('browser-safety');
+    expect(violations[0].path).toBe('src/services/rpc_server.ts');
+  });
+
+  it('names the route that reached the builtin, not just the builtin', () => {
+    const violations = checkBoundaries([
+      file('src/remote_client.ts', `export * from './services';`),
+      file('src/services/index.ts', `export * from './rpc_server';`),
+      file('src/services/rpc_server.ts', `import * as http from 'node:http';`),
+    ]);
+
+    expect(violations[0].message).toContain(
+      'src/remote_client.ts -> src/services/index.ts -> src/services/rpc_server.ts',
+    );
+  });
+
+  /**
+   * The exemption that makes the rule usable at all: `remote_service.ts` names
+   * a dozen protocol types.
+   * An erased import emits no module reference, so no bundler follows it.
+   */
+  it('ignores a type-only import of a module that is not browser-safe', () => {
+    const violations = checkBoundaries([
+      file(
+        'src/remote_client.ts',
+        `import type {Server} from './server_main';`,
+      ),
+      file('src/server_main.ts', `import {readFileSync} from 'node:fs';`),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * The other half of the promise, and the half that fails silently. A builtin
+   * breaks the consumer's build; a workflow module registers its activities into
+   * a process-global registry and breaks nothing you can see. This is what
+   * `src/schedule/index.ts` did for a day — see
+   * `spec/schedule/client_entrypoint.spec.ts`, which asserts the same property
+   * for that entrypoint specifically and in both directions.
+   */
+  it('rejects an entrypoint reaching a workflow module for a value', () => {
+    const violations = checkBoundaries([
+      file('src/schedule/index.ts', `export * from './scheduler.workflow';`),
+      file('src/schedule/scheduler.workflow.ts', `export const x = 1;`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('browser-safety');
+    expect(violations[0].message).toContain('scheduler.workflow');
+  });
+
+  it('lets an entrypoint name a workflow module in a type-only import', () => {
+    const violations = checkBoundaries([
+      file(
+        'src/schedule/index.ts',
+        `import type {Spec} from './scheduler.workflow';`,
+      ),
+      file('src/schedule/scheduler.workflow.ts', `export const x = 1;`),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  it('reports a builtin reached through a cycle exactly once', () => {
+    const violations = checkBoundaries([
+      file('src/remote_client.ts', `export * from './a';`),
+      file('src/a.ts', `export * from './b';`),
+      file('src/b.ts', `export * from './a';\nimport 'node:fs';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('node:fs');
+  });
+});
+
 describe('architecture — the comment stripper', () => {
   it('preserves line numbers so violations point at the right line', () => {
     const stripped = stripCommentsAndStrings('a\n/* x\n y */\nb');
@@ -352,8 +461,8 @@ describe('architecture — dependencies', () => {
    * get wrong in a way that looks like success — a bug that returns no
    * violations passes the case above too, because the repo declares no runtime
    * dependency to find. So the claim is pinned from the other side: anything at
-   * all in `dependencies` is refused, and `lit` in particular, which is what
-   * this package carried for a browser it no longer ships.
+   * all in `dependencies` is refused, and `lit` in particular, as the browser
+   * dependency a dashboard in this tree would reintroduce.
    */
   it('refuses any runtime dependency, lit included', () => {
     const violations = checkDependencies({
@@ -377,5 +486,89 @@ describe('architecture — dependencies', () => {
 
     expect(violations.map((v) => v.name).sort()).toEqual(['esbuild', 'vite']);
     expect(violations.every((v) => v.field === 'devDependencies')).toBe(true);
+  });
+});
+
+describe('architecture — internal libraries', () => {
+  /**
+   * Location is the declaration: any file under src/libraries/<name>/ is held
+   * to the library contract with no list to join. These plant each way the
+   * contract can break; the last two check the real tree for the halves the
+   * checker cannot see (a contract entrypoint, a seam spec).
+   */
+  it('rejects a library reaching into the engine', () => {
+    const violations = checkBoundaries([
+      file('src/libraries/fake/thing.ts', `import {x} from '../../core';`),
+    ]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('library-boundary');
+    expect(violations[0].message).toContain('libraries/fake');
+  });
+
+  it('rejects a library importing a Node builtin — third-party means self-contained', () => {
+    const violations = checkBoundaries([
+      file('src/libraries/fake/thing.ts', `import * as fs from 'node:fs';`),
+    ]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('library-boundary');
+  });
+
+  it('rejects a library importing a sibling library', () => {
+    const violations = checkBoundaries([
+      file(
+        'src/libraries/fake/thing.ts',
+        `import {x} from '../schema/validate';`,
+      ),
+    ]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('library-boundary');
+  });
+
+  it('allows a library importing its own files', () => {
+    expect(
+      checkBoundaries([
+        file('src/libraries/fake/thing.ts', `import {x} from './other';`),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('refuses a loose file directly under src/libraries/', () => {
+    const violations = checkBoundaries([
+      file('src/libraries/stray.ts', `export const x = 1;`),
+    ]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('library-boundary');
+    expect(violations[0].message).toContain('belongs to no package');
+  });
+
+  it('derives the membership every other check keys on from the tree', () => {
+    expect(internalLibraries(readSourceFiles(repoRoot, ['src']))).toEqual([
+      'schema',
+      'walltime',
+    ]);
+  });
+
+  // The two halves of the contract the checker cannot enforce from file
+  // contents alone: an index.ts stating the contract, and a seam spec pinning
+  // the removal surface. Checked here against the real tree so a package
+  // cannot drift into existence with neither.
+  it('gives every library a contract entrypoint and a seam spec', () => {
+    const src = readSourceFiles(repoRoot, ['src']);
+    const specs = new Set(
+      readSourceFiles(repoRoot, ['spec']).map((f) => f.path),
+    );
+    const srcPaths = new Set(src.map((f) => f.path));
+    for (const library of internalLibraries(src)) {
+      expect(srcPaths.has(`src/libraries/${library}/index.ts`))
+        .withContext(
+          `src/libraries/${library}/ has no index.ts — the contract fileoverview lives there`,
+        )
+        .toBe(true);
+      expect(specs.has(`spec/libraries/${library}/seam.spec.ts`))
+        .withContext(
+          `src/libraries/${library}/ has no seam spec — spec/libraries/${library}/seam.spec.ts names its removal surface`,
+        )
+        .toBe(true);
+    }
   });
 });

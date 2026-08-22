@@ -11,8 +11,19 @@ document.
 
 **Organize by responsibility, not by technical kind.** The top-level split is
 `protocol/`, `core/`, `patterns/`, `schedule/`, `server/`, `services/`,
-`worker/`, `client/` — each a job the system does, and each declaring what it may
-import in [`tools/boundaries.ts`](tools/boundaries.ts). A new area of behaviour
+`worker/`, `client/`, `connectors/`, plus `libraries/` — each layer a job the
+system does, and each declaring what it may import in
+[`tools/boundaries.ts`](tools/boundaries.ts). `src/libraries/` holds the
+**internal libraries** (`walltime/`, `schema/`): repo-owned code deliberately
+treated like third-party dependencies, and the one place where grouping is by
+contract rather than by job — being under that directory _is_ the declaration.
+The checker derives membership from the tree and pins every package to itself
+(imports nothing: not layers, not Node, not a sibling library), and each
+package owes a contract fileoverview in its `index.ts` plus a seam spec built
+on [`spec/support/library_seam.ts`](spec/support/library_seam.ts) naming every
+call site — which doubles as the removal instruction. All of it is checked:
+`spec/architecture.spec.ts` plants violations of the library boundary and
+asserts the contract files exist. A new area of behaviour
 gets its own layer there rather than a folder inside a neighbour: absence from
 that map means _unrestricted_, so skipping the declaration exempts the new code
 rather than leaving it safely unchecked. Resist `types/`, `utils/`, `helpers/`, `handlers/`: those group
@@ -177,6 +188,33 @@ believed. Where a comment and the code disagree, the code is the truth and the
 comment is a bug — fix it rather than working around it. Don't leave a pointer
 to something that no longer exists.
 
+**Write the state, not the delta.** "This used to…", "that stopped being enough
+when…", "an earlier version of this file…" describe the repo's history rather
+than its code, and a reader arriving later has to work out which half is
+current. State what is true now, in the present tense.
+
+The distinction that matters is whether an **alternative** is being recorded. A
+decision had options, and naming the one not taken is the half that stops it
+being relitigated — so write it as a live alternative, not as a past event.
+"There used to be an `isLive` flag here" is autobiography; "the alternative is a
+live edge, which answers a question about position that is really about content"
+is the same argument, present tense, and it stays true. Where there was no real
+fork — nobody weighed having `activityRetryScheduled` against not having it —
+there is no decision to record: say what the thing is for and stop.
+
+Two ways prose goes stale without ever being wrong when written:
+
+- **A claim a later change falsified.** `ActivityRetryGroup` called flakiness
+  underivable from history for a week after `activityRetryScheduled` made it
+  derivable. A change owns every comment describing it, including in neighbouring
+  modules.
+- **The history of something removed.** A decision documents code it
+  _constrains_; a deleted thing constrains nothing, so its story belongs in the
+  commit message. Keep what the code does now and what is still open.
+
+The tell for the second: on a change that removes code, the comment delta should
+be negative too.
+
 ### Start here when orienting
 
 | Read                                      | For                                                                   |
@@ -201,10 +239,11 @@ trailing commas). Two rules need local judgement rather than literal
 application:
 
 - **`any` in rest-parameter positions is correct here and must stay.**
-  `WorkflowFn`, `ActivityFn`, and `AnyFn` take `(...args: any[])` because
-  `strictFunctionTypes` makes parameters contravariant: a real `(name: string)
-=> Promise<string>` is _not_ assignable to `(...args: unknown[]) => …`, so a
-  registry typed that way would accept nothing anyone writes. Return types
+  `ActivityFn` and `AnyFn` take `(...args: any[])`, and `WorkflowFn` takes
+  `(props?: any)`, because `strictFunctionTypes` makes parameters
+  contravariant: a real `({name}: {name: string}) => Promise<string>` is _not_
+  assignable to `(props?: unknown) => …`, so a registry typed that way would
+  accept nothing anyone writes. Return types
   carry no such constraint and stay `unknown`. Each such `any` is documented
   at its declaration — Google's rule is to justify it, not to pretend it is
   avoidable.
@@ -327,12 +366,15 @@ Not every test is documentation, and forcing it to be makes both worse.
 
 `spec/integration/local.spec.ts` is the reference for all six.
 
-### Examples must be spec-covered
+### There is no examples/ tree
 
-Every file in `examples/` must be exercised by a spec. An example nobody runs
-rots silently; one that CI runs cannot. `examples/greeter.ts` is covered by
-`spec/integration/distributed.spec.ts` and
-`spec/integration/worker_entrypoint.spec.ts`.
+A runnable file is honest only while something runs it — an example nobody runs
+rots silently — so anything runnable lives where the suite runs it:
+`spec/support/greeter_worker.ts` is the reference worker binary, deployed for
+real by `spec/integration/distributed.spec.ts` and run in `--local` mode by
+`spec/integration/local_run.spec.ts`. Authoring examples belong in the README's
+snippets and the documentation specs, which CI executes. An `examples/` tree
+held files CI merely typechecked, and that is the gap this rule closes.
 
 ## Commands
 

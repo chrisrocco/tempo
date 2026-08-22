@@ -18,15 +18,9 @@
 import {createLocalRuntime} from '../../src';
 import {MemoryHistoryStore} from '../../src/server';
 import type {HistoryEvent} from '../../src/protocol';
-import {
-  defineSignal,
-  executeChild,
-  runActivity,
-  setHandler,
-  sleep,
-} from '../../src/workflow';
+import {executeChild, runActivity, setHandler, sleep} from '../../src/workflow';
 
-const go = defineSignal('go');
+const go = 'go';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -62,7 +56,7 @@ async function historyOfEveryKind(): Promise<HistoryEvent[]> {
       return 'unreachable';
     });
 
-  const handle = rt.start('wf', [], {workflowId: 'wf-1'});
+  const handle = rt.start('wf', undefined, {workflowId: 'wf-1'});
   await wait(60);
   handle.signal(go);
   await wait(40);
@@ -129,7 +123,7 @@ describe('history event timestamps', () => {
       .registerActivity('ok', () => 'fine')
       .registerWorkflow('wf', async () => runActivity('ok'));
 
-    await rt.start('wf', [], {workflowId: 'wf-1'}).result();
+    await rt.start('wf', undefined, {workflowId: 'wf-1'}).result();
     const before = (await store.get('wf-1'))!.history.map((e) => e.ts);
     await wait(25);
     const after = (await store.get('wf-1'))!.history.map((e) => e.ts);

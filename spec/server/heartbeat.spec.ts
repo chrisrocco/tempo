@@ -17,7 +17,9 @@ import {
   MemoryTaskQueue,
   MemoryTimerService,
   MemoryWorkflowTaskQueue,
+  type ServerCore,
   createServerCore,
+  describeExecution,
 } from '../../src/server';
 
 function wait(ms: number): Promise<void> {
@@ -191,5 +193,170 @@ describe('heartbeats for an attempt the server gave up on', () => {
     await expectAsync(
       core.heartbeatActivityTask('act-never-issued'),
     ).toBeResolved();
+  });
+});
+
+/**
+ * A register, not a log: one slot per attempt, overwritten by the next beat and
+ * thrown away with the attempt. Nothing here is a history event, so none of it
+ * outlives the attempt that reported it.
+ */
+describe('a checkpoint reported with a heartbeat', () => {
+  async function pending(core: ServerCore, historyStore: MemoryHistoryStore) {
+    const rec = await historyStore.get('wf');
+    return describeExecution(rec!, {}, core.activityCheckpoints('wf')).pending
+      .activities[0];
+  }
+
+  it('surfaces on the pending activity, with the time it arrived', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const before = Date.now();
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {jobId: 'q-8823', pct: 40});
+
+    const activity = await pending(core, historyStore);
+    expect(activity.checkpoint).toEqual({jobId: 'q-8823', pct: 40});
+    expect(activity.checkpointAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it('reports nothing until the attempt has said something', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    await core.pollActivityTask();
+
+    const activity = await pending(core, historyStore);
+    expect(activity.checkpoint).toBeUndefined();
+    expect(activity.checkpointAt).toBeUndefined();
+  });
+
+  it('replaces the previous checkpoint rather than accumulating', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {pct: 10});
+    await core.heartbeatActivityTask(task!.token, {pct: 90});
+
+    expect((await pending(core, historyStore)).checkpoint).toEqual({pct: 90});
+  });
+
+  it('is left standing by a later heartbeat that carries nothing', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {jobId: 'q-8823'});
+    await core.heartbeatActivityTask(task!.token);
+
+    expect((await pending(core, historyStore)).checkpoint).toEqual({
+      jobId: 'q-8823',
+    });
+  });
+
+  it('is discarded when the attempt completes', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {pct: 99});
+    await core.completeActivityTask(task!.token, {ok: true, result: 'rows'});
+
+    expect(core.activityCheckpoints('wf')).toEqual({});
+  });
+
+  // The case a parallel map would get wrong: an abandoned attempt's checkpoint
+  // must go with it, or `describe` reports work nobody is doing.
+  it('is discarded when the attempt is abandoned for going quiet', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 30};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {pct: 40});
+    await wait(100); // the worker dies mid-query
+
+    expect(core.activityCheckpoints('wf')).toEqual({});
+  });
+
+  it('is ignored from an attempt the server already gave up on', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 30};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await wait(80); // abandoned
+    await core.heartbeatActivityTask(task!.token, {pct: 40}); // still going
+
+    expect(core.activityCheckpoints('wf')).toEqual({});
+  });
+});
+
+/**
+ * The fourth way an attempt can end: with neither timeout set, the queue lease
+ * bounds it, and expiry redelivers without deleting the lease. The stale entry
+ * stays on purpose (`completeActivityTask` says why); its checkpoint must not.
+ */
+describe('a checkpoint superseded by redelivery', () => {
+  it('is not reported against the attempt that replaced it', async () => {
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, {});
+    enqueue(activityTaskQueue, {});
+
+    const first = await core.pollActivityTask();
+    await core.heartbeatActivityTask(first!.token, {pct: 40});
+    await wait(80); // the worker dies; the lease expires
+
+    const second = await core.pollActivityTask(); // redelivered, new token
+    expect(second!.token).not.toBe(first!.token);
+    expect(core.activityCheckpoints('wf')).toEqual({});
+  });
+
+  it('gives way to whatever the new attempt reports', async () => {
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, {});
+    enqueue(activityTaskQueue, {});
+
+    const first = await core.pollActivityTask();
+    await core.heartbeatActivityTask(first!.token, {pct: 40});
+    await wait(80);
+
+    const second = await core.pollActivityTask();
+    await core.heartbeatActivityTask(second!.token, {pct: 5});
+
+    expect(core.activityCheckpoints('wf')[0]!.checkpoint).toEqual({pct: 5});
+  });
+
+  // The stale lease itself must survive: that work really ran, so a late
+  // completion from the abandoned worker is still accepted.
+  it('leaves the abandoned attempt still able to report its result', async () => {
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, {});
+    enqueue(activityTaskQueue, {});
+
+    const first = await core.pollActivityTask();
+    await core.heartbeatActivityTask(first!.token, {pct: 40});
+    await wait(80);
+    await core.pollActivityTask(); // redelivered
+
+    await core.completeActivityTask(first!.token, {ok: true, result: 'rows'});
+
+    const terminal = await terminalEvents(historyStore);
+    expect(terminal.length).toBe(1);
+    expect(terminal[0].type).toBe('activityCompleted');
   });
 });

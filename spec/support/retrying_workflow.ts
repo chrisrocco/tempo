@@ -37,6 +37,6 @@ const rt = createLocalRuntime()
   .registerActivity('flaky', activities.flaky)
   .registerWorkflow('retrying', async () => act.flaky());
 
-rt.start('retrying', [], {workflowId: 'retrying-1'});
+rt.start('retrying', undefined, {workflowId: 'retrying-1'});
 
 process.stdout.write('SCRIPT_ENDED\n');

@@ -79,7 +79,7 @@ describe('resetting an execution', () => {
       {count: () => ++calls},
     );
 
-    service.start('counter', [], {workflowId: 'c-1'});
+    service.start('counter', undefined, {workflowId: 'c-1'});
     await wait(200);
     expect((await store.get('c-1'))?.status).toBe('completed');
     const ranBefore = calls;
@@ -104,7 +104,7 @@ describe('resetting an execution', () => {
         return 'done';
       },
     });
-    service.start('waiter', [], {workflowId: 'r-1'});
+    service.start('waiter', undefined, {workflowId: 'r-1'});
     await wait(150);
     await store.recordTaskFailure('r-1', 'nondeterminism at seq 2');
     expect((await store.get('r-1'))?.taskFailures).toBe(1);
@@ -126,7 +126,7 @@ describe('resetting an execution', () => {
         return 'done';
       },
     });
-    service.start('waiter', [], {workflowId: 'v-1'});
+    service.start('waiter', undefined, {workflowId: 'v-1'});
     await wait(150);
 
     const before = (await store.get('v-1'))!.version;
@@ -147,7 +147,7 @@ describe('resetting an execution', () => {
         return 'done';
       },
     });
-    service.start('waiter', [], {workflowId: 't-1'});
+    service.start('waiter', undefined, {workflowId: 't-1'});
     await wait(150);
     expect(
       (await store.get('t-1'))!.history.some((e) => e.type === 'timerStarted'),
@@ -182,7 +182,7 @@ describe('resetting an execution', () => {
         },
       },
     );
-    service.start('maybe', [], {workflowId: 'f-1'});
+    service.start('maybe', undefined, {workflowId: 'f-1'});
     await wait(250);
     expect((await store.get('f-1'))?.status).toBe('failed');
 
@@ -206,7 +206,7 @@ describe('resetting an execution', () => {
       {short: async () => runActivity<number>('noop')},
       {noop: () => 1},
     );
-    service.start('short', [], {workflowId: 's-1'});
+    service.start('short', undefined, {workflowId: 's-1'});
     await wait(200);
 
     const before = (await store.get('s-1'))!.history.length;

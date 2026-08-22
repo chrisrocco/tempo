@@ -4,11 +4,11 @@
  *
  * `startServer({dataDir})` opens the store, builds the host, resumes what was
  * running, binds the port, and wires shutdown. The counterpart to
- * `Tempo.startWorker` in `tempo.ts`: a deployment is **two artifacts**, one per
+ * `startWorker` in `tempo.ts`: a deployment is **two artifacts**, one per
  * entrypoint, and each is a file whose whole body is one call into this library.
  *
  *   server.ts   startServer({dataDir: '/var/lib/tempo'})
- *   worker.ts   Tempo.startWorker({name: 'orders', workflows, activities})
+ *   worker.ts   startWorker({name: 'orders', workflows, activities})
  *
  * Flags — see `process_flags.ts` for why these are flags and not environment
  * variables:
@@ -17,22 +17,21 @@
  *   --data-dir=PATH        persist history here and `resume()` on boot; unset is
  *                          in-memory and loses everything on restart
  *   --activity-lease-ms=N  activity-task lease timeout
+ *   --retain-closed-for-days=N  delete executions closed longer than N days
+ *                          (fractions allowed); unset keeps them forever
  *
  * ## Why this is a function and not only a script
  *
- * It used to be only `bin/server-main.ts` — a script, in this repo's tree, whose
- * composition (`createServerHost`, `createRpcServer`, `FileHistoryStore.open`)
- * was unexported and unreachable from outside. Anyone consuming this library
- * under their own build system had no supported way to *produce a server*: they
- * could bundle their own worker, because `startWorker` is a function, and then
- * had nothing to point it at.
+ * Assembling a deployment is entirely the consumer's job (see `README.md`), so
+ * the server and the worker have to be equally buildable — which means both
+ * entrypoints have to be *values*. A composition left as a script in `bin/`,
+ * with `createServerHost`, `createRpcServer` and `FileHistoryStore.open`
+ * unexported, is unreachable from outside: a consumer on their own build system
+ * could bundle a worker, because `startWorker` is a function, and have nothing
+ * to point it at.
  *
- * That asymmetry was invisible while a deployment library lived here and knew
- * both paths itself. Now that assembling a deployment is entirely the consumer's
- * job (see `README.md`), the two artifacts have to be equally buildable, and that
- * means both entrypoints have to be *values*. `bin/server-main.ts` still exists
- * and is still what the specs spawn — it is now the reference invocation of this
- * function, and the file a consumer copies.
+ * `bin/server-main.ts` still exists and is still what the specs spawn — it is the
+ * reference invocation of this function, and the file a consumer copies.
  *
  * ## The options object is the configuration, and three flags override it
  *
@@ -59,11 +58,18 @@
  * which is the field that distinguishes a healthy server from one that will lose
  * every execution on its next restart. `queues()` is its companion for workers.
  *
+ * It now also reports **where this server is bound** — interface, port, and
+ * machine hostname (see `ServerEndpoint`). That is resolved here, from the
+ * `AddressInfo` the listen callback hands back, and pushed into the host: the
+ * host is the tier that answers probes and this is the tier that knows, so the
+ * knowledge has to cross once, at bind.
+ *
  * The line stays for the two jobs it is genuinely good at: a human watching a
- * terminal, and **learning the port after `--port=0`**, which is how the specs
- * get an arbitrary port without racing for one. In-process callers do not need
- * even that — `Server.port` is the bound port, and `--port=0` resolves in the
- * returned value.
+ * terminal, and **learning the port after `--port=0`** without a connection —
+ * which is how the specs that spawn this as a subprocess get an arbitrary port
+ * without racing for one. Anything that can already connect should ask
+ * `health()` instead. In-process callers need neither: `Server.port` is the
+ * bound port, and `--port=0` resolves in the returned value.
  *
  * ## Operational notes
  *
@@ -100,8 +106,9 @@ import {
   flagValue,
   numericFlagValue,
 } from './process_flags';
+import type {ServerEndpoint} from './protocol';
 import {FileHistoryStore, createJsonLogger} from './server';
-import {createRpcServer, createServerHost} from './services';
+import {createRpcServer, createServerHost, resolveEndpoint} from './services';
 
 /**
  * What a server process is configured with. Every field has a launch-site
@@ -124,12 +131,39 @@ export interface StartServerOptions {
   /**
    * Activity-task lease timeout. `--activity-lease-ms` overrides.
    *
-   * Must exceed the largest `startToCloseTimeoutMs` any activity sets, or the
-   * lease redelivers the task before its own deadline is reached and the timeout
-   * never gets to decide.
+   * Should exceed the largest `startToCloseTimeoutMs` any activity sets — a
+   * lease shorter than a deadline redelivers the task into a concurrent second
+   * run before the deadline fires. The deadline still decides in the end (its
+   * failure settles the seq, and the poll guard then drains the stale
+   * redeliveries), but every lease period until then dispatches the work again.
    */
   activityLeaseMs?: number;
+  /**
+   * Start-to-close deadline for activities that configured no deadline of
+   * their own. Default 10 minutes. A launch-site knob with no flag on purpose:
+   * changing it is a policy decision about every workflow on the server, not a
+   * per-deploy tuning. See `ServerCoreDeps.defaultStartToCloseTimeoutMs`.
+   */
+  defaultStartToCloseTimeoutMs?: number;
+  /**
+   * Delete executions closed longer than this many **days**.
+   * `--retain-closed-for-days` overrides. **Unset keeps every execution
+   * forever**, today's behavior.
+   *
+   * Days rather than the `Ms` every other knob here speaks, because this is
+   * the one duration an operator writes in a unit file and reasons about in
+   * deployment time: `7` reads at the launch site where `604800000` has to be
+   * decoded. Fractions are fine — `0.5` is twelve hours. The conversion to the
+   * host's millisecond knob happens exactly once, below.
+   *
+   * The contract this changes — results claimable only within the window, a
+   * closed `workflowId` reclaimable after it — is documented where the option
+   * lands: `ServerHostOptions.retainClosedForMs`.
+   */
+  retainClosedForDays?: number;
 }
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** A running server, and the two things a caller needs from one. */
 export interface Server {
@@ -172,13 +206,37 @@ export async function startServer(
   const activityLeaseMs =
     numericFlagValue(argv, SERVER_FLAG.activityLeaseMs) ??
     options.activityLeaseMs;
+  const retainClosedForDays =
+    numericFlagValue(argv, SERVER_FLAG.retainClosedForDays) ??
+    options.retainClosedForDays;
+  // Rejected rather than clamped, like --activity-concurrency: a negative
+  // window is a typo in a unit file, and a server that quietly swept
+  // everything closed would be the worst possible reading of it.
+  if (retainClosedForDays !== undefined && retainClosedForDays < 0)
+    throw new Error(
+      `--${SERVER_FLAG.retainClosedForDays} needs a non-negative number of days, got ${retainClosedForDays}`,
+    );
 
   // Durable when a data dir was resolved (a single-writer lockfile guards it);
   // otherwise in-memory. `undefined` lets createServerHost default the store.
   const store = dataDir ? await FileHistoryStore.open(dataDir) : undefined;
+  // Filled in below, once there is something to fill it in with. The host is
+  // built first because `resume()` has to run before the port opens, so at this
+  // point the only truthful answer to "where are you bound" is that nothing is
+  // — and under `--port=0` the requested port is not the answer anyway. See
+  // `ServerHostOptions.endpoint`.
+  let endpoint: ServerEndpoint | undefined;
   const host = createServerHost(store, {
     activityLeaseMs,
+    defaultStartToCloseTimeoutMs: options.defaultStartToCloseTimeoutMs,
+    // The one place days become milliseconds — the host, like every store and
+    // lease below it, speaks ms.
+    retainClosedForMs:
+      retainClosedForDays === undefined
+        ? undefined
+        : retainClosedForDays * MS_PER_DAY,
     log: createJsonLogger(),
+    endpoint: () => endpoint,
   });
   // Re-arm timers, re-dispatch pending work, re-drive running executions. Before
   // the port opens, so nothing observes a server that is listening and has not
@@ -190,6 +248,7 @@ export async function startServer(
     rpc.once('error', reject);
     rpc.listen(port, bindHost, () => resolve(rpc.address() as AddressInfo));
   });
+  endpoint = resolveEndpoint(address);
 
   // A convenience for humans and for `--port=0`, not the readiness contract —
   // see the fileoverview. The host is appended rather than substituted: existing

@@ -13,7 +13,6 @@
 import {
   condition,
   createContext,
-  defineSignal,
   replay,
   runActivity,
   setHandler,
@@ -25,8 +24,8 @@ import {
 } from '../../src/patterns/signal_stream';
 import type {HistoryEvent} from '../../src/protocol';
 
-const comment = defineSignal('comment');
-const stop = defineSignal('stop');
+const comment = 'comment';
+const stop = 'stop';
 
 /** A signal event, since these specs are mostly lists of them. */
 function sig(name: string, payload: unknown): HistoryEvent {
@@ -326,20 +325,35 @@ describe('signalStream — determinism', () => {
 });
 
 describe('signalStream — one consumer per signal', () => {
-  it('rejects a second consumer of the same signal', async () => {
-    const ctx = createContext([], []);
-    let message = '';
-
-    await replay(ctx, async () => {
-      signalStream(comment);
-      try {
-        signalStream(comment);
-      } catch (e) {
-        message = (e as Error).message;
+  /**
+   * A characterization test, not an endorsement: two streams on one signal is a
+   * bug, and this pins what it currently does. It inverts if `setHandler` is
+   * ever given the guard.
+   */
+  it('lets a second consumer displace the first, silently', async () => {
+    const displaced: unknown[] = [];
+    await replay(createContext([], [sig('comment', 'a')]), async () => {
+      const first = signalStream(comment);
+      signalStream(comment); // no throw — it takes the name over
+      for await (const item of first) {
+        displaced.push(item);
+        break;
       }
     });
 
-    expect(message).toContain('already has a consumer');
+    const usurper: unknown[] = [];
+    await replay(createContext([], [sig('comment', 'a')]), async () => {
+      signalStream(comment);
+      const second = signalStream(comment);
+      for await (const item of second) {
+        usurper.push(item);
+        break;
+      }
+    });
+
+    // Both halves matter: empty alone is also what a broken stream produces.
+    expect(displaced).toEqual([]);
+    expect(usurper).toEqual(['a']);
   });
 
   it('allows a new consumer once the previous one has ended', async () => {

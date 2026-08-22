@@ -32,7 +32,7 @@ const rt = createLocalRuntime()
   .registerActivity('alwaysFails', activities.alwaysFails)
   .registerWorkflow('doomed', async () => act.alwaysFails());
 
-rt.start('doomed', [], {workflowId: 'doomed-1'});
+rt.start('doomed', undefined, {workflowId: 'doomed-1'});
 
 // Long enough for the first attempt to fail and the backoff to be armed, short
 // enough that it cannot be confused with waiting the backoff out.

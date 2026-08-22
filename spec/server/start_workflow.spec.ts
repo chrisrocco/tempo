@@ -45,9 +45,13 @@ function parkingStarter(store: MemoryHistoryStore, targetId: string) {
 describe('startWorkflow — an execution that is nobody’s child', () => {
   it('survives its starter being cancelled, where a child would not', async () => {
     const store = new MemoryHistoryStore();
-    const handle = parkingStarter(store, 'indep-1').start('starter', [], {
-      workflowId: 'starter-1',
-    });
+    const handle = parkingStarter(store, 'indep-1').start(
+      'starter',
+      undefined,
+      {
+        workflowId: 'starter-1',
+      },
+    );
     await wait(80);
     handle.cancel();
     await wait(120);
@@ -80,7 +84,7 @@ describe('startWorkflow — an execution that is nobody’s child', () => {
         return 'unreachable';
       });
 
-    const handle = rt.start('starter', [], {workflowId: 'starter-2'});
+    const handle = rt.start('starter', undefined, {workflowId: 'starter-2'});
     await wait(80);
     handle.cancel();
     await wait(120);
@@ -103,7 +107,7 @@ describe('startWorkflow — an execution that is nobody’s child', () => {
         await sleep(5); // park, so the start is dispatched before this run ends
         return 'done';
       })
-      .start('starter', [], {workflowId: 'starter-3'});
+      .start('starter', undefined, {workflowId: 'starter-3'});
     await wait(200);
 
     expect((await store.get('starter-3'))?.status).toBe('completed');
@@ -113,7 +117,7 @@ describe('startWorkflow — an execution that is nobody’s child', () => {
 
   it('records no parent link, so nothing points back at the starter', async () => {
     const store = new MemoryHistoryStore();
-    parkingStarter(store, 'indep-3').start('starter', [], {
+    parkingStarter(store, 'indep-3').start('starter', undefined, {
       workflowId: 'starter-4',
     });
     await wait(120);
@@ -141,7 +145,7 @@ describe('startWorkflow — the claimed id is the dedup', () => {
         await sleep(5);
         return 'done';
       })
-      .start('starter', [], {workflowId: 'starter-5'});
+      .start('starter', undefined, {workflowId: 'starter-5'});
     await wait(250);
 
     expect(starts.length).toBe(1);
@@ -161,7 +165,7 @@ describe('startWorkflow — the claimed id is the dedup', () => {
         await sleep(5);
         return 'done';
       })
-      .start('starter', [], {workflowId: 'starter-6'});
+      .start('starter', undefined, {workflowId: 'starter-6'});
     await wait(250);
 
     const markers = ((await store.get('starter-6'))?.history ?? []).filter(

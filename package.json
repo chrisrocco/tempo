@@ -5,11 +5,14 @@
   "description": "A minimal-but-correct durable workflow engine (a small Temporal-shaped system).",
   "exports": {
     ".": "./src/index.ts",
+    "./client": "./src/remote_client.ts",
     "./protocol": "./src/protocol/index.ts",
     "./workflow": "./src/workflow.ts",
+    "./connectors": "./src/connectors/index.ts",
     "./activity": "./src/activity.ts",
     "./schedule": "./src/schedule/index.ts",
-    "./schedule/worker": "./src/schedule/worker.ts"
+    "./schedule/worker": "./src/schedule/worker.ts",
+    "./testing": "./src/testing/index.ts"
   },
   "scripts": {
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",

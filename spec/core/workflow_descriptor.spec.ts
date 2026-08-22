@@ -1,182 +1,224 @@
 /**
  * @fileoverview
- * `defineWorkflow` — defining a workflow and describing it in one object.
+ * The describing half of `createWorkflow` — what a workflow says about itself,
+ * and how invisible saying it is.
  *
- * The point of the shape is that it changes nothing downstream. `defineWorkflow` returns
- * `start` itself, so a described workflow registers, runs, and unit-tests exactly as an
- * undescribed one does — adopting this is one workflow at a time rather than a migration.
+ * The point of the shape is that describing a workflow changes nothing about
+ * running it. The descriptor rides on the body as a non-enumerable frozen
+ * property, so a described workflow registers, runs, and unit-tests exactly as
+ * an undescribed one does, and adopting descriptions is one workflow at a time
+ * rather than a migration.
  *
- * Most of these specs exist to pin that invisibility, which is the property a future
- * change is most likely to break by returning a wrapper object instead of the function.
+ * Most of these specs exist to pin that invisibility, which is the property a
+ * future change is most likely to break — by returning a wrapper object instead
+ * of the function, or by leaving an enumerable key behind.
+ *
+ * `createWorkflow`'s *other* half — the reference it returns, and what calling
+ * that reference dispatches — is `spec/workflow_registry.spec.ts`.
  */
 
 import 'jasmine';
-import type {WorkflowProp} from '../../src/protocol';
+import type {WorkflowPropsSchema} from '../../src/protocol';
 import {createLocalRuntime} from '../../src';
-import {defineWorkflow} from '../../src/workflow';
+import {createWorkflow} from '../../src/workflow';
 import {workflowDescriptor} from '../../src/workflow_descriptor';
+import {isolateWorkflowRegistry} from '../support/isolate_workflow_registry';
 
-describe('defineWorkflow', () => {
-  it('returns the start function itself', () => {
-    const start = async (): Promise<string> => 'hi';
-    expect(defineWorkflow({title: 'Greeter', start})).toBe(start);
+describe('createWorkflow — describing a workflow', () => {
+  isolateWorkflowRegistry();
+
+  it('leaves the body itself on `.impl`, unwrapped', () => {
+    const run = async (): Promise<string> => 'hi';
+
+    expect(createWorkflow({key: 'greeter', title: 'Greeter', run}).impl).toBe(
+      run,
+    );
   });
 
   it('leaves it callable, with its props and result intact', async () => {
-    const greet = defineWorkflow({
+    const greet = createWorkflow({
+      key: 'greeter',
       title: 'Greeter',
-      async start(props: {name: string}) {
+      async run(props: {name: string}) {
         return `hello ${props.name}`;
       },
     });
 
-    await expectAsync(greet({name: 'world'})).toBeResolvedTo('hello world');
+    // `.impl`, not the reference: calling the reference dispatches a child, which
+    // is the whole distinction `workflow_registry.spec.ts` covers.
+    await expectAsync(greet.impl({name: 'world'})).toBeResolvedTo(
+      'hello world',
+    );
   });
 
-  it('reads back everything except the function', () => {
-    const props: WorkflowProp[] = [
-      {name: 'customerId', required: true, type: 'string'},
-      {name: 'locale', description: 'Defaults to the account language.'},
-    ];
-    const fn = defineWorkflow({
+  it('reads back everything except the key and the function', () => {
+    const props: WorkflowPropsSchema = {
+      type: 'object',
+      properties: {
+        customerId: {type: 'string'},
+        locale: {description: 'Defaults to the account language.'},
+      },
+      required: ['customerId'],
+    };
+    const ref = createWorkflow({
+      key: 'greeter',
       title: 'Greet a customer',
       description: 'Sends the welcome email.',
       props,
-      async start() {
+      async run() {
         return 'x';
       },
     });
 
-    expect(workflowDescriptor(fn)).toEqual({
+    expect(workflowDescriptor(ref.impl)).toEqual({
       title: 'Greet a customer',
       description: 'Sends the welcome email.',
       props,
     });
   });
 
-  // `start` is the function, not something to describe — it must not end up in the
-  // descriptor, which is data destined for a wire and a screen.
-  it('keeps start out of the descriptor', () => {
-    const fn = defineWorkflow({
+  // `run` is the function and `key` is the identity — neither is something to
+  // describe, and the descriptor is data destined for a wire and a screen.
+  it('keeps key and run out of the descriptor', () => {
+    const ref = createWorkflow({
+      key: 'greeter',
       title: 'Greeter',
-      async start() {
+      async run() {
         return 'x';
       },
     });
 
-    expect(Object.keys(workflowDescriptor(fn)!)).toEqual(['title']);
+    expect(Object.keys(workflowDescriptor(ref.impl)!)).toEqual(['title']);
   });
 
   /**
-   * The invisibility that matters most: a described function must not look different to
-   * anything that enumerates it. `startWorker({workflows})` iterates entries, specs
-   * compare objects, and a stray enumerable key would surface in all of them.
+   * The invisibility that matters most: a described body must not look different
+   * to anything that enumerates it. `startWorker({workflows})` iterates entries,
+   * specs compare objects, and a stray enumerable key would surface in all of
+   * them.
    */
-  it('adds nothing enumerable', () => {
-    const fn = defineWorkflow({
+  it('adds nothing enumerable to the body', () => {
+    const ref = createWorkflow({
+      key: 'greeter',
       title: 'Greeter',
-      async start() {
+      async run() {
         return 'x';
       },
     });
 
-    expect(Object.keys(fn)).toEqual([]);
-    expect(JSON.stringify({fn})).toBe('{}');
-    expect({...fn}).toEqual({});
+    expect(Object.keys(ref.impl)).toEqual([]);
+    expect(JSON.stringify({fn: ref.impl})).toBe('{}');
+    expect({...ref.impl}).toEqual({});
   });
 
   it('freezes the descriptor, so one reader cannot alter another’s', () => {
-    const fn = defineWorkflow({
+    const ref = createWorkflow({
+      key: 'greeter',
       title: 'Greeter',
-      async start() {
+      async run() {
         return 'x';
       },
     });
-    const read = workflowDescriptor(fn)!;
+    const read = workflowDescriptor(ref.impl)!;
 
     expect(() => {
       (read as {title: string}).title = 'changed';
     }).toThrow();
-    expect(workflowDescriptor(fn)?.title).toBe('Greeter');
+    expect(workflowDescriptor(ref.impl)?.title).toBe('Greeter');
   });
 
   it('reports nothing for a function nobody described', () => {
     expect(workflowDescriptor(async () => 'x')).toBeUndefined();
   });
 
-  // The reader is handed whatever an entries loop produced, so it must tolerate values
-  // that are not functions at all rather than being the thing that throws.
+  // The reader is handed whatever an entries loop produced, so it must tolerate
+  // values that are not functions at all rather than being the thing that throws.
   it('reports nothing for a value that is not a function', () => {
     for (const value of [undefined, null, 42, 'x', {}, []])
       expect(workflowDescriptor(value)).toBeUndefined();
   });
 
   /**
-   * Partial descriptions are ordinary, not a special case — a missing `title` falls back
-   * to the registered name wherever this is displayed, which is the same fallback an
-   * entirely undescribed workflow gets.
+   * Partial descriptions are ordinary, not a special case — a missing `title`
+   * falls back to the registered name wherever this is displayed, which is the
+   * same fallback an entirely undescribed workflow gets.
    */
   it('accepts a description with only some fields', () => {
-    const fn = defineWorkflow({
+    const ref = createWorkflow({
+      key: 'greeter',
       description: 'No title, just this.',
-      async start() {
+      async run() {
         return 'x';
       },
     });
 
-    expect(workflowDescriptor(fn)).toEqual({
+    expect(workflowDescriptor(ref.impl)).toEqual({
       description: 'No title, just this.',
     });
   });
 
-  it('accepts a workflow with no props at all', () => {
-    const fn = defineWorkflow({
-      title: 'Takes nothing',
-      async start() {
+  /**
+   * An undescribed workflow gets an empty descriptor rather than none, since
+   * `createWorkflow` writes one unconditionally. Every consumer spreads it with
+   * `?? {}`, so this reads identically to "never described" — pinned because the
+   * two are only interchangeable while that stays true.
+   */
+  it('describes an undescribed workflow as nothing in particular', () => {
+    const ref = createWorkflow({
+      key: 'bare',
+      async run() {
         return 'x';
       },
     });
 
-    expect(workflowDescriptor(fn)?.props).toBeUndefined();
+    expect(workflowDescriptor(ref.impl)).toEqual({});
+    expect(workflowDescriptor(ref.impl)?.props).toBeUndefined();
   });
 });
 
 describe('a described workflow on a runtime', () => {
+  isolateWorkflowRegistry();
+
   /**
-   * The end-to-end claim: describing a workflow does not change how it is registered or
-   * run. If this ever needs a different registration call, the shape has failed.
-   *
-   * Note the start args — `[props]`, a one-element list holding the props object. That is
-   * the constraint a described workflow accepts in exchange for a start form that can be
-   * rendered from names rather than from an argument order.
+   * The end-to-end claim: describing a workflow does not change how it is
+   * registered or run. If this ever needs a different registration call, the
+   * shape has failed.
    */
   it('registers and runs exactly as an undescribed one does', async () => {
-    const greeter = defineWorkflow({
+    const greeter = createWorkflow({
+      key: 'greeter',
       title: 'Greet a customer',
-      props: [{name: 'name', required: true, type: 'string'}],
-      async start(props: {name: string}) {
+      props: {
+        type: 'object',
+        properties: {name: {type: 'string'}},
+        required: ['name'],
+      },
+      async run(props: {name: string}) {
         return `hello ${props.name}`;
       },
     });
+    // The reference goes in as-is; `registerWorkflow` unwraps it. Registering the
+    // dispatcher would have the workflow spawn itself forever.
     const rt = createLocalRuntime().registerWorkflow('greeter', greeter);
 
     await expectAsync(
-      rt.start<string>('greeter', [{name: 'world'}]).result(),
+      rt.start<string>('greeter', {name: 'world'}).result(),
     ).toBeResolvedTo('hello world');
     rt.shutdown();
   });
 
-  // Reading descriptors off a registry is how a catalogue will be assembled, so the
-  // iteration shape is worth pinning now: described and undescribed side by side, with
-  // the undescribed one present rather than skipped.
+  // Reading descriptors off a registry is how a catalogue is assembled, so the
+  // iteration shape is worth pinning: described and undescribed side by side,
+  // with the undescribed one present rather than skipped.
   it('lets a registry be read for descriptions, described or not', () => {
     const workflows = {
-      described: defineWorkflow({
+      described: createWorkflow({
+        key: 'described',
         title: 'Described',
-        async start() {
+        async run() {
           return 'x';
         },
-      }),
+      }).impl,
       plain: async (): Promise<string> => 'x',
     };
 
@@ -184,11 +226,11 @@ describe('a described workflow on a runtime', () => {
       Object.entries(workflows).map(([name, fn]) => ({
         name,
         title: workflowDescriptor(fn)?.title ?? name,
-        props: workflowDescriptor(fn)?.props ?? [],
+        props: workflowDescriptor(fn)?.props,
       })),
     ).toEqual([
-      {name: 'described', title: 'Described', props: []},
-      {name: 'plain', title: 'plain', props: []},
+      {name: 'described', title: 'Described', props: undefined},
+      {name: 'plain', title: 'plain', props: undefined},
     ]);
   });
 });

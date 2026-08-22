@@ -2,25 +2,20 @@
  * @fileoverview
  * The client: turns the flat `WorkflowService` surface into ergonomic handles
  * (start -> a handle with result()/status()/signal()). Written once against the
- * service seam, so it is identical for local and remote. The `SignalDef`
- * convenience (accepting a defined signal or a bare name) lives here rather than
- * in `protocol`, keeping the wire contract free of any `core` dependency.
+ * service seam, so it is identical for local and remote.
  *
  * ## It covers the whole client-facing surface, deliberately
  *
- * This used to wrap six of the service's eleven client-facing methods — the ones
- * that drive a single execution — and leave the reads (`describeExecution`,
+ * All eleven of the service's client-facing methods are here. Wrapping only the six
+ * that drive a single execution — and leaving the reads (`describeExecution`,
  * `listExecutions`, `listQueues`, `groupExecutions`) and `reset` to be reached by
- * dropping down to a raw `WorkflowService`.
+ * dropping down to a raw `WorkflowService` — would make this the ergonomic layer
+ * for exactly the calls that need one least. Anything assembling an operator tool
+ * wants all eleven, and half of them arriving through a different object, with a
+ * different shape, no handle, and no type parameter, is a seam for a distinction
+ * nobody is making.
  *
- * That split was an accident of what got built first, and it made this the
- * ergonomic layer for exactly the calls that needed one least. Anything assembling
- * an operator tool wants all eleven, and half of them arriving through a different
- * object — with a different shape, no handle, and no type parameter — is a seam
- * for a distinction nobody is making.
- *
- * So the division here is by *what the call is about* rather than by when it was
- * written:
+ * The division is by *what the call is about*:
  *
  * - **`WorkflowHandle`** — one execution. Its result, its status, its history, and
  *   the three ways to intervene in it.
@@ -56,7 +51,6 @@
  * The day the author-facing question gets an answer, this moves.
  */
 
-import type {SignalDef} from '../core';
 import type {
   DescribeOptions,
   ExecutionDetail,
@@ -68,6 +62,7 @@ import type {
   RemoteWorkflowService,
   ServerHealth,
   WorkflowService,
+  WorkflowSummary,
 } from '../protocol';
 
 /** One execution: what it did, and the ways to intervene in it. */
@@ -83,7 +78,7 @@ export interface WorkflowHandle<T = unknown> {
    * is this execution doing". `undefined` for an id the server has never seen.
    */
   describe(options?: DescribeOptions): Promise<ExecutionDetail | undefined>;
-  signal(signalDef: SignalDef | string, payload?: unknown): void;
+  signal(name: string, payload?: unknown): void;
   /**
    * Ask the workflow to unwind. Cooperative: it is delivered through replay, so
    * the workflow catches `CancelledFailure` and can clean up — and so it cannot
@@ -101,7 +96,7 @@ export interface WorkflowHandle<T = unknown> {
 export interface Client {
   start<T = unknown>(
     name: string,
-    args?: unknown[],
+    props?: unknown,
     opts?: {workflowId?: string; taskQueue?: string},
   ): WorkflowHandle<T>;
   /** A handle to an existing execution (e.g. one picked up by resume). */
@@ -131,6 +126,21 @@ export interface Client {
    * one capped page rather than on the server.
    */
   counts(): Promise<ExecutionGroups>;
+  /**
+   * Every workflow type the fleet has reported it can run, with what it says
+   * about itself.
+   *
+   * The catalogue answers "what can I start", which none of the reads above can:
+   * they describe executions, so a workflow nobody has run yet is invisible to
+   * all of them. Sourced from what workers push rather than from history, which
+   * is also why it is exactly as complete as the fleet is up: a worker that
+   * stopped takes its entries — and its queues — with it, so `taskQueues` reads
+   * as where this can run now rather than everywhere it ever ran.
+   *
+   * A `conflicting` entry is two workers describing one name differently — a
+   * fleet running two versions of a binary, reported rather than resolved.
+   */
+  workflows(): Promise<WorkflowSummary[]>;
   /**
    * Drop every event from `keep` onward and replay from there — the recovery for
    * an execution the deployed code cannot replay, where `terminate` is the
@@ -171,6 +181,11 @@ export interface RemoteClient extends Client {
    * **`durable: false` is the field to read first.** It means the server is
    * keeping history in memory and will lose every execution on its next restart,
    * while looking entirely healthy until then. Nothing else reports that.
+   *
+   * The reply also carries where the server bound, when something told it — see
+   * `ServerEndpoint`. `protocol/serverUrl` turns that into an address to dial;
+   * read what it says about its own limits before putting the result into a
+   * worker's configuration.
    */
   health(): Promise<ServerHealth>;
 }
@@ -182,12 +197,7 @@ export function createClient(service: WorkflowService): Client {
       result: () => service.getResult(workflowId) as Promise<T>,
       status: () => service.getStatus(workflowId),
       describe: (options) => service.describeExecution(workflowId, options),
-      signal: (signalDef, payload) =>
-        service.signal(
-          workflowId,
-          typeof signalDef === 'string' ? signalDef : signalDef.name,
-          payload,
-        ),
+      signal: (name, payload) => service.signal(workflowId, name, payload),
       cancel: () => service.cancel(workflowId),
       terminate: (reason = 'terminated by operator') =>
         service.terminate(workflowId, reason),
@@ -197,10 +207,10 @@ export function createClient(service: WorkflowService): Client {
   return {
     start<T = unknown>(
       name: string,
-      args: unknown[] = [],
+      props?: unknown,
       opts: {workflowId?: string; taskQueue?: string} = {},
     ): WorkflowHandle<T> {
-      const {workflowId} = service.start(name, args, opts);
+      const {workflowId} = service.start(name, props, opts);
       return handle<T>(workflowId);
     },
     getHandle<T = unknown>(workflowId: string): WorkflowHandle<T> {
@@ -209,6 +219,7 @@ export function createClient(service: WorkflowService): Client {
     list: (filter) => service.listExecutions(filter),
     queues: () => service.listQueues(),
     counts: () => service.groupExecutions(),
+    workflows: () => service.listWorkflows(),
     reset: (workflowId, keep) => service.reset(workflowId, keep),
   };
 }

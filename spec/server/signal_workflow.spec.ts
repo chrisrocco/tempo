@@ -28,7 +28,6 @@ import {
 import type {SignalWorkflowCommand} from '../../src/protocol';
 import {
   condition,
-  defineSignal,
   setHandler,
   signalWorkflow,
   startChild,
@@ -65,7 +64,7 @@ function sending(command: SignalWorkflowCommand) {
 
 describe('a workflow signalling another workflow', () => {
   it('delivers to the target and records the dispatch on the sender', async () => {
-    const item = defineSignal('item');
+    const item = 'item';
     const store = new MemoryHistoryStore();
     const rt = createLocalRuntime({historyStore: store})
       .registerWorkflow('feeder', async () => {
@@ -82,7 +81,7 @@ describe('a workflow signalling another workflow', () => {
         return got;
       });
 
-    const handle = rt.start<string>('consumer', [], {workflowId: 'c-1'});
+    const handle = rt.start<string>('consumer', undefined, {workflowId: 'c-1'});
     await expectAsync(handle.result()).toBeResolvedTo('from-child');
 
     // The receiving end: an ordinary signal, seq-less like any other, with the
@@ -195,11 +194,11 @@ describe('a workflow signalling another workflow', () => {
     const store = new MemoryHistoryStore();
     createLocalRuntime({historyStore: store})
       .registerWorkflow('shouter', async () => {
-        signalWorkflow('nobody-is-here', defineSignal('item'), 1);
+        signalWorkflow('nobody-is-here', 'item', 1);
         await wait(30);
         return 'shouted';
       })
-      .start('shouter', [], {workflowId: 's-1'});
+      .start('shouter', undefined, {workflowId: 's-1'});
     await wait(200);
 
     expect((await store.get('s-1'))?.history).toContain(

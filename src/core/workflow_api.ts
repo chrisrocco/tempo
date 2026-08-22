@@ -25,9 +25,10 @@ import {
   type ExecutionParentView,
   type ParentClosePolicy,
 } from '../protocol';
+import {durationToMs, type Duration} from '../libraries/walltime';
+import {captureSite} from './call_site';
 import {getContext, type WorkflowContext} from './context';
 import {CancelledFailure} from './errors';
-import type {SignalDef} from './signals';
 
 /**
  * The one place a command becomes real. Every site that mints a `Command` must go
@@ -62,8 +63,13 @@ function scheduleCommand(spec: CommandSpec): Promise<unknown> {
   if (ctx.cancelled) return Promise.reject(new CancelledFailure()); // no new work after cancel
   const seq = ctx.seq++;
   issue(ctx, {...spec, seq} as Command);
+  // The await site, captured per command and formatted only if this command
+  // fails — the cost argument is `call_site.ts`'s. It is what lets a failure
+  // recorded in another process name the workflow line that awaited it; the
+  // stitching happens where the failure completion rejects (`apply_event`).
+  const site = captureSite(scheduleCommand);
   return new Promise<unknown>((resolve, reject) =>
-    ctx.completions.set(seq, {resolve, reject}),
+    ctx.completions.set(seq, {resolve, reject, ...(site ? {site} : {})}),
   );
 }
 
@@ -82,14 +88,30 @@ export function runActivity<T = unknown>(
   return scheduleActivity(name, {}, args) as Promise<T>;
 }
 
-export function sleep(ms: number): Promise<void> {
-  return scheduleCommand({type: 'startTimer', ms}) as Promise<void>;
+/**
+ * A durable timer: milliseconds, or a duration string — `sleep('30 minutes')`.
+ * Parsed here, before the command is minted, so the wire and history carry only
+ * the number; the parse is a pure function of the source text, which is what
+ * makes the string form replay-safe.
+ */
+export function sleep(duration: Duration): Promise<void> {
+  return scheduleCommand({
+    type: 'startTimer',
+    ms: durationToMs(duration),
+  }) as Promise<void>;
 }
 
 /** How a child is started. Both child primitives take the same shape. */
 export interface ChildOptions {
-  /** Arguments for the child workflow function. */
-  args?: unknown[];
+  /**
+   * The one props object the child is started with.
+   *
+   * Wrapped into the command's positional `childArgs` beneath, which is what the
+   * wire and history have always carried — see `Client.start`, which does the
+   * same. A child started with nothing gets an empty list rather than
+   * `[undefined]`.
+   */
+  props?: unknown;
   /**
    * The child's execution id. Omit and the engine derives one from lineage,
    * which is unique per call site and per run.
@@ -122,7 +144,7 @@ export interface ChildOptions {
    *
    * Set `'abandon'` for a child deliberately started to outlive its parent — a
    * follow-up job, a handoff. Leave it alone for anything started to serve this
-   * workflow, which is the case that used to leak: an infinite poller feeding a
+   * workflow, which is the case that leaks otherwise: an infinite poller feeding a
    * parent goes on polling forever once the parent is gone, and nothing reports
    * that it has.
    *
@@ -150,7 +172,7 @@ export function executeChild<T = unknown>(
   return scheduleCommand({
     type: 'startChild',
     childName: name,
-    childArgs: options.args ?? [],
+    childProps: options.props,
     detached: false,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
@@ -187,7 +209,7 @@ export function startChild(
   issue(ctx, {
     type: 'startChild',
     childName: name,
-    childArgs: options.args ?? [],
+    childProps: options.props,
     detached: true,
     workflowId: options.workflowId,
     taskQueue: options.taskQueue,
@@ -253,7 +275,7 @@ export function startChild(
  */
 export function signalWorkflow(
   workflowId: string,
-  signal: SignalDef,
+  signal: string,
   payload?: unknown,
 ): void {
   const ctx = getContext();
@@ -261,7 +283,7 @@ export function signalWorkflow(
   issue(ctx, {
     type: 'signalWorkflow',
     targetId: workflowId,
-    signalName: signal.name,
+    signalName: signal,
     payload,
     seq: ctx.seq++,
   });
@@ -269,7 +291,8 @@ export function signalWorkflow(
 
 /** What `startWorkflow` needs to know beyond the id and the name. */
 export interface StartWorkflowExternalOptions {
-  args?: unknown[];
+  /** The one props object it is started with; see `ChildOptions.props`. */
+  props?: unknown;
   /** Which pool runs it. Defaults to this execution's queue, as `startChild` does. */
   taskQueue?: string;
 }
@@ -307,7 +330,7 @@ export interface StartWorkflowExternalOptions {
  * domain:
  *
  * ```ts
- * startWorkflow(`${scheduleId}-${nominalTime}`, 'nightlyReport', {args: [day]});
+ * startWorkflow(`${scheduleId}-${nominalTime}`, 'nightlyReport', {props: {day}});
  * ```
  *
  * A schedule that fires the same nominal time twice — a retried task, a rollover
@@ -333,7 +356,7 @@ export function startWorkflow(
     type: 'startWorkflow',
     targetId: workflowId,
     name,
-    args: options.args ?? [],
+    props: options.props,
     taskQueue: options.taskQueue,
     seq: ctx.seq++,
   });
@@ -540,7 +563,7 @@ export function deprecatePatch(id: string): void {
 }
 
 /**
- * Terminal: end this run and start a fresh one carrying `args`. It emits a
+ * Terminal: end this run and start a fresh one carrying `props`. It emits a
  * `continueAsNew` command and returns a promise that never resolves, so no code
  * runs after it — `return continueAsNew(...)` (or `await` it) halts the run.
  *
@@ -557,8 +580,11 @@ export function deprecatePatch(id: string): void {
  * smuggling run-spanning state into an engine that should know about exactly one
  * run at a time.
  */
-export function continueAsNew(...args: unknown[]): Promise<never> {
-  return scheduleCommand({type: 'continueAsNew', args}) as Promise<never>;
+export function continueAsNew(props?: unknown): Promise<never> {
+  return scheduleCommand({
+    type: 'continueAsNew',
+    props,
+  }) as Promise<never>;
 }
 
 export interface WorkflowInfo {
@@ -610,12 +636,12 @@ export interface WorkflowInfo {
    * life of the run. A copy, so a caller cannot reach back through it into the
    * context.
    */
-  args: unknown[];
+  props: unknown;
   /**
    * The execution that started this one, or absent if a client did.
    *
    * How a child learns its parent's id without being handed it as an argument —
-   * the same reason `args` is here. `signalWorkflow` addresses a target by id, so
+   * the same reason `props` is here. `signalWorkflow` addresses a target by id, so
    * without this the child → parent direction would require every parent to pass
    * its own id down, which it cannot always know either: an id the engine derived
    * from lineage is not visible to the workflow that owns it.
@@ -634,8 +660,8 @@ export function workflowInfo(): WorkflowInfo {
   return {
     workflowId: ctx.workflowId,
     continueAsNewSuggested: ctx.continueAsNewSuggested,
-    args: [...ctx.args],
-    // Copied for the same reason `args` is: a caller must not be able to reach
+    props: ctx.props,
+    // Copied for the same reason `props` is: a caller must not be able to reach
     // back through the returned object and mutate the context.
     parent: ctx.parent && {...ctx.parent},
   };

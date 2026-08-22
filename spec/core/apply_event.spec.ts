@@ -11,7 +11,6 @@ import {
   applyEvent,
   CancelledFailure,
   createContext,
-  defineSignal,
   NondeterminismError,
   setHandler,
 } from '../../src/core';
@@ -221,7 +220,7 @@ describe('core applyEvent — marker validation', () => {
       type: 'startChild',
       seq: 0,
       childName: 'c',
-      childArgs: [],
+      childProps: undefined,
       detached: false,
       parentClosePolicy: 'abandon',
     });
@@ -248,7 +247,7 @@ describe('core applyEvent — marker validation', () => {
       type: 'startChild',
       seq: 0,
       childName: 'planner',
-      childArgs: [],
+      childProps: undefined,
       detached: false,
       parentClosePolicy: 'abandon',
       workflowId: 'plan-for-event-42',
@@ -343,7 +342,7 @@ describe('core applyEvent — marker validation', () => {
       type: 'startChild',
       seq: 0,
       childName: 'planner',
-      childArgs: [],
+      childProps: undefined,
       detached: false,
       parentClosePolicy: 'abandon',
     });
@@ -417,7 +416,7 @@ describe('core applyEvent — signals', () => {
     const ctx = createContext([], []);
     const received: unknown[] = [];
     als.run(ctx, () => {
-      setHandler(defineSignal('ping'), (p) => received.push(p));
+      setHandler('ping', (p) => received.push(p));
     });
 
     applyEvent(ctx, {type: 'signal', name: 'ping', payload: 42});
@@ -436,7 +435,7 @@ describe('core applyEvent — signals', () => {
 
     const received: unknown[] = [];
     als.run(ctx, () => {
-      setHandler(defineSignal('ping'), (p) => received.push(p));
+      setHandler('ping', (p) => received.push(p));
     });
 
     expect(received).toEqual(['early']);
@@ -448,7 +447,7 @@ describe('core applyEvent — signals', () => {
     applyEvent(ctx, {type: 'signal', name: 'ping', payload: 1});
     applyEvent(ctx, {type: 'signal', name: 'pong', payload: 2});
 
-    als.run(ctx, () => setHandler(defineSignal('ping'), () => {}));
+    als.run(ctx, () => setHandler('ping', () => {}));
 
     expect(ctx.bufferedSignals.map((s) => s.name)).toEqual(['pong']);
   });

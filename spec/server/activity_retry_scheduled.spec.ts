@@ -52,7 +52,7 @@ describe('activityRetryScheduled', () => {
       .registerActivity('flaky', flaky)
       .registerWorkflow('w', async () => act.flaky());
 
-    await rt.start('w', [], {workflowId: 'rs-1'}).result();
+    await rt.start('w', undefined, {workflowId: 'rs-1'}).result();
 
     // Three attempts, two gaps. The count is the point: an event per *failure*
     // would be three, and the third failure is not a gap — it is a success.
@@ -81,7 +81,7 @@ describe('activityRetryScheduled', () => {
       .registerActivity('flapping', flapping)
       .registerWorkflow('w', async () => act.flapping());
 
-    await rt.start('w', [], {workflowId: 'rs-2'}).result();
+    await rt.start('w', undefined, {workflowId: 'rs-2'}).result();
 
     // The activity succeeded, so `activityFailed` was never written and the attempt
     // counter was cleared on settling. Without these events an activity that failed
@@ -109,7 +109,7 @@ describe('activityRetryScheduled', () => {
       .registerActivity('twice', twice)
       .registerWorkflow('w', async () => act.twice());
 
-    await rt.start('w', [], {workflowId: 'rs-3'}).result();
+    await rt.start('w', undefined, {workflowId: 'rs-3'}).result();
 
     const history = (await store.get('rs-3'))!.history;
     const shape = history
@@ -146,7 +146,7 @@ describe('activityRetryScheduled', () => {
       .registerWorkflow('w', async () => act.doomed());
 
     await expectAsync(
-      rt.start('w', [], {workflowId: 'rs-4'}).result(),
+      rt.start('w', undefined, {workflowId: 'rs-4'}).result(),
     ).toBeRejected();
 
     // A failure that ends the activity is `activityFailed`, which already carries

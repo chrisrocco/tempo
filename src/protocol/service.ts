@@ -48,6 +48,12 @@ export interface StartWorkflowOptions {
    * the caller, and the engine will not arbitrate it — it records the reuse and
    * flags whether the request matched, so the bug is greppable rather than
    * invisible.
+   *
+   * **The claim lasts as long as the record.** A server configured with a
+   * retention window deletes closed executions after it, and a start under a
+   * deleted id creates a fresh execution — "one workflow per order" holds for
+   * the window, not forever. A server without retention (the default) keeps
+   * every claim for its store's lifetime.
    */
   workflowId?: string;
   /**
@@ -198,6 +204,131 @@ export interface ExecutionFilter {
 }
 
 /**
+ * Where a server is bound, and which machine it is bound on.
+ *
+ * **All three or none.** They are read from a single `listen`, so a server that
+ * knows any of them knows all of them, and a server with no transport in front
+ * of it — which `createServerHost()` on its own is, and which the specs use —
+ * knows none. `ServerHealth` therefore carries this as a `Partial` rather than
+ * as three independently optional fields, which would offer eight combinations
+ * where only two exist.
+ *
+ * A fact about the *process*, not about the store or the executions: none of it
+ * changes after the port is bound, and none of it costs a scan to answer.
+ *
+ * Every field here is something the server observed about itself. Nothing here
+ * is inferred — where to *dial* the server is an inference, and it lives in
+ * `serverUrl` below, on the reader's side of the wire where it can be
+ * corrected.
+ */
+export interface ServerEndpoint {
+  /**
+   * The interface bound, as the transport reports it — `127.0.0.1`, `0.0.0.0`,
+   * `::`.
+   *
+   * This is the field that answers "why can nothing else reach this server". A
+   * server on loopback is unreachable from every other machine, and nothing else
+   * it says distinguishes it from one listening to the world: both are up, both
+   * report their durability, and both answer this probe perfectly well for
+   * whoever can already reach them. It is also the one thing here a caller
+   * cannot work out for itself — it knows the address that happened to work for
+   * *it*, which says nothing about what else the server accepts.
+   */
+  host: string;
+  /**
+   * The port bound — the resolved value after `--port=0`, over the wire.
+   *
+   * `server_main.ts` prints it on stdout as well, and says there why that line
+   * is a convenience rather than the contract: it is observable only by whoever
+   * spawned the process, holding a pipe, at the moment it started. This answers
+   * the same question from anywhere, at any time, about a process nobody here
+   * spawned.
+   */
+  port: number;
+  /**
+   * The machine the process runs on, as it calls itself — `os.hostname()`.
+   *
+   * What turns a fleet of identically-configured servers into distinguishable
+   * ones, and the only field here that is about the box rather than the socket.
+   * The workers already have this: `DEFAULT_IDENTITY` is `${pid}@${hostname}`,
+   * on the reasoning that an identity should be something an operator can act on
+   * — find the process, read its logs. The server was the one tier with no such
+   * identity, which is the gap this closes.
+   *
+   * Read once at bind time, not per probe.
+   */
+  hostname: string;
+}
+
+/**
+ * Bind addresses that mean "every interface" rather than a reachable one.
+ *
+ * Node normalizes to these two: `--host=0.0.0.0` reports `0.0.0.0`, and both
+ * `::` and an omitted host on a dual-stack build report `::`.
+ */
+const WILDCARD_BINDS: ReadonlySet<string> = new Set(['0.0.0.0', '::']);
+
+/**
+ * Where to dial the server a `health()` reply came from — **the reader's
+ * inference, not the server's claim.**
+ *
+ * A function here rather than a `serverUrl` field on `ServerEndpoint`, and the
+ * difference is not cosmetic. The server knows what it bound. It does not know
+ * what sits in front of that — a reverse proxy, a published container port, a
+ * NAT, a Service — and cannot, because nothing tells it. Putting a URL on the
+ * wire would dress that guess as a fact the server had checked, and it would be
+ * *least* accurate exactly where it was most wanted: in the single-VM case the
+ * answer is the address the caller already dialed, and in the containerized and
+ * proxied cases the issue asks about, it is wrong. A plausible wrong value is
+ * worse than an obviously missing one, because a placeholder gets filled in and
+ * a URL gets pasted into a unit file.
+ *
+ * So the inference belongs on the side that can correct it. This is the same
+ * move as `isStuck`, `isQueueServed` and `isNameServed`: derived answers ship as
+ * exported functions over the projection types, so no consumer reimplements one
+ * and gets it subtly wrong, and none of them is mistaken for something the
+ * server asserted. Living in `protocol/` also makes it importable by a browser,
+ * which the transport-side code that produces the endpoint is not.
+ *
+ * Two rules, which are the whole reason this is not a template literal at the
+ * call site:
+ *
+ * - **A wildcard bind is substituted with `hostname`.** `http://0.0.0.0:7777`
+ *   is an address to listen on rather than one to dial. Every interface would
+ *   be an equally correct answer, so the machine's own name is used — the one
+ *   candidate that does not require picking an interface for the reader.
+ * - **An IPv6 literal is bracketed.** Without it `::1` and port 7777 concatenate
+ *   to `http://::1:7777`, which no URL parser accepts — so the failure is not a
+ *   subtly wrong address but a consumer that cannot dial at all.
+ *
+ * `undefined` when the reply carries no endpoint, which is the honest answer for
+ * a server that has not been told where it is bound rather than a URL invented
+ * on its behalf. A *complete* `ServerEndpoint` always yields one, which is what
+ * the first overload says — the tier that just bound a listener should not have
+ * to handle an absence it knows cannot happen.
+ *
+ * **If a deployment needs an authoritative URL**, the server has to be *told*
+ * one — an advertise flag, supplied by whoever knows the topology — and that
+ * would be a real field on this type, because a human asserted it. Nothing has
+ * asked for one; this is the door it would come through.
+ */
+export function serverUrl(endpoint: ServerEndpoint): string;
+export function serverUrl(
+  endpoint: Partial<ServerEndpoint>,
+): string | undefined;
+export function serverUrl(
+  endpoint: Partial<ServerEndpoint>,
+): string | undefined {
+  const {host, port, hostname} = endpoint;
+  if (host === undefined || port === undefined) return undefined;
+  const dialable = WILDCARD_BINDS.has(host) ? hostname : host;
+  if (dialable === undefined) return undefined;
+  // Bracket by the colon rather than by address family: the value may be a
+  // hostname substituted for a wildcard, and hostnames never contain one.
+  return `http://${dialable.includes(':') ? `[${dialable}]` : dialable}:${port}`;
+}
+
+/**
  * What a server says about itself when asked.
  *
  * **There is no `ok` field, deliberately.** Liveness is carried by the response
@@ -210,8 +341,12 @@ export interface ExecutionFilter {
  * health check that walks every execution is a health check that falls over on
  * exactly the server that most needs probing. Execution counts are what
  * `groupExecutions` is for.
+ *
+ * The `ServerEndpoint` half is present when something has told the host where
+ * it is bound, which every deployed server does and a bare `createServerHost()`
+ * does not — see that type for why it arrives whole or not at all.
  */
-export interface ServerHealth {
+export interface ServerHealth extends Partial<ServerEndpoint> {
   /**
    * How long this server has been up, in milliseconds.
    *
@@ -303,8 +438,7 @@ export interface PendingWorkView {
  * shape. Without them a dispatched activity is a name, and an activity on its
  * fourth backoff is indistinguishable from one running for the first time —
  * both read as "waiting on: charge". That is the case an operator is most often
- * looking at when they open an execution that is not moving, and answering it
- * previously meant reading the server's logs.
+ * looking at when they open an execution that is not moving.
  */
 export interface PendingActivityView {
   seq: number;
@@ -328,6 +462,27 @@ export interface PendingActivityView {
    * reader must treat it as "not between attempts" rather than as "due now".
    */
   nextAttemptAt?: number;
+  /**
+   * The most recent checkpoint the running attempt reported, via `heartbeat()`.
+   *
+   * A **register, not a log**: one slot per attempt, overwritten by each beat,
+   * and only a sample of beats is sent. Readable anyway because every beat
+   * carries a complete checkpoint — the contract is on `heartbeat` in
+   * `worker/activity_context`. A consumer treating this as a stream of progress
+   * events will silently miss most of them; history is where a trail lives.
+   *
+   * Absent until the attempt beats, and gone once it settles: live state about
+   * an attempt in flight, so an activity waiting out a backoff has none.
+   */
+  checkpoint?: unknown;
+  /**
+   * When `checkpoint` arrived, epoch ms.
+   *
+   * Beside the value because sampling makes it routinely older than the work it
+   * describes: without the age, what an activity managed to send just before
+   * wedging reads as what it is doing now.
+   */
+  checkpointAt?: number;
 }
 
 /**
@@ -345,7 +500,7 @@ export interface ExecutionParentView {
 
 /** `Client.describe()`: the summary, plus history and what the execution awaits. */
 export interface ExecutionDetail extends ExecutionSummary {
-  args: unknown[];
+  props: unknown;
   /**
    * Absent on an execution a client started directly.
    *
@@ -421,21 +576,40 @@ export interface ExecutionGroup {
  * precise about why, because the obvious reading of "which activity is failing"
  * is the one this does not answer.
  *
- * History records an activity's *final* outcome: `activityFailed` is written
- * once the retry budget is spent, and the per-attempt state is discarded the
- * moment the activity settles. So an activity that fails four times and
- * succeeds on the fifth leaves a history containing `activityScheduled` and
- * `activityCompleted` — identical to one that succeeded immediately. **Flakiness
- * is not derivable from history at all**, at any cost; counting it over time
- * would need a durable counter that outlives settling, which is the opposite of
- * the rule that keeps `activityAttempts` bounded.
+ * ## History answers it too
  *
- * Rather than answer a narrower question and let a reader assume the wider one,
- * this reports what the engine genuinely knows: what is burning retries at this
- * moment. That is also the cheap thing — the counts come from state the scan
- * already loads. For failure rates over time, `activity.settled` and
- * `activity.retry_scheduled` carry the activity name into the log stream, which
- * is where an aggregate over history belongs.
+ * Every retry round leaves an `activityRetryScheduled` carrying the attempt, the
+ * ceiling, the backoff deadline and the error, so an activity that failed four
+ * times and succeeded on the fifth is distinguishable from one that succeeded
+ * first time. Reducing those per `seq` counts retries after the fact, and a
+ * timeline renders them like any other event.
+ * `spec/server/activity_retry_scheduled.spec.ts` pins what makes that reduction
+ * sound — one event per retry rather than per failure, and the per-attempt error
+ * nothing else keeps.
+ *
+ * Two things qualify it. A rollover empties history, so earlier runs' retries are
+ * gone. And a task redelivered because its lease expired — a worker that died
+ * mid-attempt — leaves no `activityRetryScheduled` and burns no budget, because
+ * nothing reported a result for it; the re-run is still visible, since every
+ * *pickup* appends an `activityStarted`. So the two counts answer different
+ * questions: `activityRetryScheduled` per `seq` counts failures the retry policy
+ * acted on, `activityStarted` per `seq` counts times the work was attempted,
+ * crash-redeliveries included. A reader who wants the second and counts the
+ * first undercounts, silently.
+ *
+ * ## Why this stays a live view
+ *
+ * Not because history cannot answer it, but because of what asking costs. The
+ * question is about the whole server, and deriving it from history means
+ * fetching every execution and reducing each one — the exact cost the grouped
+ * counts above exist to avoid. These come from state the scan already loads,
+ * and they answer about *now*, which is what is wanted when something is on
+ * fire and what a total over all time blurs.
+ *
+ * For rates over time either source serves: reduce `activityRetryScheduled`
+ * across the executions in question, or read `activity.settled` and
+ * `activity.retry_scheduled` off the log stream, which carry the activity name
+ * for a pipeline already ingesting stderr.
  *
  * Its own type rather than an `ExecutionGroup`, because none of that type's
  * statuses (`running` / `completed` / `terminated` / `stuck`) mean anything for
@@ -677,6 +851,11 @@ export interface QueueWorkers {
    * The two timestamps above are the aggregate — "something asked" — and remain
    * the right answer to "is this pool served at all". This is the breakdown, and
    * the only thing that can say *how many* and *which*.
+   *
+   * Quiet workers linger here for minutes, then go: long enough that the one
+   * being hunted is still listed with when it went quiet, bounded so restarted
+   * dev workers — a fresh `pid@host` identity per restart — do not pile up.
+   * The aggregate timestamps outlive them.
    */
   workers: WorkerInfo[];
 }
@@ -705,12 +884,12 @@ export type QueueLiveness = Omit<
  * this repo reading `QueueWorkers` gets the verdict rather than reimplementing
  * it, and reimplementing it is how "served" quietly comes to mean two things.
  *
- * **A busy worker used to look like an absent one.** The activity loop is
- * sequential: it awaits the activity it claimed before polling again, so a
- * worker running a single 60-second activity stops polling for 60 seconds and
- * its queue goes stale. That is now distinguishable — a worker holding a live
- * lease is reported `busy` (see `WorkerInfo`), and a busy worker serves its
- * queue however long it has been since it last asked for more.
+ * **Recency alone cannot tell a busy worker from an absent one.** The activity
+ * loop is sequential: it awaits the activity it claimed before polling again, so
+ * a worker running a single 60-second activity stops polling for 60 seconds and
+ * its queue goes stale. Hence the second input — a worker holding a live lease is
+ * reported `busy` (see `WorkerInfo`), and a busy worker serves its queue however
+ * long it has been since it last asked for more.
  *
  * The recency test remains for the idle case, which is the common one: a worker
  * with nothing to do holds no lease and is known only by polling.
@@ -755,12 +934,12 @@ export function isQueueServed(
  *
  * ## Never a reason to refuse
  *
- * `false` is a **report**, not a veto. `spec/integration/distributed.spec.ts` settles
- * this: an unregistered name used to fail an execution on the reading that it was a
- * typo, and that was wrong, because once tasks route by queue it far more often means
- * a deploy still rolling — *"failing fast would trade a recoverable state for an
- * unrecoverable one"*. What a manifest adds is the ability to say which of the two it
- * is, not permission to act on the answer.
+ * `false` is a **report**, not a veto. Failing an execution on it — on the reading
+ * that an unregistered name is a typo — trades a recoverable state for an
+ * unrecoverable one: once tasks route by queue, an unregistered name far more often
+ * means a deploy still rolling. What a manifest adds is the ability to say which of
+ * the two it is, not permission to act on the answer.
+ * `spec/integration/distributed.spec.ts` holds the case.
  */
 export function isNameServed(
   queues: readonly QueueLiveness[],
@@ -783,10 +962,13 @@ export function isNameServed(
  *
  * Beside `isQueueServed` and for the same reason: "a worker on `*` serves
  * `email` too" is a rule, and two clients applying it differently would
- * disagree about how big a fleet is. Returns every worker ever seen, however
- * long ago — staleness is `lastPolledAt`, which the caller can read, and
- * filtering here would hide the worker that went quiet, which is usually the
- * one being looked for.
+ * disagree about how big a fleet is. Returns every worker in the rows it is
+ * given, however long quiet — staleness is `lastPolledAt`, which the caller can
+ * read, and filtering here would hide the worker that went quiet, which is
+ * usually the one being looked for. The server bounds how long that can be:
+ * it retains a quiet worker's row for minutes, not forever, so a recently-dead
+ * worker is listed and an old session's pile is not (`WORKER_RETENTION_MS`,
+ * server-side).
  */
 export function workersServing(
   queues: readonly QueueLiveness[],
@@ -809,7 +991,7 @@ export interface WorkflowService {
   // ── client-facing ──
   start(
     name: string,
-    args?: unknown[],
+    props?: unknown,
     opts?: StartWorkflowOptions,
   ): {workflowId: string};
   signal(workflowId: string, signalName: string, payload?: unknown): void;
@@ -846,11 +1028,16 @@ export interface WorkflowService {
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
   /**
-   * Every workflow any worker has reported, deduped by name.
+   * Every workflow the live fleet reports, deduped by name.
    *
    * The catalogue a dashboard lists. Sourced from what workers push rather than from
    * executions, so a workflow that has never run still appears — which is the point, since
    * the question it answers is "what can I start".
+   *
+   * *Live* fleet, present tense: a report only counts while the worker that pushed it
+   * still polls with a digest matching it (or is mid-task). A worker that stopped takes
+   * its workflows — and the queues it served them on — out of the catalogue with it,
+   * rather than a queue last served a week ago reading as one that can run work today.
    */
   listWorkflows(): Promise<WorkflowSummary[]>;
   /**
@@ -899,10 +1086,13 @@ export interface WorkflowService {
    * Report that this attempt is still alive. Renews the task's lease so it is not
    * redelivered, and resets the `heartbeatTimeoutMs` deadline if one is set.
    *
+   * `checkpoint` replaces whatever this attempt last reported, surfacing on
+   * `PendingActivityView.checkpoint`. Last write wins; no history event.
+   *
    * A no-op for an attempt the server has already given up on — the worker finds
    * out when it reports a result and the completion is dropped, not here.
    */
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
 }
 
 /**
@@ -976,7 +1166,7 @@ export interface WorkflowTask {
   token: TaskToken;
   workflowId: string;
   name: string;
-  args: unknown[];
+  props: unknown;
   history: HistoryEvent[];
   continueAsNewSuggested: boolean;
   /** What the previous task (or the previous run) left behind. */
@@ -997,8 +1187,8 @@ export interface WorkflowTask {
 /**
  * A `condition()` the workflow is still waiting on.
  *
- * The answer to the one diagnostic question the engine could not previously
- * answer: an execution that is `running` with nothing pending is either mid-task
+ * The answer to the one diagnostic question nothing else can settle: an
+ * execution that is `running` with nothing pending is either mid-task
  * or parked, and those are opposite conclusions. Pending work is derived from
  * history; a parked condition leaves no history at all — that is the point of it
  * — so it has to be reported by the worker that replayed it.
@@ -1018,7 +1208,35 @@ export interface ParkedCondition {
    * rather than as "no site".
    */
   site?: string;
+  /**
+   * What the workflow says it is waiting for — free-form JSON, declared at the
+   * `condition()` call and opaque to the engine.
+   *
+   * `site` answers "which line"; this answers "what would release it", which is
+   * the question a dashboard has to answer before it can offer to. The engine
+   * stores and returns it and interprets nothing: any convention layered on top
+   * — a `kind` field a UI dispatches on, a signal name it offers to send — is a
+   * contract between the workflow author and the reader, held in `patterns/`
+   * helpers rather than here. `waitForApproval` is the first such convention.
+   *
+   * Fixed for the life of the park: it is computed where `condition()` is
+   * called, and replay reaches that call with the same history prefix every
+   * task, so the same `condSeq` reports the same value until it unparks.
+   */
+  awaiting?: unknown;
 }
+
+/**
+ * A ceiling on one condition's serialized `awaiting`, enforced when the worker
+ * reports the parked set — the same seam, and the same reasoning, as
+ * `MAX_CARRYOVER_BYTES`: stored on every task a park survives and stamped into
+ * history at the park, so unbounded growth degrades quietly. The cap converts
+ * it into a loud task failure naming the condition's site, at the first task
+ * that crosses the line. Smaller than the carryover cap because this is a
+ * description of a wait, not state — "what would release this" fits in a
+ * sentence and a few ids.
+ */
+export const MAX_AWAITING_BYTES = 4 * 1024;
 
 export interface WorkflowTaskResult {
   done: boolean;

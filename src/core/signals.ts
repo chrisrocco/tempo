@@ -8,6 +8,17 @@
  * order-independent with respect to handler setup. In practice a workflow
  * registers its handlers before its first await, so the buffer is a safety net.
  *
+ * ## A signal is a name, on both sides of the wire
+ *
+ * `setHandler('go', …)` inside the workflow; `handle.signal('go', payload)`
+ * outside it. There used to be a `defineSignal(name)` returning a `SignalDef`
+ * wrapper, and it was deleted for buying nothing: it carried no payload type —
+ * the payload is untyped JSON off the wire either way — so it was ceremony
+ * around a string, and half the API accepted the bare string anyway. If typed
+ * payloads are ever wanted, the mechanism is a *generic* definition that
+ * `setHandler` and the senders both consume; a def that exists only to hold a
+ * name is the shape that was tried and removed.
+ *
  * ## The handler-only-enqueues discipline
  *
  * A handler runs synchronously inside `applyEvent`, so it has no coherent place to
@@ -17,13 +28,13 @@
  * continue-as-new or completion.
  *
  * That constraint is essential. What is *not* essential is hand-rolling the
- * plumbing around it: **prefer `signalStream` from `core/signal_stream.ts`**,
+ * plumbing around it: **prefer `signalStream` from `patterns/signal_stream.ts`**,
  * which turns signal consumption into a `for await` loop whose body may await
  * activities freely. The manual form below is what it replaces, kept here because
  * the ordering guarantee it relies on is the same one the stream is built on:
  *
  *     const queue: Diff[] = [];
- *     setHandler(diff, (d) => queue.push(d));
+ *     setHandler('diff', (d: Diff) => queue.push(d));
  *     while (true) {
  *       await condition(() => queue.length > 0);
  *       const d = queue.shift()!;
@@ -36,36 +47,33 @@
 
 import {getContext} from './context';
 
-export interface SignalDef {
-  name: string;
-}
-
-export function defineSignal(name: string): SignalDef {
-  return {name};
-}
-
 /**
  * Register the handler for a signal, delivering anything that arrived before it
  * was set (see the buffering note below).
  *
  * `payload` is `any` rather than `unknown` so an author can write
- * `setHandler(approved, (id: string) => …)` without a cast: parameters are
+ * `setHandler('approved', (id: string) => …)` without a cast: parameters are
  * contravariant, so `(id: string) => void` is not assignable to
  * `(payload: unknown) => void`. The payload genuinely is untyped — it crossed
  * the wire as JSON — and the handler's own signature is the assertion about its
- * shape. Making `SignalDef` generic would let this be checked properly and is
- * the right long-term fix.
+ * shape.
+ *
+ * ## A second registration silently displaces the first
+ *
+ * One handler exists per name, so this overwrites and the displaced consumer
+ * stops receiving. The symptom is a *hang* rather than an error: a workflow
+ * parked on something that will never arrive, with nothing in history saying
+ * why. `clearHandler` is how a consumer scoped to a block gives the name back.
+ *
+ * Whether this should throw instead is open. It would be consistent with
+ * `clearHandler` existing at all, and a breaking change for anyone relying on
+ * replace-in-place.
  */
-export function setHandler(
-  signalDef: SignalDef,
-  fn: (payload: any) => void,
-): void {
+export function setHandler(name: string, fn: (payload: any) => void): void {
   const ctx = getContext();
-  ctx.signalHandlers.set(signalDef.name, fn);
-  const ready = ctx.bufferedSignals.filter((s) => s.name === signalDef.name);
-  ctx.bufferedSignals = ctx.bufferedSignals.filter(
-    (s) => s.name !== signalDef.name,
-  );
+  ctx.signalHandlers.set(name, fn);
+  const ready = ctx.bufferedSignals.filter((s) => s.name === name);
+  ctx.bufferedSignals = ctx.bufferedSignals.filter((s) => s.name !== name);
   for (const s of ready) fn(s.payload);
 }
 
@@ -74,21 +82,6 @@ export function setHandler(
  * pre-registration buffer, so a later `setHandler` still receives them. This is
  * what lets a consumer be scoped to a block instead of to the whole workflow.
  */
-export function clearHandler(signalDef: SignalDef): void {
-  getContext().signalHandlers.delete(signalDef.name);
-}
-
-/**
- * Reserve a signal name for one consumer, failing loudly if it is already taken.
- * Only one handler exists per name, so a second registration would silently
- * replace the first and the original consumer would simply stop receiving —
- * a bug with no symptom at the point it is introduced.
- */
-export function claimSignal(signalDef: SignalDef): void {
-  if (getContext().signalHandlers.has(signalDef.name)) {
-    throw new Error(
-      `signal '${signalDef.name}' already has a consumer — a signal is consumed ` +
-        `by one handler or one stream at a time; close the existing one first`,
-    );
-  }
+export function clearHandler(name: string): void {
+  getContext().signalHandlers.delete(name);
 }

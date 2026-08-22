@@ -1,10 +1,9 @@
 /**
  * @fileoverview
- * In-memory HistoryStore: a Map of execution records. This is the old runtime's
- * `executions` map, promoted behind the async port. The methods are async to
- * satisfy the interface, but their bodies are synchronous (Map access), so each
- * is atomic — a filesystem/db adapter is the Phase-4 swap and serializes its own
- * writes. Powers LocalService and the fast test path.
+ * In-memory HistoryStore: a Map of execution records, behind the async port. The
+ * methods are async to satisfy the interface, but their bodies are synchronous
+ * (Map access), so each is atomic — a filesystem/db adapter (ROADMAP Phase 4)
+ * serializes its own writes. Powers LocalService and the fast test path.
  */
 
 import {
@@ -19,7 +18,7 @@ import type {
   ExecutionRecord,
   HistoryStore,
 } from '../ports/history_store';
-import {VersionConflictError} from '../ports/history_store';
+import {VersionConflictError, trailingIdSuffix} from '../ports/history_store';
 
 export class MemoryHistoryStore implements HistoryStore {
   /** Everything here dies with the process; `location` stays absent. */
@@ -27,10 +26,14 @@ export class MemoryHistoryStore implements HistoryStore {
 
   private readonly records = new Map<string, ExecutionRecord>();
 
+  /** Dies with the process like everything else here — which is consistent:
+   * the records it guards against reissue die with it too. */
+  highestDeletedSuffix = 0;
+
   async create(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string = DEFAULT_TASK_QUEUE,
     parent?: ExecutionParent,
   ): Promise<void> {
@@ -41,7 +44,7 @@ export class MemoryHistoryStore implements HistoryStore {
       workflowId,
       runId: 0,
       name,
-      args,
+      props,
       taskQueue,
       createdAt: Date.now(),
       history: [],
@@ -59,6 +62,14 @@ export class MemoryHistoryStore implements HistoryStore {
 
   async list(): Promise<ExecutionRecord[]> {
     return [...this.records.values()];
+  }
+
+  async delete(workflowId: string): Promise<void> {
+    if (!this.records.delete(workflowId)) return;
+    this.highestDeletedSuffix = Math.max(
+      this.highestDeletedSuffix,
+      trailingIdSuffix(workflowId),
+    );
   }
 
   async append(workflowId: string, events: HistoryEvent[]): Promise<void> {
@@ -161,6 +172,10 @@ export class MemoryHistoryStore implements HistoryStore {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.status = status;
+    // Present exactly while terminal: stamped here, cleared when a reset
+    // revives the execution — see `ExecutionRecord.closedAt`.
+    if (status === 'running') delete rec.closedAt;
+    else rec.closedAt = Date.now();
     if (outcome && 'result' in outcome) rec.result = outcome.result;
     if (outcome && 'failure' in outcome) rec.failure = outcome.failure;
     if (outcome && 'failureStack' in outcome)
@@ -176,12 +191,12 @@ export class MemoryHistoryStore implements HistoryStore {
 
   async resetForContinueAsNew(
     workflowId: string,
-    args: unknown[],
+    props: unknown,
   ): Promise<void> {
     const rec = this.records.get(workflowId);
     if (!rec) throw new Error(`no execution ${workflowId}`);
     rec.history = [];
-    rec.args = args;
+    rec.props = props;
     rec.version = 0;
     rec.runId += 1;
     // status stays 'running'; result/failure remain unset — this is not a close.

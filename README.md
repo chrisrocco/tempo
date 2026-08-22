@@ -13,7 +13,7 @@ outside world happens in **activities** the engine runs on its behalf.
 import { runActivity } from './src/workflow';
 
 // Deterministic orchestration. Survives a crash at any await.
-export async function greeter(name: string): Promise<string> {
+export async function greeter({ name }: { name: string }): Promise<string> {
   return runActivity<string>('greet', name);
 }
 
@@ -30,9 +30,12 @@ on npm and makes no stability promises — clone it, read it, run it.
 
 - **Activities** with typed `proxyActivities`, which registers what it types, plus
   server-decided retry with
-  backoff, start-to-close timeouts, and `heartbeat()` for work of unbounded
-  duration
-- **Timers** — real wall-clock, durable, re-armed from history on restart
+  backoff, start-to-close timeouts (defaulted to 10 minutes when an activity
+  sets no deadline at all — `startToCloseTimeoutMs: 0` opts out), and
+  `heartbeat()` for work of unbounded duration
+- **Timers** — real wall-clock, durable, re-armed from history on restart;
+  `sleep('30 minutes')` or milliseconds, and the same duration strings anywhere
+  an option wants a time span
 - **Signals** and **`condition`** — event-driven waiting, no polling; a
   workflow can `signalWorkflow` another one, so a child poller can feed items
   to a waiting parent without leaving the engine
@@ -40,6 +43,12 @@ on npm and makes no stability promises — clone it, read it, run it.
   `workflowId` you choose — claim the same id twice and you get one child, and
   a per-child **parent-close policy** decides whether it is terminated, asked
   to unwind, or left running when its parent finishes
+- **`createWorkflow`** — define a workflow under its wire name and get a typed
+  reference back: invoking it runs it as a blocking child (`.execute` adds the
+  `workflowId`/policy knobs), `.detached()` spawns it fire-and-forget, and
+  defining it registers it — so a worker names only its
+  root workflows and everything they invoke rides along on the import graph,
+  the same way `proxyActivities` registers activities
 - **Cancellation**, cascading to children, surfacing as a catchable failure —
   plus `terminate` for when cooperative cancellation cannot land
 - **`continueAsNew`** to bound history on long-lived workflows
@@ -49,6 +58,10 @@ on npm and makes no stability promises — clone it, read it, run it.
   reached the call site takes the new one. `deprecatePatch` retires the branch
   afterwards
 - **Crash recovery** — kill the server mid-workflow, restart, and it continues
+- **Retention**, opt-in — `--retain-closed-for-days=N` deletes executions that
+  have been closed longer than the window, so a long-lived server's history
+  does not grow forever; results and `workflowId` claims last only as long as
+  the record, which is the trade the flag's docs spell out
 - **Inspection** — an execution's status, history, and what it is currently
   waiting on, derived from history rather than stored and reachable through
   [`src/client/`](src/client/client.ts)
@@ -57,6 +70,16 @@ on npm and makes no stability promises — clone it, read it, run it.
 - **Task queues** — route work to a pool of workers, so several applications
   can share one server; activities and children inherit their execution's
   queue
+- **Connectors** (experimental) — `workflow-engine/connectors`: define a
+  service wrapper once as queries, commands (each with a declared idempotency
+  story), and triggers, and derive the typed workflow proxy, the worker
+  registration, a JSON-Schema catalogue for dashboards, and **watchers** — a
+  poller child that signals its parent one event at a time, riding the
+  engine's own `createWatcher` primitive. Schemas are authored
+  with `t`, a small first-party builder sized to what JSON Schema can render
+  (`t.object`, `t.enum`, `t.defaulted`, descriptions everywhere) — no schema
+  dependency, built on an internal validator port. Developer docs:
+  [`src/connectors/README.md`](src/connectors/README.md)
 
 The same workflow code runs four ways, with no changes:
 
@@ -86,18 +109,18 @@ import { runActivity } from './src/workflow';
 
 const rt = createLocalRuntime()
   .registerActivity('greet', (name: string) => `Hello, ${name}!`)
-  .registerWorkflow('greeter', (name: string) =>
+  .registerWorkflow('greeter', ({ name }: { name: string }) =>
     runActivity<string>('greet', name),
   );
 
-console.log(await rt.start<string>('greeter', ['world']).result());
+console.log(await rt.start<string>('greeter', { name: 'world' }).result());
 rt.shutdown(); // stop background timers so the process exits
 ```
 
 Or run one workflow through your worker binary, with no server at all:
 
 ```bash
-tsx examples/greeter.ts --local=greeter --args='["world"]'
+tsx spec/support/greeter_worker.ts --local=greeter --props='{"name":"world"}'
 # LOCAL RUN greeter greeter — one workflow, then exit. Not a deployment: …
 # "Hello, world!"
 ```
@@ -117,8 +140,8 @@ Or run the real thing — a server and the two worker tiers, each its own proces
 
 ```bash
 tsx bin/server-main.ts --port=7777 --data-dir=./data &          # LISTENING 7777 127.0.0.1
-tsx examples/greeter.ts --server=http://127.0.0.1:7777 --role=workflow &
-tsx examples/greeter.ts --server=http://127.0.0.1:7777 --role=activity &
+tsx spec/support/greeter_worker.ts --server=http://127.0.0.1:7777 --role=workflow &
+tsx spec/support/greeter_worker.ts --server=http://127.0.0.1:7777 --role=activity &
 ```
 
 Each prints one readiness line — `LISTENING <port> <host>` and `WORKER_READY
@@ -130,16 +153,16 @@ import { createRemoteClient, createRemoteService } from './src';
 
 const client = createRemoteClient(createRemoteService('http://127.0.0.1:7777'));
 
-await client.health(); // {uptimeMs, durable, dataLocation} — is it up, is it durable
+await client.health(); // is it up, is it durable, and where is it bound
 await client.queues(); // who is polling, per queue and role
 
-const handle = client.start<string>('greeter', ['world']);
+const handle = client.start<string>('greeter', 'world');
 console.log(await handle.result()); // Hello, world!
 ```
 
 `start`, `describe`, `signal`, `cancel`, `terminate`, `reset`, `list`, `queues`,
-`counts`, and `health` are all there — the whole client-facing surface, so
-nothing needs a raw service.
+`counts`, `workflows`, and `health` are all there — the whole client-facing
+surface, so nothing needs a raw service.
 
 Configuration is flags with defaults, never the environment — see
 [`src/process_flags.ts`](src/process_flags.ts) for why.
@@ -162,6 +185,43 @@ not be guessed at twice. A UI reading them is reading the same definitions the
 server writes, so a field added to a projection is a compile error in the tool
 rather than `undefined` at runtime. A gap there is a bug here.
 
+`workflow-engine/client` is how such a tool reaches a server: `createRemoteService`
+plus `createRemoteClient`, and nothing else. It exists because those two used to
+be reachable only through the host entrypoint, which meant a dashboard pulled
+`node:fs` and `node:http` into a browser build to get a function that calls
+`fetch`. Both paths are now **checked** to reach no Node builtin and no workflow
+module, transitively — a barrel that would quietly undo it fails `npm run lint`
+rather than a consumer's bundler.
+
+One deployment note the engine cannot handle for you: **failure stacks are
+formatted in the process that threw** and travel as strings, so a bundled worker
+binary owns the legibility of its own frames. Emit _inline_ source maps (a
+binary moved to a stable location silently breaks a relative
+`sourceMappingURL`), run workers with `node --enable-source-maps`, and keep
+identifier names through the bundle (`--keep-names`, no identifier minification)
+— otherwise the stack the engine faithfully carries from an activity to your
+terminal names positions in a bundle nobody can open. Each process fixes its
+own half: activity frames in the activity worker, the awaited-at frames in the
+workflow worker.
+
+Reading the surface is one thing; **developing** against it is another.
+`workflow-engine/testing` starts a real server, on a real port, already holding
+the states such a tool has to render:
+
+```ts
+import { startScenario } from 'workflow-engine/testing';
+
+const server = await startScenario(['stuck', 'parked', 'unserved-queue']);
+// point your UI at server.url, build it, then:
+await server.stop();
+```
+
+Getting a server into those states is otherwise the hardest part of building
+anything that reads one, and every tool that does it from guesswork drifts from
+what the engine actually produces — separately, and invisibly. The catalogue is
+closed on purpose: a state it cannot produce is a state no tool should claim to
+render. `src/testing/scenarios.ts` lists them, and the suite runs every one.
+
 What this library gives a deployment is **two entrypoints, one per artifact** —
 each a file whose whole body is one call:
 
@@ -171,18 +231,21 @@ import { startServer } from 'workflow-engine';
 void startServer({ dataDir: '/var/lib/tempo' });
 
 // workflows/order.workflow.ts — declaring the activities registers them
-import { proxyActivities } from 'workflow-engine/workflow';
+import * as Tempo from 'workflow-engine/workflow';
 import * as payments from '../activities/payments';
-const act = proxyActivities(payments, { retry: { maximumAttempts: 3 } });
+const act = Tempo.proxyActivities(payments, { retry: { maximumAttempts: 3 } });
 
-export async function order(id: string): Promise<void> {
-  await act.charge(id);
-}
+export const order = Tempo.createWorkflow({
+  key: 'order',
+  async run({ id }: { id: string }) {
+    await act.charge(id);
+  },
+});
 
 // worker.ts — bundle this, run it twice, once per --role
-import { Tempo } from 'workflow-engine';
-import * as workflows from './workflows';
-Tempo.startWorker({ name: 'orders', workflows });
+import { startWorker } from 'workflow-engine';
+import { order } from './workflows/order.workflow';
+startWorker({ name: 'orders', workflows: [order] });
 ```
 
 plus the client above, and the **flag vocabulary** both processes read
@@ -215,13 +278,64 @@ Three things are worth knowing before you write that supervisor config:
 - **A redeploy is a restart.** Nothing rereads a `.js` in place.
 - **Readiness is `health()` and `queues()`, not the stdout lines.** Those two
   answer from anywhere, at any time, about a process you did not spawn — which is
-  what a supervisor or a deploy check actually needs. The readiness lines are for
-  a human watching a terminal, and for learning the port after `--port=0`.
+  what a supervisor or a deploy check actually needs. `health()` also says where
+  the server bound — the interface, the resolved port after `--port=0`, and the
+  machine's hostname — which is how you find out that a server nothing can reach
+  is on loopback. `serverUrl(health)` turns that into an address to dial, on the
+  client side, because the server cannot see a proxy in front of itself and will
+  not claim to. The readiness lines are left for a human watching a terminal, and
+  for learning the port when you cannot yet connect at all.
 
 Going distributed does not change the workflow code, only how it is hosted. See
 [`src/server_main.ts`](src/server_main.ts) for the server entrypoint and its
 operational caveats, and [`src/tempo.ts`](src/tempo.ts) for the worker entrypoint
 and its input contract.
+
+### Put your own server in front of a dashboard
+
+The RPC has **no auth and no TLS** — `bin/server-main` binds loopback for that
+reason, and anything that can reach the port can terminate any execution. For
+workers on a trusted network that is a deferred problem. For a UI it is not,
+because a UI has users, sessions, and a browser between them and the port.
+
+So the supported shape puts a server of your own in the middle:
+
+```
+browser ──▶ your dashboard's server ──▶ tempo RPC
+             (auth, sessions, RBAC)     (loopback / trusted network)
+```
+
+Your server holds the session and decides who may call `terminate`; tempo's port
+stays where it already is. The browser gets `workflow-engine/protocol` for the
+types and the shared predicates, which is dependency-free and safe to bundle.
+
+Two things follow from this, and both look like gaps until you see the shape:
+
+- **There is no CORS on the RPC, deliberately.** Adding it would invite exactly
+  the topology above to be skipped, putting an unauthenticated `terminate` one
+  fetch away from any page a user has open.
+- **The engine will not grow a login.** Authorization is about your users and your
+  roles, neither of which this library knows anything about. It is the same
+  argument as the rest of this section.
+
+### What is contract, and what is not
+
+The top of this file says the package makes no stability promises, and that stays
+true: there is no npm release, no semver, and no deprecation window. What can be
+said is narrower and more useful — which surfaces are load-bearing, and what a
+change to one of them counts as.
+
+| Surface                                                    | A change to it                                                       |
+| ---------------------------------------------------------- | -------------------------------------------------------------------- |
+| The paths in the `exports` map                             | A break. Something outside resolves them by name.                    |
+| Types and predicates from `workflow-engine/protocol`       | A break, and a wire-format one — treat it like a schema migration.   |
+| Log event names and their fields                           | A break once anything aggregates them. See `server/ports/logger.ts`. |
+| `LISTENING` / `WORKER_READY` lines, and the flag spellings | A break. A supervisor parses one and emits the other.                |
+| Anything reached by a deep import into `src/`              | Not a break. That is the reason the `exports` map is a short list.   |
+
+"A break" here means it is treated as a bug in this repo rather than as a
+consumer's problem to absorb — the same standing the missing-projection rule
+above has. It does not mean it will not happen.
 
 ## How it works
 
@@ -263,7 +377,7 @@ the engine:
     At most one task per execution is in flight; a wake landing mid-task
     coalesces into exactly one more. This is where the two concurrency bugs are
     prevented.
-4.  **A workflow worker polls** and gets `{name, args, history}` plus a lease —
+4.  **A workflow worker polls** and gets `{name, props, history}` plus a lease —
     [`worker/worker_loops.ts`](src/worker/worker_loops.ts). It holds no state
     between tasks, so any worker can serve any execution.
 5.  **Replay** builds a fresh context and re-runs the workflow function against
@@ -306,6 +420,7 @@ warm executions on the worker is planned but not built.
 | **Marker event**  | A record that work was _dispatched_; resolves nothing, but stops re-dispatch on replay      |
 | **Wake**          | Enqueuing a workflow task for an execution                                                  |
 | **Execution**     | One running instance of a workflow (a `workflowId`, plus a `runId` per run)                 |
+| **Watcher**       | A poller child that signals each new item to its parent once; `createWatcher` declares one  |
 
 ## Project layout
 
@@ -317,9 +432,17 @@ src/
   protocol/       Pure data + contracts. The wire format. No logic, no deps.
   core/           The deterministic engine: (history) -> (commands).
   patterns/       Authoring helpers built from core's primitives — pollForever,
-                  diffing, signal streams. Depends on core; core never on it.
-  schedule/       When a schedule fires — spec arithmetic, the scheduler
-                  workflow, and the schedule client. Needs protocol only.
+                  diffing, signal streams, the watcher. Depends on core; core
+                  never on it.
+  libraries/      Internal libraries, held at arm's length — each imports
+                  nothing, knows nothing about the engine, and has its removal
+                  surface pinned by a seam spec. Location is the declaration.
+    walltime/       Duration strings and wall-clock rules.
+    schema/         The validator port, the first-party `t` builder,
+                    structural JSON Schema, strict conformance.
+  schedule/       Schedules: the scheduler workflow, its client, and the
+                  when-does-this-fire arithmetic (client and worker halves are
+                  separate entrypoints on purpose — see schedule/index.ts).
   server/         Orchestration brain. Stateful, runs NO user code.
     ports/          history_store · task_queue · workflow_task_queue · timer_service
     memory/         in-memory adapters for all four ports
@@ -330,22 +453,28 @@ src/
   workflow.ts     ★ AUTHOR ENTRYPOINT — deterministic primitives only
   activity.ts     ★ ACTIVITY ENTRYPOINT — heartbeat()
   index.ts        ★ HOST ENTRYPOINT — startServer, createLocalRuntime, types
-  tempo.ts        ★ WORKER ENTRYPOINT — Tempo.startWorker()
+  tempo.ts        ★ WORKER ENTRYPOINT — startWorker()
   server_main.ts  ★ SERVER ENTRYPOINT — startServer()
+  remote_client.ts ★ CLIENT ENTRYPOINT — reaching a server from outside it,
+                  from a browser included. Published as `workflow-engine/client`.
+  testing/        ★ TESTING ENTRYPOINT — startScenario(), a real server already
+                  in the states a UI has to render
   local_runtime.ts  createLocalRuntime — the single-node wiring seam
   process_flags.ts  how a deployed process reads its own configuration
   activity_registry.ts    what proxyActivities recorded, waiting for a worker
-  workflow_descriptor.ts  defineWorkflow — descriptions bound to the function
+  workflow_registry.ts    createWorkflow — a child reference that registers itself
+  workflow_descriptor.ts  the descriptor createWorkflow binds to the function;
+                          a worker reads it back for its catalogue
 bin/              server-main.ts — the reference server binary, one call
-examples/         greeter.ts — the reference worker binary, one call
-spec/             the executable documentation
+spec/             the executable documentation; spec/support/greeter_worker.ts
+                  is the reference worker binary the process-level specs deploy
 ```
 
 The `★` entrypoints are load-bearing: workflow code imports only from
 `workflow.ts`, which is what makes the determinism boundary a structural fact
 rather than a convention. [`tools/boundaries.ts`](tools/boundaries.ts) enforces
-it mechanically — layering, core purity, and the author entrypoint — via `npm
-run lint` and the suite. `activity.ts` is the other side of that line and is
+it mechanically — layering, core purity, the author entrypoint, and browser
+safety — via `npm run lint` and the suite. `activity.ts` is the other side of that line and is
 deliberately _not_ enforced: activities are where I/O belongs, so there is
 nothing to forbid — it exists to say where `heartbeat()` makes sense, and where
 it does not.

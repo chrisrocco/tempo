@@ -99,7 +99,7 @@ describe('client — one execution', () => {
   it('starts a workflow and awaits its result', async () => {
     const {client, teardown} = await startDeployment();
     try {
-      const handle = client.start<string>('greeter', ['world']);
+      const handle = client.start<string>('greeter', 'world');
 
       expect(handle.workflowId).toBeTruthy();
       await expectAsync(handle.result()).toBeResolvedTo('Hello, world!');
@@ -111,7 +111,7 @@ describe('client — one execution', () => {
   it('describes an execution: its status, its history, and what it awaits', async () => {
     const {client, teardown} = await startDeployment();
     try {
-      const handle = client.start<string>('greeter', ['ada']);
+      const handle = client.start<string>('greeter', 'ada');
       await handle.result();
       const detail = await handle.describe();
 
@@ -139,7 +139,7 @@ describe('client — one execution', () => {
   it('starts on the queue it was given', async () => {
     const {client, teardown} = await startDeployment();
     try {
-      const handle = client.start('greeter', ['world'], {
+      const handle = client.start('greeter', 'world', {
         taskQueue: 'other-pool',
       });
       const detail = await handle.describe();
@@ -155,9 +155,9 @@ describe('client — reading the whole server', () => {
   it('lists executions, newest first', async () => {
     const {client, teardown} = await startDeployment();
     try {
-      const first = client.start<string>('greeter', ['one']);
+      const first = client.start<string>('greeter', 'one');
       await first.result();
-      const second = client.start<string>('greeter', ['two']);
+      const second = client.start<string>('greeter', 'two');
       await second.result();
 
       const page = await client.list();
@@ -172,8 +172,8 @@ describe('client — reading the whole server', () => {
   it('filters server-side rather than narrowing a full page here', async () => {
     const {client, teardown} = await startDeployment();
     try {
-      await client.start<string>('greeter', ['one']).result();
-      client.start('greeter', ['two'], {taskQueue: 'other-pool'});
+      await client.start<string>('greeter', 'one').result();
+      client.start('greeter', 'two', {taskQueue: 'other-pool'});
 
       const page = await client.list({taskQueue: 'other-pool'});
       expect(page.executions.length).toBe(1);
@@ -205,7 +205,7 @@ describe('client — reading the whole server', () => {
   it('counts executions by status, grouped by queue and by name', async () => {
     const {client, teardown} = await startDeployment();
     try {
-      await client.start<string>('greeter', ['one']).result();
+      await client.start<string>('greeter', 'one').result();
 
       const counts = await client.counts();
       const byName = counts.byName.find((g) => g.key === 'greeter');

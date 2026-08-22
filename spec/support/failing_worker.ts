@@ -12,11 +12,11 @@
  * spec/server/task_failure.spec.ts). Only the first kind ever settles, so only
  * the first kind can be awaited by a caller that expects an answer.
  *
- * It lives in spec/support/ rather than examples/ because nothing about it is
- * exemplary — the reference worker is examples/greeter.ts.
+ * Nothing about it is exemplary — the reference worker is greeter_worker.ts
+ * next door.
  */
 
-import {Tempo} from '../../src';
+import {startWorker} from '../../src';
 import {runActivity} from '../../src/workflow';
 
 const activities = {
@@ -30,4 +30,4 @@ const workflows = {
   failer: async (): Promise<unknown> => runActivity('boom'),
 };
 
-Tempo.startWorker({name: 'failing', activities, workflows});
+startWorker({name: 'failing', activities, workflows});

@@ -121,6 +121,13 @@ happen today (a poison task, a hung activity) present identically as silence.
   that the process is alive. Calls are throttled worker-side, so a loop body is a
   fine place to put one. Activity code reaches it through a new
   [`src/activity.ts`](src/activity.ts) entrypoint.
+- ~~**Activity checkpoints**~~ — **landed**. A beat may carry one, surfacing on
+  `PendingActivityView` as `checkpoint` + `checkpointAt`, so a UI polling
+  `describe` can watch a query that runs for hours. A register rather than a log:
+  one slot per attempt, discarded with it, and never a history event — beats are
+  unbounded per attempt, unlike the retries `activityRetryScheduled` records. The
+  payload contract and the shapes rejected for the throttle are in
+  [`src/worker/activity_context.ts`](src/worker/activity_context.ts).
 - **Structured lifecycle log**, replacing ad-hoc stderr writes — no new dependency,
   and it is the source Phase 7 aggregates.
 
@@ -268,7 +275,7 @@ max)`. `deprecatePatch(id)` retires a patch, and exists because deleting the `if
   only fixed in this one. The `/usr/bin/node` in `ExecStart=` is the specimen.
   What this library owes a deployment instead is that both artifacts are ordinary
   library calls — [`startServer`](src/server_main.ts) and
-  [`Tempo.startWorker`](src/tempo.ts) — plus the client and the flag vocabulary,
+  [`startWorker`](src/tempo.ts) — plus the client and the flag vocabulary,
   all exported. Installing and supervising them is the consumer's, and README's
   "Running it yourself" is the whole of what this repo says about it. Supersedes
   [#41](https://github.com/chrisrocco/tempo/issues/41).

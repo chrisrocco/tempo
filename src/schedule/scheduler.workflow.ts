@@ -2,7 +2,7 @@
  * @fileoverview
  * The scheduler: a workflow whose whole job is starting other workflows on time.
  *
- * A schedule **is** an execution. Its id is the schedule's id, its args are the
+ * A schedule **is** an execution. Its id is the schedule's id, its props are the
  * schedule's definition, and its carryover is the schedule's status — so creating a
  * schedule is starting this workflow, pausing one is signalling it, and describing one
  * is `describeExecution` on it. Nothing new had to become durable to make schedules
@@ -55,7 +55,6 @@ import {
   background,
   condition,
   continueAsNew,
-  defineSignal,
   getCarryover,
   proxyActivities,
   setCarryover,
@@ -86,10 +85,10 @@ const STATUS_KEY = 'schedule';
  */
 const RECENT_LIMIT = 20;
 
-export const pauseSchedule = defineSignal('pauseSchedule');
-export const resumeSchedule = defineSignal('resumeSchedule');
-export const triggerSchedule = defineSignal('triggerSchedule');
-export const updateSchedule = defineSignal('updateSchedule');
+export const pauseSchedule = 'pauseSchedule';
+export const resumeSchedule = 'resumeSchedule';
+export const triggerSchedule = 'triggerSchedule';
+export const updateSchedule = 'updateSchedule';
 
 /** The initial status of a schedule nobody has run yet. */
 function initialStatus(definition: ScheduleDefinition): ScheduleStatus {
@@ -190,7 +189,7 @@ export async function scheduler(
     const ordinal = status.triggerCount + i + 1;
     const targetId = `${scheduleId}-manual-${ordinal}`;
     startWorkflow(targetId, definition.target.name, {
-      args: definition.target.args,
+      props: definition.target.props,
       taskQueue: definition.target.taskQueue,
     });
     fired.push({nominalTimeMs: ordinal, targetId, manual: true});
@@ -204,7 +203,7 @@ export async function scheduler(
     // rollover landing on the same instant — claims one execution rather than running
     // the work twice. That is the dedup, and it is at the server rather than here.
     startWorkflow(targetId, definition.target.name, {
-      args: definition.target.args,
+      props: definition.target.props,
       taskQueue: definition.target.taskQueue,
     });
     fired.push({nominalTimeMs: boundary.nominalTimeMs, targetId});

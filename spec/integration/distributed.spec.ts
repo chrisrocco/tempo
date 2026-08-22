@@ -2,7 +2,7 @@
  * @fileoverview
  * Against a REAL server process (spawned via `node --import tsx bin/server-main`),
  * over real sockets, driving the real deployable worker entrypoint
- * (`examples/greeter.ts`) exactly as a deployment launches it: one binary,
+ * (`spec/support/greeter_worker.ts`) exactly as a deployment launches it: one binary,
  * its role chosen by --role. Test 2 demonstrates the phase's failure
  * semantics: an activity whose worker "crashed" (ran it but never acked) has its
  * lease expire and is redelivered — so it runs at-least-once.
@@ -27,12 +27,12 @@ import {repoPath} from '../support/repo_root';
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
-const WORKER = repoPath('examples/greeter.ts');
+const WORKER = repoPath('spec/support/greeter_worker.ts');
 
 /**
  * Run a deployable entrypoint the way a systemd unit would: an argv and nothing
- * ambient. Configuration used to arrive here as environment variables; it is
- * flags now, for the reasons in `src/process_flags.ts`.
+ * ambient. Configuration arrives as flags rather than environment variables, for
+ * the reasons in `src/process_flags.ts`.
  */
 function spawnMain(script: string, args: string[] = []): ChildProcess {
   return spawn(process.execPath, ['--import', 'tsx', script, ...args], {
@@ -137,7 +137,7 @@ describe('distributed — real server process over RPC', () => {
       await waitForLine(act, /WORKER_READY greeter activity/);
 
       const service = remote(url);
-      const {workflowId} = service.start('greeter', ['world']);
+      const {workflowId} = service.start('greeter', {name: 'world'});
       await expectAsync(service.getResult(workflowId)).toBeResolvedTo(
         'Hello, world!',
       );
@@ -157,7 +157,7 @@ describe('distributed — real server process over RPC', () => {
       await waitForLine(worker, /WORKER_READY greeter workflow,activity/);
 
       const service = remote(url);
-      const {workflowId} = service.start('greeter', ['world']);
+      const {workflowId} = service.start('greeter', {name: 'world'});
       await expectAsync(service.getResult(workflowId)).toBeResolvedTo(
         'Hello, world!',
       );
@@ -170,11 +170,10 @@ describe('distributed — real server process over RPC', () => {
   /**
    * A workflow the worker cannot run keeps its execution alive and reports why.
    *
-   * This used to settle the execution as failed, on the reading that an
-   * unregistered name is a typo. Once tasks are routed by queue it far more often
-   * means a deploy still rolling, and a typo is no longer expensive to diagnose:
-   * the reason is on the record, `describe` prints it, and `terminate` ends it.
-   * Failing fast would trade a recoverable state for an unrecoverable one.
+   * Settling it as failed would trade a recoverable state for an unrecoverable
+   * one; `protocol/service.isNameServed` owns that argument. What this case adds
+   * is that a typo stays cheap to diagnose either way: the reason is on the
+   * record, `describe` prints it, and `terminate` ends it.
    */
   it('keeps an execution alive when no worker has its workflow, and says why', async () => {
     const {url, proc: server} = await spawnServer();

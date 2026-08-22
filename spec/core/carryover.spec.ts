@@ -81,7 +81,7 @@ describe('carryover', () => {
       });
 
     await expectAsync(
-      rt.start<string>('wf', [], {workflowId: 'wf-1'}).result(),
+      rt.start<string>('wf', undefined, {workflowId: 'wf-1'}).result(),
     ).toBeResolvedTo('saw 3');
 
     const rec = await store.get('wf-1');
@@ -138,7 +138,7 @@ describe('carryover', () => {
         return 'unreachable';
       });
 
-    rt.start('wf', [], {workflowId: 'wf-1'});
+    rt.start('wf', undefined, {workflowId: 'wf-1'});
     await wait(60);
 
     const rec = await store.get('wf-1');
@@ -164,7 +164,7 @@ describe('carryover', () => {
         return continueAsNew();
       });
 
-    await rt.start('wf', [], {workflowId: 'wf-1'}).result();
+    await rt.start('wf', undefined, {workflowId: 'wf-1'}).result();
 
     const rec = await store.get('wf-1');
     // 2, not 3: carryover is adopted at a rollover, and the third run *completed*
@@ -190,7 +190,7 @@ describe('carryover', () => {
       },
     );
 
-    rt.start('hoarder', [], {workflowId: 'wf-1'});
+    rt.start('hoarder', undefined, {workflowId: 'wf-1'});
     await wait(80);
 
     const rec = await store.get('wf-1');
@@ -235,7 +235,7 @@ describe('carryover', () => {
       async () => (workflowInfo().continueAsNewSuggested ? 'hint' : 'no hint'),
     );
 
-    await rt.start('plain', [], {workflowId: 'wf-1'}).result();
+    await rt.start('plain', undefined, {workflowId: 'wf-1'}).result();
 
     expect(await store.get('wf-1').then((r) => r!.carryover)).toEqual({});
     rt.shutdown();

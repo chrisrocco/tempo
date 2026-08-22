@@ -39,20 +39,18 @@
  * `childStarted.detached`: the marker is unconditional, and the flag tells the
  * recovery path which children have a completion coming.
  *
- * **Every** command leaves one, with no exceptions left. `cancelChild` used to be
- * the exception, on the grounds that its effect is already a durable record — the
- * `cancelRequested` it appends to the *child's* history — and that `requestCancel`
+ * **Every** command leaves one, with no exceptions. `cancelChild` is the one that
+ * looks like it could go without: its effect is already a durable record — the
+ * `cancelRequested` it appends to the *child's* history — and `requestCancel`
  * short-circuits on finding one, so a re-dispatched cancel is idempotent rather
- * than a second cancellation. All of that is still true, and it is an argument
- * about **safety**: re-dispatch does no harm.
- *
- * It stopped being sufficient when replay began deciding what to emit by asking
- * whether history holds a command's seq (`core/workflow_api`). That question needs
- * **observability**, and a record living on another execution cannot supply it: a
- * cancel that reached the workflow mid-batch was dropped and never re-issued, with
- * not even a gap in the seqs to notice — the wedge of issue #39, surviving in the
- * one place its fix could not see (issue #50). `childCancelRequested` is what
- * closes it.
+ * than a second cancellation. That argument is sound, and it is about **safety**:
+ * re-dispatch does no harm. Safety is not what replay asks about. Replay decides
+ * what to emit by asking whether history holds a command's seq
+ * (`core/workflow_api`), which needs **observability**, and a record living on
+ * another execution cannot supply it — a cancel reaching the workflow mid-batch
+ * is dropped and never re-issued, without even a gap in the seqs to notice. That
+ * is the wedge of issue #39 in the one place its fix could not see (issue #50),
+ * and `childCancelRequested` is what closes it.
  *
  * `recordPatch` is the invariant read from the other end: a command that is
  * *nothing but* its marker. It dispatches no work, so there is no "record the
@@ -167,8 +165,13 @@ import type {
   WorkflowTaskResult,
 } from '../protocol';
 import {ANY_TASK_QUEUE} from '../protocol';
+import type {ActivityCheckpoints} from './execution_view';
 import {completedSeqs, pendingWork} from './pending_work';
-import {createWorkerRegistry} from './worker_registry';
+import {
+  createWorkerRegistry,
+  isReportCurrent,
+  WORKER_RETENTION_MS,
+} from './worker_registry';
 import type {
   ExecutionParent,
   ExecutionRecord,
@@ -266,7 +269,7 @@ export interface ServerCoreDeps {
   launch(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string,
     parent: ExecutionParent | undefined,
   ): void;
@@ -280,15 +283,15 @@ export interface ServerCoreDeps {
    * Exists because not every settle follows a workflow task. `LocalService`
    * learns an execution's outcome by watching its own drain loop — it applies a
    * task, re-reads the record, and settles the caller's `getResult` — and
-   * `terminate` produces no task at all, so it used to patch its bookkeeping by
-   * hand from the client side.
+   * `terminate` produces no task at all.
    *
-   * That stopped being enough when the server acquired a reason of its own to
+   * Patching that bookkeeping by hand from the client side covers only the
+   * terminations a client asked for, and the server has reasons of its own to
    * terminate an execution nobody asked about: a child whose parent closed under
-   * a `terminate` policy (see `closeChildren`). Without this the child would be
-   * `terminated` on the record while local mode still reported it `running`, and
-   * anyone holding its `getResult` promise would wait forever for an outcome
-   * that had already happened.
+   * a `terminate` policy (see `closeChildren`). Without this the child is
+   * `terminated` on the record while local mode still reports it `running`, and
+   * anyone holding its `getResult` promise waits forever for an outcome that has
+   * already happened.
    *
    * Called at every terminal transition rather than only that one, so there is
    * no rule to remember about which settles are observable. Optional because a
@@ -310,7 +313,35 @@ export interface ServerCoreDeps {
    * the default came to be 4.
    */
   continueAsNewSuggestThreshold?: number;
+  /**
+   * The start-to-close deadline applied to an activity that configured no
+   * deadline of its own — neither `startToCloseTimeoutMs` nor a heartbeat.
+   * Defaults to `DEFAULT_START_TO_CLOSE_MS` (10 minutes).
+   *
+   * Exists because a deadline-less activity whose worker dies silently has no
+   * reaper: nothing ever settles the seq, the workflow waits forever, and the
+   * server's attempt bookkeeping for it can only be reclaimed by an operator
+   * reset. Requiring authors to remember a timeout just moves the leak to
+   * whoever forgets, so the server supplies one — the same stance Temporal
+   * takes by refusing deadline-less activities outright.
+   *
+   * The default is a policy of this server, not of the activity: it is applied
+   * at dispatch, never written into the `activityScheduled` event, so changing
+   * it changes the next attempt of everything already in flight. An activity
+   * that genuinely wants no ceiling opts out explicitly with
+   * `startToCloseTimeoutMs: 0`, and one that heartbeats already has its reaper
+   * (the heartbeat deadline), so the default leaves it unbounded — see
+   * `protocol/activity_options.ts`.
+   */
+  defaultStartToCloseTimeoutMs?: number;
 }
+
+/**
+ * Ten minutes: long enough that an activity which finishes at all almost
+ * certainly finishes inside it, short enough that a workflow stuck on a dead
+ * worker fails while someone still remembers deploying it.
+ */
+export const DEFAULT_START_TO_CLOSE_MS = 600_000;
 
 export interface ServerCore {
   /** Build the task for an execution the worker has claimed (or undefined if gone/terminal). */
@@ -339,12 +370,11 @@ export interface ServerCore {
   /**
    * Request cancellation, cascading to **every** child this execution started.
    *
-   * Not only the fire-and-forget ones, which is what this used to say: both kinds
-   * go into `childrenByParent`, so a blocking child is cancelled alongside a
-   * detached one. That is the intended behaviour — a parent unwinding through a
-   * `CancelledFailure` is not going to consume the result it was awaiting — and
-   * cancellation remains the only thing that walks downward at all (see the
-   * header).
+   * Not only the fire-and-forget ones: both kinds go into `childrenByParent`, so
+   * a blocking child is cancelled alongside a detached one. That is the intended
+   * behaviour — a parent unwinding through a `CancelledFailure` is not going to
+   * consume the result it was awaiting — and cancellation remains the only thing
+   * that walks downward at all (see the header).
    */
   requestCancel(workflowId: string): Promise<void>;
   /**
@@ -382,7 +412,7 @@ export interface ServerCore {
   listQueues(): QueueWorkers[];
   /** Record what a worker says it has registered. See `WorkflowReportRequest`. */
   reportWorkflows(report: WorkflowReportRequest): void;
-  /** Every workflow any worker has reported, deduped by name. */
+  /** Every workflow the live fleet reports, deduped by name. See `WorkflowService`. */
   listWorkflows(): WorkflowSummary[];
   /**
    * Drop the timers this core is holding, so a host can shut down.
@@ -458,8 +488,19 @@ export interface ServerCore {
   /**
    * The attempt behind `token` is still alive: renew its lease and reset its
    * silence deadline. Ignored once the server has given up on that attempt.
+   *
+   * `checkpoint` replaces this attempt's checkpoint, readable back through
+   * `activityCheckpoints`. Omitting it leaves the previous one standing.
    */
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
+  /**
+   * What each of `workflowId`'s in-flight attempts last reported, keyed by seq.
+   *
+   * Live state, and the one input to `describeExecution` history cannot supply.
+   * Deliberately **not** durable: a restart abandons every attempt, so a
+   * persisted checkpoint would outlive the work it describes.
+   */
+  activityCheckpoints(workflowId: string): ActivityCheckpoints;
 }
 
 export function createServerCore(deps: ServerCoreDeps): ServerCore {
@@ -474,6 +515,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     onSettled = () => {},
     log = silentLogger,
     continueAsNewSuggestThreshold = DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD,
+    defaultStartToCloseTimeoutMs = DEFAULT_START_TO_CLOSE_MS,
   } = deps;
 
   // Keyed by the `startChild` seq that spawned each child, so `cancelChild` can
@@ -511,9 +553,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   }
   // Seam bookkeeping: what each handed-out task token maps to, so `complete` can
   // report it back and (for workflow tasks) run the optimistic version check.
+  // The checkpoint rides on the lease so it is cleaned up by construction: every
+  // path that ends an attempt already deletes the lease. A parallel map would
+  // need each of them to remember, and the one that forgot would leave `describe`
+  // reporting an attempt nobody is running.
   const activityLeases = new Map<
     TaskToken,
-    {workflowId: string; seq: number}
+    {
+      workflowId: string;
+      seq: number;
+      checkpoint?: {checkpoint: unknown; at: number};
+    }
   >();
   // `polledAt` exists purely so a completion can report how long the task was out
   // with a worker — the task-latency number Phase 7 wants to aggregate.
@@ -560,10 +610,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    * recomputed on read — an event's time is a fact about when it happened, not
    * about when someone asked.
    *
-   * Everything funnels through here so that stays true. `appendSignal` used to
-   * call the store directly, which would have left externally injected signals
-   * as the one event kind with no time on it — the kind an operator is most
-   * likely to be looking for.
+   * Everything funnels through here so that stays true. A path that called the
+   * store directly would leave externally injected signals as the one event kind
+   * with no time on it — the kind an operator is most likely to be looking for.
    */
   function appendEvent(workflowId: string, event: HistoryEvent): Promise<void> {
     return historyStore.append(workflowId, [{...event, ts: Date.now()}]);
@@ -745,7 +794,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         launch(
           childId,
           cmd.childName,
-          cmd.childArgs,
+          cmd.childProps,
           cmd.taskQueue ?? taskQueue,
           {workflowId, seq: cmd.seq},
         );
@@ -794,7 +843,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         launch(
           cmd.targetId,
           cmd.name,
-          cmd.args,
+          cmd.props,
           cmd.taskQueue ?? taskQueue,
           undefined,
         );
@@ -897,7 +946,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       token: workflowId,
       workflowId,
       name: rec.name,
-      args: rec.args,
+      props: rec.props,
       history: rec.history.slice(),
       continueAsNewSuggested:
         rec.history.length >= continueAsNewSuggestThreshold,
@@ -930,10 +979,10 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // Dispatch before settling, not instead of it. A task can both issue
     // commands and finish the workflow — `signalWorkflow(parent, done); return
     // result;` is one activation — and the dispositions below all return early,
-    // so a batch reaching them used to be discarded. Nothing raised: the
-    // execution completed normally, having silently not done what its last line
-    // said. Every command has this shape, and the fire-and-forget ones have it
-    // worst, since they are the ones with no promise whose absence would be
+    // so a batch reaching them without this would be discarded. Nothing raises:
+    // the execution completes normally, having silently not done what its last
+    // line said. Every command has this shape, and the fire-and-forget ones have
+    // it worst, since they are the ones with no promise whose absence would be
     // noticed.
     //
     // Safe for a settling execution because a dispatch outliving it is already
@@ -1026,7 +1075,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // this is the one moment where changing the seed cannot split a run.
       if (result.carryover !== undefined)
         await historyStore.setCarryover(workflowId, result.carryover);
-      await historyStore.resetForContinueAsNew(workflowId, caN.args);
+      await historyStore.resetForContinueAsNew(workflowId, caN.props);
       wake(workflowId); // drive the fresh run
       return;
     }
@@ -1061,7 +1110,15 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (
       stored.length === parked.length &&
       stored.every(
-        (s, i) => s.seq === parked[i]?.seq && s.site === parked[i]?.site,
+        (s, i) =>
+          s.seq === parked[i]?.seq &&
+          s.site === parked[i]?.site &&
+          // Deterministic replay reaches each `condition()` call with the same
+          // history prefix every task, so a surviving park reports the same
+          // `awaiting` and this compares equal — stringify order included. A
+          // mismatch means the code changed under a live park (a deploy), and
+          // the store should follow the worker's latest report.
+          JSON.stringify(s.awaiting) === JSON.stringify(parked[i]?.awaiting),
       )
     )
       return;
@@ -1076,12 +1133,17 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
           type: 'conditionUnparked',
           condSeq: s.seq,
         });
+    // Membership, not equality: a park whose `awaiting` text changed under a
+    // deploy is still the same wait, so the span stays open and the store below
+    // just adopts the new value — no event churn for a workflow that is not
+    // actually moving.
     for (const p of parked)
       if (!was.has(p.seq))
         await appendEvent(workflowId, {
           type: 'conditionParked',
           condSeq: p.seq,
           site: p.site,
+          awaiting: p.awaiting,
         });
     await historyStore.setParkedConditions(workflowId, parked);
   }
@@ -1385,7 +1447,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   /**
    * Replay an execution from an earlier point in its own history.
    *
-   * The escape hatch for the case `terminate` was previously the only answer to:
+   * The escape hatch for the case `terminate` is the blunt answer to:
    * a workflow edited while it had live executions, whose replay now throws
    * nondeterminism at some seq. Truncating to before that point and re-driving
    * lets the *new* code produce the commands from there on.
@@ -1555,7 +1617,13 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
    * identity-on-poll change exists to make. See `WorkerInfo.busy`.
    */
   /**
-   * Fold every worker's report into one catalogue, keyed by workflow name.
+   * Fold every *current* report into one catalogue, keyed by workflow name.
+   *
+   * Current is `isReportCurrent`: the reporting worker still polls the queue with the
+   * report's own digest, or is mid-task on it. A report outlives its worker, so
+   * without this filter the catalogue would list every queue any worker recently
+   * served — and the question here is "what can I start", present tense. Only
+   * workflow leases count as busy, because only the workflow role reports.
    *
    * First report wins on a disagreement, and the disagreement is *reported* rather than
    * resolved: two workers describing one name differently is a fleet running two versions
@@ -1575,7 +1643,11 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // function has already added resolved fields to.
     const firstSeen = new Map<string, string>();
 
-    for (const report of workerRegistry.reports())
+    const now = Date.now();
+    const busy = sweepQuietWorkers().workflow;
+    const observed = workerRegistry.queues();
+    for (const report of workerRegistry.reports()) {
+      if (!isReportCurrent(report, observed, busy, now)) continue;
       for (const workflow of report.workflows) {
         const described = JSON.stringify(workflow);
         const existing = byName.get(workflow.name);
@@ -1593,6 +1665,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         if (firstSeen.get(workflow.name) !== described)
           existing.conflicting = true;
       }
+    }
 
     return [...byName.values()];
   }
@@ -1601,11 +1674,26 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     workerRegistry.recordReport(report);
   }
 
-  function listQueues(): QueueWorkers[] {
+  /**
+   * Evict workers quiet past retention before a fleet read — the moment the
+   * pile would be visible — sparing every lease holder, which only this tier
+   * can name (see `evictQuietWorkers`). Returns the holders, because the read
+   * needs them anyway to mark workers `busy`.
+   */
+  function sweepQuietWorkers(): {workflow: Set<string>; activity: Set<string>} {
     const holders = {
       workflow: workflowTaskQueue.leaseHolders(),
       activity: activityTaskQueue.leaseHolders(),
     };
+    workerRegistry.evictQuietWorkers(
+      Date.now() - WORKER_RETENTION_MS,
+      new Set([...holders.workflow, ...holders.activity]),
+    );
+    return holders;
+  }
+
+  function listQueues(): QueueWorkers[] {
+    const holders = sweepQuietWorkers();
     const backlog = {
       workflow: workflowTaskQueue.backlog(),
       activity: activityTaskQueue.backlog(),
@@ -1681,7 +1769,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         token: leased.token,
         workflowId: leased.workflowId,
         name: rec.name,
-        args: rec.args,
+        props: rec.props,
         history: rec.history.slice(),
         carryover: {...rec.carryover},
         continueAsNewSuggested:
@@ -1771,6 +1859,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     task: LeasedActivityTask,
     kind: 'startToClose' | 'heartbeat',
     timeoutMs: number,
+    opts: {defaulted?: boolean} = {},
   ): void {
     const lease = activityLeases.get(task.token);
     if (!lease) return; // already settled
@@ -1783,13 +1872,22 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       name: task.name,
       kind,
       timeoutMs,
+      // A deadline the author never wrote deserves to say so where it will be
+      // read: in the log line an operator greps and in the error the workflow
+      // catches — otherwise the first default timeout ever hit becomes a hunt
+      // for a `startToCloseTimeoutMs` that appears in no source file.
+      ...(opts.defaulted ? {defaulted: true} : {}),
     });
     void reportActivityResult(lease.workflowId, lease.seq, {
       ok: false,
       error:
         kind === 'heartbeat'
           ? `activity ${task.name} stopped heartbeating for ${timeoutMs}ms`
-          : `activity ${task.name} timed out after ${timeoutMs}ms`,
+          : `activity ${task.name} timed out after ${timeoutMs}ms${
+              opts.defaulted
+                ? ' (server default; set startToCloseTimeoutMs to change it, or 0 to opt out)'
+                : ''
+            }`,
     });
   }
 
@@ -1798,11 +1896,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     task: LeasedActivityTask,
     kind: 'startToClose' | 'heartbeat',
     timeoutMs: number,
+    opts: {defaulted?: boolean} = {},
   ): void {
     const timers = attemptTimers.get(task.token) ?? {};
     if (timers[kind]) clearTimeout(timers[kind]);
     const timer = setTimeout(
-      () => abandonAttempt(task, kind, timeoutMs),
+      () => abandonAttempt(task, kind, timeoutMs, opts),
       timeoutMs,
     );
     timer.unref?.(); // a pending deadline must not hold the process open
@@ -1825,37 +1924,98 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // See the note in `pollWorkflowTask`: recorded before the queue is
     // consulted, so an idle poll still counts as liveness.
     workerRegistry.recordPoll('activity', taskQueue, identity, servesHash);
-    const task = activityTaskQueue.poll(taskQueue, identity);
-    if (!task) return undefined;
-    activityLeases.set(task.token, {
-      workflowId: task.workflowId,
-      seq: task.seq,
-    });
-    // Stamped here rather than reported by the worker at completion, for two
-    // reasons. One clock: a `startedAt` from the worker is on the worker's clock,
-    // and a skewed one could claim to have started after the server recorded it
-    // finished. And it is written *now*, so an attempt still running is visible —
-    // a value carried on the completion event would say nothing until it was over,
-    // which is the half of the question an operator actually asks first.
-    await appendEvent(task.workflowId, {
-      type: 'activityStarted',
-      seq: task.seq,
-      identity,
-    });
-    // Armed on poll, not on dispatch: both deadlines bound the attempt, and the
-    // attempt begins when a worker takes the task, not when it was queued.
-    const {startToCloseTimeoutMs, heartbeatTimeoutMs} = task.options;
-    if (startToCloseTimeoutMs !== undefined && startToCloseTimeoutMs > 0)
-      armAttemptTimer(task, 'startToClose', startToCloseTimeoutMs);
-    // The heartbeat clock starts now, so an attempt that never beats at all is
-    // caught just as surely as one that stops partway.
-    if (heartbeatTimeoutMs !== undefined && heartbeatTimeoutMs > 0)
-      armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
-    heartbeatTasks.set(task.token, task);
-    return task;
+    for (;;) {
+      const task = activityTaskQueue.poll(taskQueue, identity);
+      if (!task) return undefined;
+      // The queue redelivers on silence, and silence cannot tell a dead worker
+      // from a slow one — so a wrong guess leaves a copy of the task
+      // circulating after the original attempt settled the seq. The settlement
+      // sweep in `reportActivityResult` acks the copies still in the lease
+      // table, but one already reclaimed into the queue by then has no token
+      // for the sweep to ack — and it can never leave on its own: every
+      // attempt of an activity slower than the lease acks after redelivery,
+      // where the ack is a no-op. Unchecked, it loops forever — a phantom
+      // `activityStarted` per lease period, a real re-execution per loop. This
+      // is the one moment every copy passes back through the server's hands,
+      // so it is where the queue's guess is reconciled against history: same
+      // predicate as the result-side dedup in `reportActivityResult`, and
+      // terminal-events-only for the same reason a looser one would break
+      // retries — a retry reuses its seq, marked by `activityRetryScheduled`,
+      // never by a terminal event. Costs one store read per dispatch; idle
+      // polls return above without reading.
+      const rec = await historyStore.get(task.workflowId);
+      if (
+        !rec ||
+        rec.status !== 'running' ||
+        completedSeqs(rec.history).activities.has(task.seq)
+      ) {
+        activityTaskQueue.complete(task.token); // ack the fresh lease — the copy dies here
+        log('activity.stale_delivery_dropped', {
+          workflowId: task.workflowId,
+          seq: task.seq,
+          name: task.name,
+        });
+        continue;
+      }
+      activityLeases.set(task.token, {
+        workflowId: task.workflowId,
+        seq: task.seq,
+      });
+      // A new attempt supersedes the last one's checkpoint, which now describes
+      // work being redone. This is the one path that ends an attempt without
+      // deleting its lease — the queue expiring it and redelivering — and the stale
+      // lease must stay: `completeActivityTask` relies on it to accept a late
+      // completion from the abandoned worker. So only the checkpoint is cleared.
+      for (const [token, lease] of activityLeases)
+        if (
+          token !== task.token &&
+          lease.workflowId === task.workflowId &&
+          lease.seq === task.seq
+        )
+          lease.checkpoint = undefined;
+      // Stamped here rather than reported by the worker at completion, for two
+      // reasons. One clock: a `startedAt` from the worker is on the worker's clock,
+      // and a skewed one could claim to have started after the server recorded it
+      // finished. And it is written *now*, so an attempt still running is visible —
+      // a value carried on the completion event would say nothing until it was over,
+      // which is the half of the question an operator actually asks first.
+      await appendEvent(task.workflowId, {
+        type: 'activityStarted',
+        seq: task.seq,
+        identity,
+      });
+      // Armed on poll, not on dispatch: both deadlines bound the attempt, and the
+      // attempt begins when a worker takes the task, not when it was queued.
+      const {startToCloseTimeoutMs, heartbeatTimeoutMs} = task.options;
+      const heartbeats =
+        heartbeatTimeoutMs !== undefined && heartbeatTimeoutMs > 0;
+      if (startToCloseTimeoutMs !== undefined && startToCloseTimeoutMs > 0) {
+        armAttemptTimer(task, 'startToClose', startToCloseTimeoutMs);
+      } else if (startToCloseTimeoutMs === undefined && !heartbeats) {
+        // No deadline of any kind means no reaper: a worker that dies silently
+        // leaves the seq unsettled forever and the workflow parked on it, with
+        // an operator reset as the only way out. So an activity that configured
+        // nothing gets this server's default deadline. Applied here rather than
+        // stamped into `activityScheduled`, because it is the server's policy
+        // and not the activity's record — an explicit `startToCloseTimeoutMs: 0`
+        // is the author saying "unbounded, and I mean it", and a heartbeating
+        // activity already has its reaper below.
+        armAttemptTimer(task, 'startToClose', defaultStartToCloseTimeoutMs, {
+          defaulted: true,
+        });
+      }
+      // The heartbeat clock starts now, so an attempt that never beats at all is
+      // caught just as surely as one that stops partway.
+      if (heartbeats) armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
+      heartbeatTasks.set(task.token, task);
+      return task;
+    }
   }
 
-  async function heartbeatActivityTask(token: TaskToken): Promise<void> {
+  async function heartbeatActivityTask(
+    token: TaskToken,
+    checkpoint?: unknown,
+  ): Promise<void> {
     const lease = activityLeases.get(token);
     const task = heartbeatTasks.get(token);
     // Silence is the only signal the server has, so a heartbeat for an attempt
@@ -1866,11 +2026,28 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     const timeoutMs = task.options.heartbeatTimeoutMs;
     if (timeoutMs !== undefined && timeoutMs > 0)
       armAttemptTimer(task, 'heartbeat', timeoutMs);
+    // One slot, overwritten. A bare `heartbeat()` leaves the last checkpoint
+    // standing rather than clearing it: reporting liveness is not a statement
+    // that the attempt forgot where it was.
+    if (checkpoint !== undefined)
+      lease.checkpoint = {checkpoint, at: Date.now()};
     log('activity.heartbeat', {
       workflowId: lease.workflowId,
       seq: lease.seq,
       name: task.name,
     });
+  }
+
+  /**
+   * Walks the leases rather than keeping a per-execution index: few attempts are
+   * ever out at once, and a second structure is a second thing to keep in step.
+   */
+  function activityCheckpoints(workflowId: string): ActivityCheckpoints {
+    const out: ActivityCheckpoints = {};
+    for (const lease of activityLeases.values())
+      if (lease.workflowId === workflowId && lease.checkpoint)
+        out[lease.seq] = lease.checkpoint;
+    return out;
   }
 
   async function completeActivityTask(
@@ -1916,5 +2093,6 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     pollActivityTask,
     completeActivityTask,
     heartbeatActivityTask,
+    activityCheckpoints,
   };
 }

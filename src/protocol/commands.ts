@@ -39,7 +39,7 @@ export interface StartTimerCommand extends CommandBase {
 export interface StartChildCommand extends CommandBase {
   type: 'startChild';
   childName: string;
-  childArgs: unknown[];
+  childProps: unknown;
   /** false = blocking (executeChild); true = fire-and-forget (startChild). */
   detached: boolean;
   /**
@@ -111,7 +111,7 @@ export interface StartWorkflowCommand extends CommandBase {
    */
   targetId: string;
   name: string;
-  args: unknown[];
+  props: unknown;
   /** Which pool runs it. Defaults to the starting execution's queue, as `startChild` does. */
   taskQueue?: string;
 }
@@ -177,7 +177,7 @@ export interface RecordPatchCommand extends CommandBase {
  */
 export interface ContinueAsNewCommand extends CommandBase {
   type: 'continueAsNew';
-  args: unknown[];
+  props: unknown;
 }
 
 export type Command =

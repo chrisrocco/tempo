@@ -1,6 +1,6 @@
 /**
  * @fileoverview
- * `Tempo.startWorker` as a caller meets it: what it registers, which server it
+ * `startWorker` as a caller meets it: what it registers, which server it
  * connects to, and what it refuses.
  *
  * These are internals specs (per AGENTS.md's two-kinds split) — the entrypoint
@@ -10,11 +10,10 @@
  * entrypoint does on the caller's behalf, and the precedence rules that decide
  * where the work goes.
  *
- * Every case runs against a real server on loopback, because a worker only has
- * one shape now — poll loops against a `RemoteService`. These used to compose an
- * in-process runtime through `--runtime=local` to avoid the port; that flag is
- * gone (see `src/tempo.ts`), and a loopback server is cheap enough that it was
- * never the reason to keep it.
+ * Every case runs against a real server on loopback, because a worker has one
+ * shape — poll loops against a `RemoteService` (see `src/tempo.ts`). Composing an
+ * in-process runtime here to avoid the port would test a shape no deployment has,
+ * and a loopback server is cheap.
  */
 
 import 'jasmine';
@@ -31,6 +30,7 @@ import {
   DEFAULT_SERVER_URL,
   requestedRole,
   resolveServerUrl,
+  resolveActivityConcurrency,
   resolveTaskQueue,
   startWorker,
 } from '../../src/tempo';
@@ -231,6 +231,35 @@ describe('worker entrypoint — resolving configuration', () => {
     expect(resolveTaskQueue(['--queue=fast'], 'slow')).toBe('fast');
     expect(resolveTaskQueue([], 'slow')).toBe('slow');
     expect(resolveTaskQueue([], undefined)).toBe('default');
+  });
+
+  it('applies the same precedence to activity concurrency', () => {
+    expect(resolveActivityConcurrency(['--activity-concurrency=8'], 2)).toBe(8);
+    expect(resolveActivityConcurrency([], 2)).toBe(2);
+    // Undefined rather than 1: the loop owns its own default, so the entrypoint
+    // does not have to know it and the two cannot drift apart.
+    expect(resolveActivityConcurrency([], undefined)).toBeUndefined();
+  });
+
+  it('refuses an activity concurrency that is not a positive integer', () => {
+    // A typo in a unit file, and the failure mode it prevents is quiet: a worker
+    // that fell back to running one at a time would look perfectly healthy while
+    // delivering none of the throughput it was redeployed for.
+    for (const bad of ['abc', '0', '-2', '2.5']) {
+      expect(() =>
+        resolveActivityConcurrency([`--activity-concurrency=${bad}`], 4),
+      ).toThrowError(/positive integer/);
+    }
+  });
+
+  it('leaves an empty activity concurrency to the shared flag guard', () => {
+    // `--activity-concurrency=` is refused one level down, by the same rule that
+    // refuses a bare `--data-dir`: a flag given without a value is someone who
+    // meant to say something. Asserted here so the two messages are not quietly
+    // merged into one that fits neither.
+    expect(() =>
+      resolveActivityConcurrency(['--activity-concurrency='], 4),
+    ).toThrowError(/needs a value/);
   });
 
   it('reports which source asked for a role', () => {

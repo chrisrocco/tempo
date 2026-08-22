@@ -61,7 +61,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
@@ -89,7 +89,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(120);
     feed.push({id: 'b', seq: 2});
     await wait(200);
@@ -127,7 +127,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(120);
     feed = feed.filter((item) => item.id !== 'b'); // b is resolved, drops out
     await wait(200);
@@ -142,7 +142,7 @@ describe('pollForever', () => {
    * The stream half, and the reason `query` exists: the mark goes to the source,
    * so a feed that can filter never resends what has been seen. Doubles as the
    * regression test for carryover determinism — the poll argument is derived
-   * from carried state, which is exactly what used to wedge replay.
+   * from carried state, which is exactly the shape that wedges replay.
    */
   it('hands the cursor to the source and advances it', async () => {
     const handled: number[] = [];
@@ -170,7 +170,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
@@ -204,11 +204,11 @@ describe('pollForever', () => {
           differ: byId((item) => item.id),
           poll: () => runActivity<Item[]>('fetch'),
           onAdded: (item) =>
-            startChild('handle', {workflowId: `c-${item.id}`, args: [item]}),
+            startChild('handle', {workflowId: `c-${item.id}`, props: item}),
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
@@ -236,7 +236,7 @@ describe('pollForever', () => {
   /**
    * With no `args` given, the next run gets what this one was started with.
    *
-   * The old default — no arguments at all — restarted `monitor(label)` as
+   * Defaulting to no arguments at all would restart `monitor(label)` as
    * `monitor(undefined)`. The execution stays healthy-looking, so the damage
    * shows up as a poller that has quietly stopped watching anything, one
    * rollover after the omission that caused it.
@@ -254,24 +254,24 @@ describe('pollForever', () => {
         feed.push({id: `i${n}`, seq: ++n}); // something new every cycle
         return [...feed];
       })
-      .registerWorkflow('monitor', async (label: string) =>
+      .registerWorkflow('monitor', async ({label}: {label: string}) =>
         pollForever<Item, string[], undefined>({
           everyMs: 5,
-          // no `args` — the point of the test
+          // no `props` — the point of the test
           differ: byId((item) => item.id),
           poll: () => runActivity<Item[]>('fetch'),
           onAdded: () => {},
         }),
       );
 
-    const handle = rt.start('monitor', ['hotlist'], {workflowId: 'mon'});
+    const handle = rt.start('monitor', {label: 'hotlist'}, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
 
     const rec = await store.get('mon');
     expect(rec!.runId).toBeGreaterThan(1); // several rollovers, not just one
-    expect(rec!.args).toEqual(['hotlist']); // still monitoring what it was told to
+    expect(rec!.props).toEqual({label: 'hotlist'}); // still monitoring what it was told to
     rt.shutdown();
   });
 
@@ -280,24 +280,24 @@ describe('pollForever', () => {
     const feed: Item[] = [{id: 'a', seq: 1}];
     const rt = createLocalRuntime({historyStore: store})
       .registerActivity('fetch', () => [...feed])
-      .registerWorkflow('monitor', async (label: string) =>
+      .registerWorkflow('monitor', async ({label}: {label: string}) =>
         pollForever<Item, string[], undefined>({
           everyMs: 5,
-          args: [label],
+          props: {label},
           differ: byId((item) => item.id),
           poll: () => runActivity<Item[]>('fetch'),
           onAdded: () => {},
         }),
       );
 
-    const handle = rt.start('monitor', ['hotlist'], {workflowId: 'mon'});
+    const handle = rt.start('monitor', {label: 'hotlist'}, {workflowId: 'mon'});
     await wait(250);
     handle.terminate('done');
     await wait(20);
 
     const rec = await store.get('mon');
     expect(rec!.runId).toBeGreaterThan(0); // guard: only meaningful after one
-    expect(rec!.args).toEqual(['hotlist']);
+    expect(rec!.props).toEqual({label: 'hotlist'});
     rt.shutdown();
   });
 
@@ -330,7 +330,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(120);
       handle.terminate('done');
       await wait(20);
@@ -360,7 +360,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(150);
       handle.terminate('done');
       await wait(20);
@@ -388,7 +388,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(80); // let it seed on the backlog
       feed.push({id: 'fresh', seq: 2});
       await wait(150);
@@ -425,7 +425,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(80); // several cycles against an empty feed
       feed.push({id: 'first-ever', seq: 1});
       await wait(150);
@@ -460,7 +460,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(150);
       handle.terminate('done');
       await wait(20);
@@ -493,7 +493,7 @@ describe('pollForever', () => {
           }),
         );
 
-      const handle = rt.start('monitor', [], {workflowId: 'mon'});
+      const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
       await wait(80);
       // Each new item forces a rollover, so seeding is re-evaluated in a run
       // that did not start the poller.
@@ -531,7 +531,7 @@ describe('pollForever', () => {
         }),
       );
 
-    const handle = rt.start('monitor', [], {workflowId: 'mon'});
+    const handle = rt.start('monitor', undefined, {workflowId: 'mon'});
     await wait(60);
     handle.cancel();
     await wait(60);

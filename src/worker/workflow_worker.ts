@@ -96,21 +96,20 @@ export function createWorkflowWorker(
       // Throw, so the poll loop reports this through `failWorkflowTask` and the
       // execution keeps running.
       //
-      // This used to fail the *execution* instead, and that was right when it was
-      // written: a throw escaped the loop, the task was never acked, and the
-      // lease redelivered it forever while the client waited on something that
-      // would never settle. Both premises have since changed. A task failure is
-      // now reported, counted, backed off, and named in `Client.describe()`; and
-      // once tasks are routed by queue, an unregistered type usually means a
-      // deploy that has not finished rolling rather than a typo — so recovering
-      // when the right version arrives is worth far more than failing fast.
+      // Failing the *execution* instead would settle a typo quickly, and it rests
+      // on two premises this engine does not have. A task failure here is
+      // reported, counted, backed off, and named in `Client.describe()`, so an
+      // unacked throw is not invisible; and once tasks route by queue, an
+      // unregistered type usually means a deploy that has not finished rolling
+      // rather than a typo, so recovering when the right version arrives is worth
+      // far more than failing fast.
       //
-      // A genuine typo now wedges rather than settling. That is the poison-task
-      // policy applied consistently: retry and surface, never give up on the
-      // author's behalf — see `server_core.failWorkflowTask`.
+      // The cost is that a genuine typo wedges rather than settling. That is the
+      // poison-task policy applied consistently: retry and surface, never give up
+      // on the author's behalf — see `server_core.failWorkflowTask`.
       if (!fn) throw new Error(`no workflow registered as ${name}`);
       const ctx = createContext(
-        task.args,
+        task.props,
         task.history,
         task.continueAsNewSuggested,
         task.carryover,

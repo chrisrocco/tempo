@@ -4,10 +4,10 @@
  *
  * One activation can both dispatch and complete — `signalWorkflow(parent, done);
  * return result;` — and the terminal dispositions in `applyWorkflowTaskResult`
- * all return early. The batch used to reach them and be discarded: the execution
- * completed normally, having silently not done what its last line said, with
- * nothing raised anywhere. The fire-and-forget commands wear it worst, because
- * they are the ones with no promise whose absence would be noticed.
+ * all return early. A batch reaching them undispatched is discarded: the
+ * execution completes normally, having silently not done what its last line said,
+ * with nothing raised anywhere. The fire-and-forget commands wear it worst,
+ * because they are the ones with no promise whose absence would be noticed.
  *
  * ## Dispatching is not the same as surviving
  *
@@ -63,7 +63,7 @@ function spawnerRuntime(
 describe('commands issued by the task that finishes a workflow', () => {
   it('launches a fire-and-forget child spawned on the way out', async () => {
     const store = new MemoryHistoryStore();
-    spawnerRuntime(store, 'leaf-1', 'abandon').start('spawner', [], {
+    spawnerRuntime(store, 'leaf-1', 'abandon').start('spawner', undefined, {
       workflowId: 'sp-1',
     });
     await wait(200);
@@ -79,7 +79,7 @@ describe('commands issued by the task that finishes a workflow', () => {
    */
   it('closes that child immediately when it was not asked to outlive its parent', async () => {
     const store = new MemoryHistoryStore();
-    spawnerRuntime(store, 'leaf-2', undefined).start('spawner', [], {
+    spawnerRuntime(store, 'leaf-2', undefined).start('spawner', undefined, {
       workflowId: 'sp-2',
     });
     await wait(200);
@@ -117,11 +117,11 @@ describe('commands issued by the task that finishes a workflow', () => {
           type: 'startChild',
           seq: 0,
           childName: 'leaf',
-          childArgs: [],
+          childProps: undefined,
           detached: true,
           parentClosePolicy: 'abandon',
         },
-        {type: 'continueAsNew', seq: 1, args: []},
+        {type: 'continueAsNew', seq: 1, props: undefined},
       ],
     });
 

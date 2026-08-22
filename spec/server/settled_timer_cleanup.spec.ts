@@ -53,7 +53,7 @@ describe('a settled execution and its timer', () => {
   it('stops reporting the timer as pending once it is cancelled', async () => {
     const store = new MemoryHistoryStore();
     const rt = sleeper(store);
-    const handle = rt.start('sleeper', [], {workflowId: 'p1'});
+    const handle = rt.start('sleeper', undefined, {workflowId: 'p1'});
     await wait(80);
 
     // Waiting, and honestly reporting it.
@@ -78,7 +78,7 @@ describe('a settled execution and its timer', () => {
   it('keeps the timerStarted in history for the postmortem', async () => {
     const store = new MemoryHistoryStore();
     const rt = sleeper(store);
-    const handle = rt.start('sleeper', [], {workflowId: 'p2'});
+    const handle = rt.start('sleeper', undefined, {workflowId: 'p2'});
     await wait(80);
     handle.cancel();
     await wait(120);
@@ -96,7 +96,7 @@ describe('a settled execution and its timer', () => {
   it('still reports that a cancel was requested', async () => {
     const store = new MemoryHistoryStore();
     const rt = sleeper(store);
-    const handle = rt.start('sleeper', [], {workflowId: 'p3'});
+    const handle = rt.start('sleeper', undefined, {workflowId: 'p3'});
     await wait(80);
     handle.cancel();
     await wait(120);
@@ -156,10 +156,10 @@ describe('the timer table when an execution settles', () => {
   });
 
   /**
-   * Not a correctness fix, and this is the spec that says so. Before the cleanup a
-   * surviving timer was harmless: `onFire` drops a fire for a record that is no longer
-   * running, appending nothing and waking nothing. The cleanup stops it being *held*,
-   * which is a resource question.
+   * Not a correctness fix, and this is the spec that says so. A surviving timer is
+   * harmless: `onFire` drops a fire for a record that is no longer running, appending
+   * nothing and waking nothing. The cleanup stops it being *held*, which is a resource
+   * question.
    */
   it('would have been harmless anyway: a fire for a settled execution is dropped', async () => {
     const store = new MemoryHistoryStore();
@@ -228,7 +228,7 @@ describe('a completed execution', () => {
       },
     );
 
-    await rt.start('brief', [], {workflowId: 'c1'}).result();
+    await rt.start('brief', undefined, {workflowId: 'c1'}).result();
     const detail = await rt.service.describeExecution('c1');
 
     expect(detail?.status).toBe('completed');

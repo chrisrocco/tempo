@@ -33,7 +33,7 @@ function runtimeWith(store: MemoryHistoryStore, ran: string[]) {
   return createLocalRuntime({historyStore: store})
     .registerActivity('nextFire', nextFire)
     .registerWorkflow('scheduler', scheduler)
-    .registerWorkflow('target', async (label: string) => {
+    .registerWorkflow('target', async ({label}: {label?: string} = {}) => {
       ran.push(label ?? 'run');
       return 'ok';
     });
@@ -43,7 +43,7 @@ const definition = (
   over: Partial<ScheduleDefinition> = {},
 ): ScheduleDefinition => ({
   spec: {type: 'interval', everyMs: 40},
-  target: {name: 'target', args: ['run']},
+  target: {name: 'target', props: {label: 'run'}},
   ...over,
 });
 
@@ -62,7 +62,7 @@ describe('the scheduler workflow', () => {
   it('starts its target on the interval, more than once', async () => {
     const store = new MemoryHistoryStore();
     const ran: string[] = [];
-    runtimeWith(store, ran).start('scheduler', [definition()], {
+    runtimeWith(store, ran).start('scheduler', definition(), {
       workflowId: 'sched-1',
     });
     await wait(300);
@@ -79,7 +79,7 @@ describe('the scheduler workflow', () => {
   it('names each run after its boundary, so a repeat claims one execution', async () => {
     const store = new MemoryHistoryStore();
     const ran: string[] = [];
-    runtimeWith(store, ran).start('scheduler', [definition()], {
+    runtimeWith(store, ran).start('scheduler', definition(), {
       workflowId: 'sched-2',
     });
     await wait(300);
@@ -97,7 +97,7 @@ describe('the scheduler workflow', () => {
   // frozen at whenever that run began.
   it('keeps its status readable while it is still running', async () => {
     const store = new MemoryHistoryStore();
-    runtimeWith(store, []).start('scheduler', [definition()], {
+    runtimeWith(store, []).start('scheduler', definition(), {
       workflowId: 'sched-3',
     });
     await wait(300);
@@ -114,7 +114,7 @@ describe('the scheduler workflow', () => {
     // Fast enough to exceed the limit of 20 well inside the window.
     runtimeWith(store, []).start(
       'scheduler',
-      [definition({spec: {type: 'interval', everyMs: 1}})],
+      definition({spec: {type: 'interval', everyMs: 1}}),
       {workflowId: 'sched-4'},
     );
     await wait(600);
@@ -133,7 +133,7 @@ describe('a paused schedule', () => {
   it('starts nothing while paused', async () => {
     const store = new MemoryHistoryStore();
     const ran: string[] = [];
-    runtimeWith(store, ran).start('scheduler', [definition({paused: true})], {
+    runtimeWith(store, ran).start('scheduler', definition({paused: true}), {
       workflowId: 'sched-5',
     });
     await wait(300);
@@ -144,7 +144,7 @@ describe('a paused schedule', () => {
 
   it('holds no timer, so pausing costs nothing and lasts', async () => {
     const store = new MemoryHistoryStore();
-    runtimeWith(store, []).start('scheduler', [definition({paused: true})], {
+    runtimeWith(store, []).start('scheduler', definition({paused: true}), {
       workflowId: 'sched-6',
     });
     await wait(200);
@@ -157,7 +157,7 @@ describe('a paused schedule', () => {
     const store = new MemoryHistoryStore();
     const ran: string[] = [];
     const rt = runtimeWith(store, ran);
-    const handle = rt.start('scheduler', [definition({paused: true})], {
+    const handle = rt.start('scheduler', definition({paused: true}), {
       workflowId: 'sched-7',
     });
     await wait(120);
@@ -183,7 +183,7 @@ describe('a paused schedule', () => {
     const rt = runtimeWith(store, ran);
     const handle = rt.start(
       'scheduler',
-      [definition({spec: {type: 'interval', everyMs: 3_600_000}})],
+      definition({spec: {type: 'interval', everyMs: 3_600_000}}),
       {workflowId: 'sched-8'},
     );
     await wait(120);
@@ -232,7 +232,7 @@ describe('a manually triggered schedule', () => {
     // An interval far longer than this test, so nothing can fire on schedule.
     const handle = rt.start(
       'scheduler',
-      [definition({spec: {type: 'interval', everyMs: 3_600_000}})],
+      definition({spec: {type: 'interval', everyMs: 3_600_000}}),
       {workflowId: 'sched-9'},
     );
     await wait(80);
@@ -253,7 +253,7 @@ describe('a manually triggered schedule', () => {
     const store = new MemoryHistoryStore();
     const ran: string[] = [];
     const rt = runtimeWith(store, ran);
-    const handle = rt.start('scheduler', [definition({paused: true})], {
+    const handle = rt.start('scheduler', definition({paused: true}), {
       workflowId: 'sched-10',
     });
     await wait(80);
@@ -272,12 +272,10 @@ describe('a manually triggered schedule', () => {
     const rt = runtimeWith(store, ran);
     const handle = rt.start(
       'scheduler',
-      [
-        definition({
-          spec: {type: 'interval', everyMs: 3_600_000},
-          paused: true,
-        }),
-      ],
+      definition({
+        spec: {type: 'interval', everyMs: 3_600_000},
+        paused: true,
+      }),
       {workflowId: 'sched-11'},
     );
     await wait(80);
@@ -310,13 +308,11 @@ describe('a schedule with bounds', () => {
     const ran: string[] = [];
     runtimeWith(store, ran).start(
       'scheduler',
-      [
-        definition({
-          spec: {type: 'interval', everyMs: 40},
-          // A window in the past: there is no boundary left to fire, ever.
-          bounds: {notAfterMs: 1_000},
-        }),
-      ],
+      definition({
+        spec: {type: 'interval', everyMs: 40},
+        // A window in the past: there is no boundary left to fire, ever.
+        bounds: {notAfterMs: 1_000},
+      }),
       {workflowId: 'sched-12'},
     );
     await wait(250);

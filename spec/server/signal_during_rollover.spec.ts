@@ -40,7 +40,7 @@ const rollover: WorkflowTaskResult = {
   result: undefined,
   failed: false,
   failure: undefined,
-  commands: [{type: 'continueAsNew', args: [1], seq: 0}],
+  commands: [{type: 'continueAsNew', props: 1, seq: 0}],
   carryover: {},
   parked: [],
 };
@@ -69,7 +69,7 @@ describe('a signal racing a rollover', () => {
 
     const after = await store.get('x');
     expect(after?.runId).toBe(1);
-    expect(after?.args).toEqual([1]);
+    expect(after?.props).toEqual(1);
   });
 
   it('discards the task result rather than rolling over, so the signal is kept', async () => {

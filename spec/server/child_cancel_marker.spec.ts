@@ -19,12 +19,7 @@
 
 import {createLocalRuntime} from '../../src';
 import {MemoryHistoryStore} from '../../src/server';
-import {
-  condition,
-  defineSignal,
-  setHandler,
-  startChild,
-} from '../../src/workflow';
+import {condition, setHandler, startChild} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -43,7 +38,7 @@ describe('cancelling a detached child', () => {
         await wait(30);
         return 'cancelled it';
       })
-      .start('parent', [], {workflowId: 'p-1'});
+      .start('parent', undefined, {workflowId: 'p-1'});
     await wait(200);
 
     const history = (await store.get('p-1'))?.history ?? [];
@@ -57,7 +52,7 @@ describe('cancelling a detached child', () => {
   });
 
   it('reaches the child when the cancel is issued with history still unconsumed', async () => {
-    const ping = defineSignal('ping');
+    const ping = 'ping';
     const store = new MemoryHistoryStore();
     const rt = createLocalRuntime({historyStore: store})
       .registerWorkflow('child', async () => {
@@ -73,7 +68,7 @@ describe('cancelling a detached child', () => {
 
     // The signal lands before the first task is polled, so that task carries a
     // history of `[signal]` and the cancel is issued before any of it is applied.
-    const handle = rt.start('parent', [], {workflowId: 'p-2'});
+    const handle = rt.start('parent', undefined, {workflowId: 'p-2'});
     await handle.signal('ping', 'early');
     await wait(200);
 

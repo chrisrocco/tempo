@@ -10,7 +10,6 @@ import {
   CancelledFailure,
   continueAsNew,
   createContext,
-  defineSignal,
   drainMicrotasks,
   executeChild,
   createActivityProxy,
@@ -81,6 +80,25 @@ describe('core primitives — command payloads', () => {
     });
 
     expect(ctx.commands[0]).toEqual({type: 'startTimer', ms: 250, seq: 0});
+  });
+
+  /**
+   * A duration string is parsed before the command is minted, so the wire and
+   * history carry only the number — a replay of this command is
+   * indistinguishable from a replay of `sleep(1_800_000)`.
+   */
+  it('parses a duration string into the same numeric timer command', () => {
+    const ctx = createContext([], []);
+
+    als.run(ctx, () => {
+      void sleep('30 minutes');
+    });
+
+    expect(ctx.commands[0]).toEqual({
+      type: 'startTimer',
+      ms: 1_800_000,
+      seq: 0,
+    });
   });
 
   /**
@@ -158,7 +176,7 @@ describe('core primitives — signalling another workflow', () => {
     const ctx = createContext([], []);
 
     als.run(ctx, () => {
-      signalWorkflow('parent-1', defineSignal('comment'), {id: 7});
+      signalWorkflow('parent-1', 'comment', {id: 7});
     });
 
     expect(ctx.commands[0]).toEqual({
@@ -179,7 +197,7 @@ describe('core primitives — signalling another workflow', () => {
     const ctx = createContext([], []);
 
     als.run(ctx, () => {
-      signalWorkflow('parent-1', defineSignal('comment'));
+      signalWorkflow('parent-1', 'comment');
       void runActivity('after');
     });
 
@@ -210,7 +228,7 @@ describe('core primitives — signalling another workflow', () => {
     );
 
     als.run(ctx, () => {
-      signalWorkflow('parent-1', defineSignal('comment'), {id: 7});
+      signalWorkflow('parent-1', 'comment', {id: 7});
     });
 
     expect(ctx.commands).toEqual([]);
@@ -222,7 +240,7 @@ describe('core primitives — signalling another workflow', () => {
     ctx.cancelled = true;
 
     als.run(ctx, () => {
-      signalWorkflow('parent-1', defineSignal('comment'));
+      signalWorkflow('parent-1', 'comment');
     });
 
     expect(ctx.commands).toEqual([]);
@@ -275,7 +293,7 @@ describe('core primitives — continueAsNew', () => {
 
     expect(ctx.commands[0]).toEqual({
       type: 'continueAsNew',
-      args: ['carried'],
+      props: 'carried',
       seq: 0,
     });
     expect(reachedAfter).toBeFalse();

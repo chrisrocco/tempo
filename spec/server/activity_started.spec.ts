@@ -52,7 +52,7 @@ describe('activityStarted', () => {
       })
       .registerWorkflow('w', async () => runActivity<string>('slow'));
 
-    const handle = rt.start('w', [], {workflowId: 'inflight-1'});
+    const handle = rt.start('w', undefined, {workflowId: 'inflight-1'});
     await wait(120);
 
     // The whole point of writing it at pickup: the attempt is still running, and
@@ -80,14 +80,14 @@ describe('activityStarted', () => {
       })
       .registerWorkflow('w', async () => runActivity<string>('work'));
 
-    await rt.start('w', [], {workflowId: 'span-1'}).result();
+    await rt.start('w', undefined, {workflowId: 'span-1'}).result();
 
     const history = (await store.get('span-1'))!.history;
     const at = (type: string): number =>
       history.find((e) => e.type === type)!.ts!;
 
-    // Three points now, where there used to be two — so queue time and execution
-    // time are separately measurable rather than summed into one bar.
+    // Three points rather than two, so queue time and execution time are
+    // separately measurable rather than summed into one bar.
     expect(at('activityStarted')).toBeGreaterThanOrEqual(
       at('activityScheduled'),
     );
@@ -119,7 +119,7 @@ describe('activityStarted', () => {
         .registerActivity('flaky', flaky)
         .registerWorkflow('w', async () => act.flaky());
 
-      await rt.start('w', [], {workflowId: 'retry-1'}).result();
+      await rt.start('w', undefined, {workflowId: 'retry-1'}).result();
 
       const started = startedEvents(await store.get('retry-1'));
       expect(started.length).toBe(3);

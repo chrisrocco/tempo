@@ -13,13 +13,13 @@
 
 import {createLocalRuntime} from '../../src';
 import {MemoryHistoryStore} from '../../src/server';
-import {condition, defineSignal, setHandler} from '../../src/workflow';
+import {condition, setHandler} from '../../src/workflow';
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-const go = defineSignal('go');
+const go = 'go';
 
 describe('a workflow parked on a condition', () => {
   it('reports the condition it is waiting on', async () => {
@@ -33,7 +33,7 @@ describe('a workflow parked on a condition', () => {
         await condition(() => ready);
         return 'went';
       })
-      .start('waiter', [], {workflowId: 'p-1'});
+      .start('waiter', undefined, {workflowId: 'p-1'});
     await wait(150);
 
     const rec = await store.get('p-1');
@@ -49,7 +49,7 @@ describe('a workflow parked on a condition', () => {
         await condition(() => false);
         return 'never';
       })
-      .start('waiter', [], {workflowId: 'p-2'});
+      .start('waiter', undefined, {workflowId: 'p-2'});
     await wait(150);
 
     const site = (await store.get('p-2'))?.parked?.[0]?.site;
@@ -72,7 +72,7 @@ describe('a workflow parked on a condition', () => {
         await waitForIt();
         return 'never';
       })
-      .start('nested', [], {workflowId: 'p-6'});
+      .start('nested', undefined, {workflowId: 'p-6'});
     await wait(150);
 
     const site = (await store.get('p-6'))!.parked![0]!.site!;
@@ -99,7 +99,7 @@ describe('a workflow parked on a condition', () => {
         return 'went';
       },
     );
-    const handle = rt.start<string>('waiter', [], {workflowId: 'p-3'});
+    const handle = rt.start<string>('waiter', undefined, {workflowId: 'p-3'});
     await wait(150);
     expect((await store.get('p-3'))?.parked?.length).toBe(1);
 
@@ -117,7 +117,7 @@ describe('a workflow parked on a condition', () => {
       async () => 'done',
     );
     await expectAsync(
-      rt.start<string>('plain', [], {workflowId: 'p-4'}).result(),
+      rt.start<string>('plain', undefined, {workflowId: 'p-4'}).result(),
     ).toBeResolvedTo('done');
 
     expect((await store.get('p-4'))?.parked ?? []).toEqual([]);
@@ -130,7 +130,7 @@ describe('a workflow parked on a condition', () => {
         await Promise.all([condition(() => false), condition(() => false)]);
         return 'never';
       })
-      .start('two', [], {workflowId: 'p-5'});
+      .start('two', undefined, {workflowId: 'p-5'});
     await wait(150);
 
     const parked = (await store.get('p-5'))?.parked ?? [];
@@ -156,7 +156,7 @@ describe('capturing a park site — what it must not do', () => {
         await condition(() => ready);
         return 'went';
       });
-    const handle = rt.start<string>('mixed', [], {workflowId: 'q-1'});
+    const handle = rt.start<string>('mixed', undefined, {workflowId: 'q-1'});
     await wait(150);
     handle.signal('go');
     await expectAsync(handle.result()).toBeResolvedTo('went');
@@ -186,7 +186,7 @@ describe('capturing a park site — what it must not do', () => {
         await condition(() => false);
         return 'never';
       })
-      .start('waiter', [], {workflowId: 'q-2'});
+      .start('waiter', undefined, {workflowId: 'q-2'});
     await wait(150);
 
     expect(Error.stackTraceLimit).toBe(before);
@@ -204,9 +204,102 @@ describe('capturing a park site — what it must not do', () => {
       },
     );
     await expectAsync(
-      rt.start<string>('immediate', [], {workflowId: 'q-3'}).result(),
+      rt.start<string>('immediate', undefined, {workflowId: 'q-3'}).result(),
     ).toBeResolvedTo('straight through');
 
     expect((await store.get('q-3'))?.parked ?? []).toEqual([]);
+  });
+});
+
+describe('declaring what a park is waiting for', () => {
+  it('reports the awaiting declared at the call, verbatim', async () => {
+    // `site` says which line; `awaiting` says what would release it — the half
+    // a dashboard needs before it can offer to.
+    const store = new MemoryHistoryStore();
+    createLocalRuntime({historyStore: store})
+      .registerWorkflow('gate', async () => {
+        await condition(() => false, {
+          awaiting: {kind: 'approval', signal: 'approve', detail: 'PO-123'},
+        });
+        return 'never';
+      })
+      .start('gate', undefined, {workflowId: 'aw-1'});
+    await wait(150);
+
+    const parked = (await store.get('aw-1'))?.parked ?? [];
+    expect(parked.length).toBe(1);
+    // Opaque round-trip: the engine stores what was declared and adds nothing.
+    expect(parked[0]?.awaiting).toEqual({
+      kind: 'approval',
+      signal: 'approve',
+      detail: 'PO-123',
+    });
+    // Declaring an awaiting does not displace the site — they answer different
+    // questions and both survive.
+    expect(parked[0]?.site).toContain('parked_conditions.spec');
+  });
+
+  it('reports no awaiting for a condition that declared none', async () => {
+    // Absent, not null or {}: a reader must be able to tell "said nothing"
+    // from "said something empty".
+    const store = new MemoryHistoryStore();
+    createLocalRuntime({historyStore: store})
+      .registerWorkflow('plainWait', async () => {
+        await condition(() => false);
+        return 'never';
+      })
+      .start('plainWait', undefined, {workflowId: 'aw-2'});
+    await wait(150);
+
+    const parked = (await store.get('aw-2'))?.parked ?? [];
+    expect(parked.length).toBe(1);
+    expect('awaiting' in parked[0]!).toBe(false);
+  });
+
+  it('forgets the awaiting when the condition unparks', async () => {
+    // Rides the parked state's wholesale replacement: an answered wait is no
+    // longer advertised.
+    const store = new MemoryHistoryStore();
+    const rt = createLocalRuntime({historyStore: store}).registerWorkflow(
+      'gate',
+      async () => {
+        let ready = false;
+        setHandler(go, () => {
+          ready = true;
+        });
+        await condition(() => ready, {awaiting: {kind: 'gate'}});
+        return 'went';
+      },
+    );
+    const handle = rt.start<string>('gate', undefined, {workflowId: 'aw-3'});
+    await wait(150);
+    expect((await store.get('aw-3'))?.parked?.[0]?.awaiting).toEqual({
+      kind: 'gate',
+    });
+
+    handle.signal('go');
+    await expectAsync(handle.result()).toBeResolvedTo('went');
+
+    expect((await store.get('aw-3'))?.parked ?? []).toEqual([]);
+  });
+
+  it('refuses an awaiting over the cap, as a task failure', async () => {
+    // The same seam and severity as the carryover cap: retried rather than
+    // fatal, so shipping a smaller description recovers the execution.
+    const store = new MemoryHistoryStore();
+    createLocalRuntime({historyStore: store})
+      .registerWorkflow('bloated', async () => {
+        await condition(() => false, {awaiting: {blob: 'x'.repeat(5 * 1024)}});
+        return 'never';
+      })
+      .start('bloated', undefined, {workflowId: 'aw-4'});
+    await wait(150);
+
+    const rec = await store.get('aw-4');
+    // Still running — a misdeclared wait is an authoring mistake, not a
+    // workflow outcome — but loudly: the task failed and nothing was stored.
+    expect(rec?.status).toBe('running');
+    expect(rec?.taskFailures).toBeGreaterThan(0);
+    expect(rec?.parked ?? []).toEqual([]);
   });
 });

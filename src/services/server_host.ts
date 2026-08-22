@@ -26,6 +26,7 @@ import type {
   QueueWorkers,
   WorkflowReportRequest,
   WorkflowSummary,
+  ServerEndpoint,
   ServerHealth,
   StartResult,
   StartWorkflowOptions,
@@ -42,9 +43,11 @@ import {
   MemoryWorkflowTaskQueue,
   createServerCore,
   describeExecution,
+  expiredExecutions,
   groupExecutions,
   queryExecutions,
   silentLogger,
+  trailingIdSuffix,
   type ExecutionParent,
   type ExecutionRecord,
   type HistoryStore,
@@ -65,13 +68,17 @@ function errorMessage(e: unknown): string {
  * that could disagree with the executions themselves. Ids the *client* supplied
  * may also end in `-<n>` and will be counted; overshooting costs nothing, while
  * undershooting collides.
+ *
+ * Retention carved one exception out of that argument: a swept id is a
+ * constraint the store no longer lists, so `resume` also seeds past the store's
+ * `highestDeletedSuffix` — the one number `delete` keeps durably for exactly
+ * this read. Without it, a restart after a sweep would mint a second
+ * `greeter-9` that every log line and bookmark conflates with the first.
  */
 function highestGeneratedSuffix(records: {workflowId: string}[]): number {
   let highest = 0;
-  for (const {workflowId} of records) {
-    const match = /-(\d+)$/.exec(workflowId);
-    if (match) highest = Math.max(highest, Number(match[1]));
-  }
+  for (const {workflowId} of records)
+    highest = Math.max(highest, trailingIdSuffix(workflowId));
   return highest;
 }
 
@@ -85,7 +92,7 @@ export interface ServerHost {
    */
   start(
     name: string,
-    args?: unknown[],
+    props?: unknown,
     opts?: StartWorkflowOptions,
   ): Promise<StartResult>;
   signal(
@@ -114,7 +121,7 @@ export interface ServerHost {
   health(): ServerHealth;
   /** Which task queues are being polled, and when each was last asked. */
   listQueues(): Promise<QueueWorkers[]>;
-  /** Every workflow any worker has reported, deduped by name. */
+  /** Every workflow the live fleet reports, deduped by name. See `WorkflowService`. */
   listWorkflows(): Promise<WorkflowSummary[]>;
   /** Record what a worker says it has registered. */
   reportWorkflows(report: WorkflowReportRequest): Promise<void>;
@@ -130,7 +137,7 @@ export interface ServerHost {
     request?: PollRequest,
   ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
-  heartbeatActivityTask(token: TaskToken): Promise<void>;
+  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
   /** Re-drive persisted executions after a restart. */
   resume(): Promise<void>;
   /** Stop background timers so the process can exit. */
@@ -142,8 +149,67 @@ export interface ServerHostOptions {
   workflowLeaseMs?: number;
   /** Lease timeout for activity tasks (ms). Default 30s. A short value forces redelivery. */
   activityLeaseMs?: number;
+  /**
+   * Start-to-close deadline for activities that configured no deadline of their
+   * own. Default 10 minutes — see `ServerCoreDeps.defaultStartToCloseTimeoutMs`
+   * for the policy and the opt-outs (`startToCloseTimeoutMs: 0`, heartbeats).
+   */
+  defaultStartToCloseTimeoutMs?: number;
+  /**
+   * How long a closed execution is kept before the retention sweep deletes it —
+   * record, history, and outcome. **Unset means keep forever**, which is the
+   * only correct default: how long a result stays claimable is a contract with
+   * this deployment's clients, and it should be stated at the launch site
+   * rather than defaulted invisibly. `--retain-closed-for-days` (the operator's
+   * unit; converted once at the entrypoint) overrides via
+   * `startServer`.
+   *
+   * Setting it changes two documented behaviors, both deliberately and both
+   * only after the window:
+   *
+   * - **A result is claimable only within retention.** `getOutcome` reads a
+   *   missing record as "not created yet" (see `getOutcome`), so a client that
+   *   first polls for a result after the execution was swept waits forever.
+   *   Pick a window comfortably longer than the longest a caller waits before
+   *   collecting.
+   * - **A `workflowId` claim lasts only as long as the record.** Starting under
+   *   a swept id creates a fresh execution where an unswept one returns the
+   *   original — "one workflow per order" becomes "one per order per window". See
+   *   `StartWorkflowOptions.workflowId`.
+   *
+   * Running executions are never swept, however old, and a settled child is
+   * held past the window while a running parent has yet to consume its outcome
+   * — the recovery in `resume()` needs the child's record to synthesize it.
+   * See `expiredExecutions`, which is the whole of the eligibility rule.
+   */
+  retainClosedForMs?: number;
+  /**
+   * How often the retention sweep runs (ms). Default one minute — the scan is
+   * over the in-memory cache and is cheap next to any plausible window.
+   * Injectable so a spec exercising retention can use a small one, the same
+   * reason `continueAsNewSuggestThreshold` is. Ignored when `retainClosedForMs`
+   * is unset: no window, no sweep, no timer.
+   */
+  retentionSweepIntervalMs?: number;
   /** Where lifecycle events go. Defaults to silence; `bin/server-main` supplies a JSON logger. */
   log?: Logger;
+  /**
+   * Where the transport in front of this host is bound, for `health()` to
+   * report. See `ServerEndpoint`.
+   *
+   * **A function, because of an ordering this tier cannot escape.** The host is
+   * built before anything binds — it has to be, since `resume()` re-drives
+   * persisted executions *before* the port opens, so that nothing observes a
+   * server listening and not yet remembering what it was doing. There is no port
+   * to hand it at construction, and a value passed here could only ever be the
+   * one the caller asked for rather than the one it got, which under `--port=0`
+   * is the whole question.
+   *
+   * Returning `undefined` is the honest answer while nothing has bound, and the
+   * permanent one for a host with no transport at all. This host does not listen
+   * on anything itself and will not invent an endpoint for itself.
+   */
+  endpoint?: () => ServerEndpoint | undefined;
 }
 
 export function createServerHost(
@@ -171,8 +237,50 @@ export function createServerHost(
     kickWorkflowWorker: () => {},
     kickActivityWorker: () => {},
     log,
+    defaultStartToCloseTimeoutMs: options.defaultStartToCloseTimeoutMs,
   });
   timerService.recover();
+
+  /**
+   * Delete what `expiredExecutions` allows, one at a time, loudly. Serial
+   * because deletes are I/O on the durable store and a sweep is in no hurry;
+   * logged per execution because a deletion is a fact an operator may go
+   * looking for — "where did my run go" should be answerable from the log.
+   */
+  async function sweepExpired(): Promise<void> {
+    const cutoff = Date.now() - options.retainClosedForMs!;
+    for (const rec of expiredExecutions(await historyStore.list(), cutoff)) {
+      // The in-process half of the id floor — the store keeps the durable half
+      // on `delete` — so a generated id cannot be reissued even before restart.
+      counter = Math.max(counter, trailingIdSuffix(rec.workflowId));
+      await historyStore.delete(rec.workflowId);
+      log('execution.swept', {
+        workflowId: rec.workflowId,
+        name: rec.name,
+        status: rec.status,
+      });
+    }
+  }
+
+  // Unref'd like the reporter's timer: the sweep produces no work and owes
+  // nobody an outcome, so it must not be the reason a process refuses to exit.
+  // A tick that overlaps a still-running sweep is skipped rather than stacked.
+  let sweeping = false;
+  const sweepTimer =
+    options.retainClosedForMs === undefined
+      ? undefined
+      : setInterval(() => {
+          if (sweeping) return;
+          sweeping = true;
+          void sweepExpired()
+            .catch((error: unknown) => {
+              log('execution.sweep_failed', {error: errorMessage(error)});
+            })
+            .finally(() => {
+              sweeping = false;
+            });
+        }, options.retentionSweepIntervalMs ?? 60_000);
+  sweepTimer?.unref?.();
 
   /**
    * Create the execution, or report that the id was already claimed.
@@ -198,7 +306,7 @@ export function createServerHost(
   async function createAndEnqueue(
     workflowId: string,
     name: string,
-    args: unknown[],
+    props: unknown,
     taskQueue: string,
     parent?: ExecutionParent,
   ): Promise<boolean> {
@@ -208,7 +316,7 @@ export function createServerHost(
         name,
         sameRequest:
           existing.name === name &&
-          JSON.stringify(existing.args) === JSON.stringify(args),
+          JSON.stringify(existing.props) === JSON.stringify(props),
       });
       return false;
     };
@@ -217,7 +325,7 @@ export function createServerHost(
     if (existing) return claimed(existing);
 
     try {
-      await historyStore.create(workflowId, name, args, taskQueue, parent);
+      await historyStore.create(workflowId, name, props, taskQueue, parent);
     } catch (error: unknown) {
       const raced = await historyStore.get(workflowId);
       if (!raced) throw error;
@@ -255,12 +363,12 @@ export function createServerHost(
   }
 
   return {
-    async start(name, args = [], opts = {}) {
+    async start(name, props, opts = {}) {
       const workflowId = opts.workflowId ?? `${name}-${++counter}`;
       const created = await createAndEnqueue(
         workflowId,
         name,
-        args,
+        props,
         opts.taskQueue ?? DEFAULT_TASK_QUEUE,
       );
       return {workflowId, created};
@@ -287,7 +395,11 @@ export function createServerHost(
     },
     async getOutcome(workflowId) {
       const rec = await historyStore.get(workflowId);
-      if (!rec) return {status: 'running'}; // not created yet — client keeps polling
+      // Not created yet — client keeps polling. Under retention this reading
+      // has a second face: a swept execution is also "missing", so its result
+      // is claimable only within the window. See
+      // `ServerHostOptions.retainClosedForMs`, which owns that contract.
+      if (!rec) return {status: 'running'};
       return {
         status: rec.status,
         result: rec.result,
@@ -302,7 +414,10 @@ export function createServerHost(
     },
     async describeExecution(workflowId, options) {
       const rec = await historyStore.get(workflowId);
-      return rec && describeExecution(rec, options);
+      return (
+        rec &&
+        describeExecution(rec, options, core.activityCheckpoints(workflowId))
+      );
     },
     async listExecutions(filter) {
       return queryExecutions(await historyStore.list(), filter);
@@ -316,6 +431,11 @@ export function createServerHost(
         ...(historyStore.location === undefined
           ? {}
           : {dataLocation: historyStore.location}),
+        // Spreading `undefined` contributes nothing, which is exactly the shape
+        // wanted for a host nothing has bound: absent fields rather than four
+        // keys holding `undefined`, so `Object.keys` on the reply says what the
+        // server actually knows about itself.
+        ...options.endpoint?.(),
       };
     },
     async listWorkflows() {
@@ -345,20 +465,32 @@ export function createServerHost(
     completeActivityTask(token, result) {
       return core.completeActivityTask(token, result);
     },
-    heartbeatActivityTask(token) {
-      return core.heartbeatActivityTask(token);
+    heartbeatActivityTask(token, checkpoint) {
+      return core.heartbeatActivityTask(token, checkpoint);
     },
     async resume() {
       const records = await historyStore.list();
-      // Seed the id counter past everything already on disk. It restarts at zero
-      // on boot, so without this the next generated id repeats one the previous
-      // boot handed out, and `create` rejects it. Children no longer rely on the
-      // counter (their ids are derived from lineage), but a client that starts a
-      // workflow without naming it still does.
-      counter = Math.max(counter, highestGeneratedSuffix(records));
+      // Seed the id counter past everything already on disk — and past what a
+      // sweep deleted from it, which `list()` can no longer show (see
+      // `highestGeneratedSuffix`). It restarts at zero on boot, so without this
+      // the next generated id repeats one the previous boot handed out, and
+      // `create` rejects it (or, for a swept id, silently reissues it).
+      // Children no longer rely on the counter (their ids are derived from
+      // lineage), but a client that starts a workflow without naming it still
+      // does.
+      counter = Math.max(
+        counter,
+        highestGeneratedSuffix(records),
+        historyStore.highestDeletedSuffix,
+      );
       await core.resumeFromHistory(records);
+      // After the re-drive, deliberately: resume is what appends a settled
+      // child's outcome to a parent that missed it, and sweeping first would
+      // race the very guard `expiredExecutions` keeps for that case.
+      if (options.retainClosedForMs !== undefined) await sweepExpired();
     },
     shutdown() {
+      if (sweepTimer !== undefined) clearInterval(sweepTimer);
       timerService.stop();
       // See `LocalService.shutdown`: workflow timers and retry backoffs live in
       // different places and both are ref'd.

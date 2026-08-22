@@ -182,8 +182,8 @@ describe('core replay — absences that are not divergence', () => {
   });
 
   /**
-   * The exclusion that keeps a *correct* workflow passing, and the one this check
-   * was first written without. `continueAsNewSuggested` is a server-provided input
+   * The exclusion that keeps a *correct* workflow passing.
+   * `continueAsNewSuggested` is a server-provided input
    * that flips partway through a run, so `while (!workflowInfo().continueAsNewSuggested)`
    * legitimately runs fewer iterations on a later task than it ran on an earlier
    * one, leaving completed activities behind that nothing consumes any more.
