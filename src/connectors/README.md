@@ -391,9 +391,12 @@ a connector indistinguishable in style from every existing one. It is written
 to be executable by an agent — each step says what to do and how to know it is
 done — and the consistency rules at the end are requirements, not suggestions.
 **Definition of done: `runLivePlan` returns zero failures, and every rule below
-holds.** Before writing anything, read one existing connector end to end
-(`spec/connectors/support/tracker.ts` and its fixtures/spec are the in-repo
-reference) — new connectors are written by resemblance, not invention.
+holds.** Before writing anything, read one existing connector end to end —
+new connectors are written by resemblance, not invention. The reference is
+[`examples/github/`](examples/github/README.md), a complete real connector in
+exactly the prescribed folder shape, with each of its operations chosen to
+demonstrate one decision from this guide (an honest `unsafe`, both natural
+idempotency stories, a real event-feed trigger).
 
 ### The folder
 
