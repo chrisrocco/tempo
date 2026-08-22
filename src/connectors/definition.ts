@@ -35,11 +35,20 @@ export interface QueryDef<
 
 /**
  * How a command survives the double delivery the engine will eventually
- * produce. `'keyed'` (a derived idempotency key) is designed but deferred —
- * see the RFC — so today a command is either idempotent by shape or honestly
- * unsafe: one attempt, flagged in the catalogue, with a written reason.
+ * produce.
+ *
+ * - `'natural'` — idempotent by shape: the service's own semantics make a
+ *   second delivery a no-op (delegation, convergence, repeatability).
+ * - `'keyed'` — the service accepts an idempotency key, and the definition
+ *   declares how to derive one from the input (`key`). The framework computes
+ *   it and hands it to the handler as its third argument; sending it is the
+ *   handler's job, and the double-fire certification is what proves the
+ *   service honors it. Both deliveries of one recorded command carry the same
+ *   input, so the derived key is identical — that is the whole mechanism.
+ * - `'unsafe'` — no protection exists: one attempt, flagged in the catalogue,
+ *   with a written reason.
  */
-export type Idempotency = 'natural' | 'unsafe';
+export type Idempotency = 'natural' | 'keyed' | 'unsafe';
 
 export interface CommandDef<
   Ctx = unknown,
@@ -53,7 +62,25 @@ export interface CommandDef<
   readonly unsafeBecause?: string;
   readonly input: I;
   readonly output: O;
-  handler(input: Out<I>, ctx: Ctx): Out<O> | Promise<Out<O>>;
+  /**
+   * Required when `idempotency: 'keyed'`; `command()` enforces it. Derives the
+   * idempotency key from the (parsed) input — so the input must carry a
+   * business identity to derive it from (an order id, an externalId). Must be
+   * pure: both deliveries of a retried command parse the same recorded input
+   * and must compute the same key.
+   */
+  key?(input: Out<I>): string;
+  /**
+   * `idempotencyKey` is present exactly when the command is `'keyed'`: the
+   * framework derives it via `key` and the handler's job is to send it (an
+   * `Idempotency-Key` header, a dedupe field — wherever the service accepts
+   * one).
+   */
+  handler(
+    input: Out<I>,
+    ctx: Ctx,
+    idempotencyKey?: string,
+  ): Out<O> | Promise<Out<O>>;
   readonly options?: ActivityOptionsInput;
 }
 
@@ -102,6 +129,11 @@ export function command<Ctx, I extends Schema, O extends Schema>(
   if (def.idempotency === 'unsafe' && !def.unsafeBecause) {
     throw new Error(
       `an 'unsafe' command must say why (unsafeBecause) — it becomes the catalogue flag and the keying backlog`,
+    );
+  }
+  if (def.idempotency === 'keyed' && !def.key) {
+    throw new Error(
+      `a 'keyed' command must declare key(input) — the derived idempotency key is the mechanism, so a keyed command without one is just an unsafe command with better marketing`,
     );
   }
   return {...def, kind: 'command'};
