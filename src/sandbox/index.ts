@@ -36,27 +36,35 @@
  * view honest here rather than empty. Only the wire is different, and the wire
  * is the one thing a dashboard should not be able to tell apart.
  *
- * ## Four Node builtins to alias
+ * ## The five specifiers a browser must alias
  *
  * This entrypoint is **not** on `BROWSER_SAFE_ENTRYPOINTS`, and the claim it
- * cannot make is worth stating plainly rather than hiding. Reaching the engine
- * pulls four builtins, none of them load-bearing in a single-visitor sandbox:
+ * cannot make is worth stating plainly rather than hiding: reaching the engine
+ * pulls a handful of Node builtins. None is load-bearing in a single-visitor
+ * sandbox, and `./sandbox/shims/*` ships a replacement for each — point your
+ * bundler at them rather than writing your own, because one of them has a
+ * correctness constraint that is easy to miss.
  *
- * - **`node:async_hooks`** (`core/context.ts`, `worker/activity_context.ts`) —
- *   carries workflow context across `await`. A shim that keeps one current
- *   store is correct **only while one replay runs at a time**, which is what
- *   the local drain loop does. Shipping that shim into a real worker, where
- *   two executions interleave, silently mixes their contexts.
- * - **`setImmediate`** (`core/microtask_scheduler.ts`) — use a `MessageChannel`
- *   polyfill, not `setTimeout(0)`: `settle` runs once per history event and
- *   timeouts clamp to 4ms, which turns a long replay into a visible stall.
- * - **`node:crypto`** (`worker/workflow_reporter.ts`) — a manifest digest,
- *   compared for equality and nothing else. Any stable hash does.
- * - **`node:os`** (`worker/worker_loops.ts`) — a hostname, for a worker's
- *   display identity.
+ * | specifier | shim | why it is safe |
+ * | --- | --- | --- |
+ * | `node:async_hooks` | `shims/async_hooks` | workflow context across `await`; correct **only while one replay runs at a time** |
+ * | `node:crypto` | `shims/crypto` | a manifest digest, compared for equality and nothing else |
+ * | `node:os` | `shims/os` | a hostname, for a worker's display identity |
+ * | `node:fs` | `shims/fs` | never called — the file-backed store rides in on a barrel |
+ * | `node:path` | `shims/path` | same, and implemented rather than throwing |
  *
- * Nothing here reaches `node:http` or `node:fs`: the history store is in
- * memory, and the transport is a function call.
+ * `setImmediate` is a bare global rather than an import, so there is nothing to
+ * alias: call `installSetImmediate()` from `./sandbox/shims/microtask` before
+ * `createSandbox`. Use that one rather than `setTimeout(…, 0)`, which clamps to
+ * 4ms and turns a long replay into a visible stall.
+ *
+ * The `async_hooks` shim is the one to read before trusting: it keeps a single
+ * current store, which is right while the workflow loop takes one task at a
+ * time (`maxConcurrentTasks` defaults to 1) and silently wrong if two
+ * executions ever interleave. Its own comment carries the argument.
+ *
+ * Nothing here reaches `node:http`: the history store is in memory, and the
+ * transport is a function call.
  */
 
 import {
@@ -64,23 +72,23 @@ import {
   createServerHost,
   dispatch,
   type ServerHost,
-} from './services';
-import {startHarnessOn, type HarnessOptions} from './testing/harness';
+} from '../services';
+import {startHarnessOn, type HarnessOptions} from '../testing/harness';
 import type {
   RemoteWorkflowService,
   RpcRequest,
   ServerEndpoint,
-} from './protocol';
-import type {ScenarioName} from './testing/scenarios';
+} from '../protocol';
+import type {ScenarioName} from '../testing/scenarios';
 
 export {
   describeScenarios,
   SCENARIO_IDS,
   SCENARIO_WORKFLOWS,
   type ScenarioName,
-} from './testing/scenarios';
-export {SCENARIO_QUEUE, UNSERVED_QUEUE} from './testing/harness';
-export type {RpcRequest, RpcResponse} from './protocol';
+} from '../testing/scenarios';
+export {SCENARIO_QUEUE, UNSERVED_QUEUE} from '../testing/harness';
+export type {RpcRequest, RpcResponse} from '../protocol';
 
 /** A running in-process engine, seeded and answering. */
 export interface Sandbox {
