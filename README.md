@@ -285,6 +285,13 @@ Seeding is separable from starting, because seeding is the slow part:
 and fill in behind itself with `sandbox.seed([...])`, naming what it is working
 on through `onScenario`.
 
+That is the bundler's side of it. The dashboard's side — the Worker that hosts
+the engine, the `transport` that reaches it, and why one build serves both a
+sandbox and a deployed server — is in
+[`src/remote_client.ts`](src/remote_client.ts), which is the guide to start from
+if what you are building is a dashboard. The alias table above and the shims it
+points at are documented in full in [`src/sandbox/index.ts`](src/sandbox/index.ts).
+
 What this library gives a deployment is **two entrypoints, one per artifact** —
 each a file whose whole body is one call:
 
@@ -519,7 +526,8 @@ src/
   tempo.ts        ★ WORKER ENTRYPOINT — startWorker()
   server_main.ts  ★ SERVER ENTRYPOINT — startServer()
   remote_client.ts ★ CLIENT ENTRYPOINT — reaching a server from outside it,
-                  from a browser included. Published as `workflow-engine/client`.
+                  from a browser included, and the guide to building a dashboard.
+                  Published as `workflow-engine/client`.
   testing/        ★ TESTING ENTRYPOINT — startScenario(), a real server already
                   in the states a UI has to render
   sandbox/        ★ SANDBOX ENTRYPOINT — createSandbox(), the same harness
@@ -550,6 +558,22 @@ it does not.
 the module that owns each idea. There is no `docs/` tree to drift out of sync.
 [`AGENTS.md`](AGENTS.md) explains that convention and how to structure code so
 it keeps working.
+
+**Every surface you can build on has a guide at its entrypoint**, marked `★` and
+written for someone who will not read the rest of the repo. Start at the one for
+what you are building rather than at the reading order below:
+
+| Building                              | Start at                                                                    |
+| ------------------------------------- | --------------------------------------------------------------------------- |
+| A workflow                            | [`src/workflow.ts`](src/workflow.ts)                                        |
+| An activity                           | [`src/activity.ts`](src/activity.ts)                                        |
+| A dashboard or operator tool          | [`src/remote_client.ts`](src/remote_client.ts)                              |
+| Anything that reads executions        | [`src/protocol/index.ts`](src/protocol/index.ts)                            |
+| A dashboard that hosts its own engine | [`src/sandbox/index.ts`](src/sandbox/index.ts)                              |
+| A connector                           | [`src/connectors/index.ts`](src/connectors/index.ts)                        |
+| Schedules                             | [`src/schedule/index.ts`](src/schedule/index.ts)                            |
+| A server or worker binary             | [`src/server_main.ts`](src/server_main.ts) · [`src/tempo.ts`](src/tempo.ts) |
+| Tests against a real engine           | [`src/testing/index.ts`](src/testing/index.ts)                              |
 
 [`GLOSSARY.md`](GLOSSARY.md) fixes one term per concept. Worth skimming before
 the reading order below, because a few of the distinctions it draws —

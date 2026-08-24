@@ -14,6 +14,12 @@
  * });
  * ```
  *
+ * This module owns the *hosting* half: what a sandbox is, and what a bundler
+ * must be told before one will run. If what you are building is a dashboard,
+ * start at [`src/remote_client.ts`](../remote_client.ts) — the wiring on the
+ * consumer's side, and how one build serves a sandbox and a deployed server
+ * alike, is the guide there.
+ *
  * ## What this is for
  *
  * `startScenario` is the same fixture behind an HTTP port, which is right for a

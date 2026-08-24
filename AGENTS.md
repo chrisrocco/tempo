@@ -120,6 +120,44 @@ others refer to it by path. The determinism boundary is owned by
 `src/workflow.ts`, and `core/` modules point at it. Duplicating a concept across
 three fileoverviews recreates the drift this pattern exists to prevent.
 
+### Every surface someone builds on gets a guide
+
+A path in the `exports` map is a promise that something outside will resolve it
+by name — that is already how [`README.md`](README.md#what-is-contract-and-what-is-not)
+defines the contract. Anything on that list is therefore a surface someone
+builds on, and **its entrypoint carries a guide**: not only what the module is,
+but enough for a consumer who will never read the rest of the repo to build the
+thing the surface exists for.
+
+Mark it with `★` on the first line, which is how the entrypoints are found
+(`grep ★ src/`) and what `spec/architecture.spec.ts` checks — a surface added to
+`exports` without a guide fails there rather than being noticed by whoever gets
+stuck first.
+
+A guide answers the questions a consumer has and a contributor does not:
+
+- **What to import, and what not to.** Which neighbouring paths belong in the
+  same build, and which pull a server into a browser bundle.
+- **Which call answers which question**, including the read they will otherwise
+  omit. `remote_client.ts` says `queues()` because worker liveness is the one
+  thing history cannot report, and a dashboard without it renders a
+  never-polled queue as a healthy pause.
+- **What the surface stores but does not interpret.** `awaiting` is free-form
+  JSON; the conventions live with the helpers that write them, and a consumer
+  reading one is honouring a convention rather than a contract. Say so, or they
+  will treat it as guaranteed.
+- **What it will not do**, with the reason. No auth on the RPC is a topology
+  requirement, not a gap.
+- **How to check their own work against it** — `createSandbox` in a consumer's
+  own suite, so their view models meet real histories rather than fixtures of
+  what its author believed the engine emits.
+
+The usual one-home rule still applies, so a guide **refers rather than
+repeats**. The dashboard guide in `src/remote_client.ts` sends the reader to
+`src/sandbox/index.ts` for the specifiers a bundler must alias, because that is
+the module the aliasing constrains; what it keeps is the half nothing else owns,
+which is how a dashboard wires the two modes behind one build.
+
 ### Decisions, including the ones you didn't take
 
 A decision is documentation with a shape of its own, and the rule above is not
