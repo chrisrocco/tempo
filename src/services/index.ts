@@ -5,6 +5,7 @@
  * distributed server is built from.
  */
 
+export * from './dispatch';
 export * from './local_service';
 export * from './remote_service';
 export * from './rpc_server';

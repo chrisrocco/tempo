@@ -222,6 +222,69 @@ what the engine actually produces — separately, and invisibly. The catalogue i
 closed on purpose: a state it cannot produce is a state no tool should claim to
 render. `src/testing/scenarios.ts` lists them, and the suite runs every one.
 
+### Or run the whole engine in a browser tab
+
+`workflow-engine/sandbox` is the same harness with the socket removed. It builds
+a seeded engine in-process and hands back a `dispatch` that answers an
+`RpcRequest` — the same switch the HTTP server dispatches through, so a UI's
+client code is identical either way.
+
+```ts
+import { createSandbox } from 'workflow-engine/sandbox';
+
+const sandbox = await createSandbox(['bugfix-agent', 'schedules']);
+const detail = await sandbox.dispatch({
+  method: 'describeExecution',
+  workflowId: 'scenario-bugfix-agent',
+  options: {},
+});
+```
+
+The reason to want this is not convenience. The RPC has **no auth**, so a shared
+hosted engine hands anyone who can reach it a terminate button; a sandbox gives
+every visitor a private engine with no port to protect, and "reset it" is a page
+reload. It deploys as static files.
+
+Run it in a **Web Worker**, not on the main thread: the worker loops poll
+continuously, and the message you post is the `RpcRequest` you would otherwise
+have put in a `fetch` body.
+
+Five specifiers need aliasing, and `workflow-engine/sandbox/shims/*` ships a
+replacement for each — use those rather than writing your own, because the
+`async_hooks` one has a correctness constraint that is easy to miss. With Vite:
+
+```ts
+resolve: {
+  alias: [
+    {find: /^node:async_hooks$/, replacement: 'workflow-engine/sandbox/shims/async_hooks'},
+    {find: /^node:crypto$/, replacement: 'workflow-engine/sandbox/shims/crypto'},
+    {find: /^node:os$/, replacement: 'workflow-engine/sandbox/shims/os'},
+    {find: /^node:fs$/, replacement: 'workflow-engine/sandbox/shims/fs'},
+    {find: /^node:path$/, replacement: 'workflow-engine/sandbox/shims/path'},
+  ],
+},
+define: {'process.pid': '1', 'process.env': '{}'},
+```
+
+`setImmediate` is a bare global rather than an import, so it is a call rather
+than an alias — `installSetImmediate()` from
+`workflow-engine/sandbox/shims/microtask`, before `createSandbox`. It uses
+`MessageChannel` deliberately: `setTimeout(…, 0)` clamps to 4ms, `settle()` runs
+once per history event, and a long replay would visibly stall.
+
+**The one constraint worth reading before trusting it.** The `async_hooks` shim
+keeps a single current store, which is correct while exactly one replay runs at
+a time — `maxConcurrentTasks` defaults to 1, so the workflow loop takes one task
+and drives it to quiescence before claiming the next. Raise that and two
+executions will silently read each other's context. It is sound for a
+single-visitor sandbox and wrong for a deployed worker, and it says so where it
+lives.
+
+Seeding is separable from starting, because seeding is the slow part:
+`createSandbox([])` is live in milliseconds, so a page can be interactive first
+and fill in behind itself with `sandbox.seed([...])`, naming what it is working
+on through `onScenario`.
+
 What this library gives a deployment is **two entrypoints, one per artifact** —
 each a file whose whole body is one call:
 
@@ -459,6 +522,8 @@ src/
                   from a browser included. Published as `workflow-engine/client`.
   testing/        ★ TESTING ENTRYPOINT — startScenario(), a real server already
                   in the states a UI has to render
+  sandbox/        ★ SANDBOX ENTRYPOINT — createSandbox(), the same harness
+                  with the socket removed, plus the browser shims it needs
   local_runtime.ts  createLocalRuntime — the single-node wiring seam
   process_flags.ts  how a deployed process reads its own configuration
   activity_registry.ts    what proxyActivities recorded, waiting for a worker

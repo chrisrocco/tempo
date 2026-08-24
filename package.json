@@ -12,7 +12,9 @@
     "./activity": "./src/activity.ts",
     "./schedule": "./src/schedule/index.ts",
     "./schedule/worker": "./src/schedule/worker.ts",
-    "./testing": "./src/testing/index.ts"
+    "./testing": "./src/testing/index.ts",
+    "./sandbox": "./src/sandbox/index.ts",
+    "./sandbox/shims/*": "./src/sandbox/shims/*.ts"
   },
   "scripts": {
     "test": "tsx node_modules/jasmine/bin/jasmine.js --config=spec/support/jasmine.json",
