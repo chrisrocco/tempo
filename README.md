@@ -551,6 +551,22 @@ the module that owns each idea. There is no `docs/` tree to drift out of sync.
 [`AGENTS.md`](AGENTS.md) explains that convention and how to structure code so
 it keeps working.
 
+**Every surface you can build on has a guide at its entrypoint**, marked `★` and
+written for someone who will not read the rest of the repo. Start at the one for
+what you are building rather than at the reading order below:
+
+| Building                              | Start at                                                                    |
+| ------------------------------------- | --------------------------------------------------------------------------- |
+| A workflow                            | [`src/workflow.ts`](src/workflow.ts)                                        |
+| An activity                           | [`src/activity.ts`](src/activity.ts)                                        |
+| A dashboard or operator tool          | [`src/remote_client.ts`](src/remote_client.ts)                              |
+| Anything that reads executions        | [`src/protocol/index.ts`](src/protocol/index.ts)                            |
+| A dashboard that hosts its own engine | [`src/sandbox/index.ts`](src/sandbox/index.ts)                              |
+| A connector                           | [`src/connectors/index.ts`](src/connectors/index.ts)                        |
+| Schedules                             | [`src/schedule/index.ts`](src/schedule/index.ts)                            |
+| A server or worker binary             | [`src/server_main.ts`](src/server_main.ts) · [`src/tempo.ts`](src/tempo.ts) |
+| Tests against a real engine           | [`src/testing/index.ts`](src/testing/index.ts)                              |
+
 [`GLOSSARY.md`](GLOSSARY.md) fixes one term per concept. Worth skimming before
 the reading order below, because a few of the distinctions it draws —
 **execution** against **run**, **marker** against **informational event** — are

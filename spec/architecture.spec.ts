@@ -7,6 +7,8 @@
  * feeds it deliberately broken files.
  */
 
+import {readFileSync} from 'node:fs';
+
 import {checkDependencies, checkRepoDependencies} from '../tools/dependencies';
 import {
   BROWSER_SAFE_ENTRYPOINTS,
@@ -17,7 +19,7 @@ import {
   stripCommentsAndStrings,
   type SourceFile,
 } from '../tools/boundaries';
-import {REPO_ROOT} from './support/repo_root';
+import {REPO_ROOT, repoPath} from './support/repo_root';
 
 // See spec/support/repo_root.ts — fixed to this file, not to the caller's cwd.
 const repoRoot = REPO_ROOT;
@@ -570,5 +572,109 @@ describe('architecture — internal libraries', () => {
         )
         .toBe(true);
     }
+  });
+});
+
+/**
+ * The marker a published entrypoint's guide opens with. It is what makes the
+ * surfaces findable by eye (`grep ★ src/`) as well as by this check.
+ */
+const GUIDE_MARKER = '★';
+
+/** The leading block comment, or '' — a guide that is not first is not a guide. */
+function leadingComment(text: string): string {
+  if (!text.startsWith('/**')) return '';
+  const end = text.indexOf('*/');
+  return end === -1 ? text : text.slice(0, end);
+}
+
+/**
+ * Published subpaths whose entrypoint carries no guide.
+ *
+ * Wildcard patterns are skipped. `./sandbox/shims/*` publishes a family of
+ * replacement modules rather than a surface to build on, and the guide that
+ * governs them is the sandbox entrypoint's — which this does check.
+ *
+ * Pure, so the rule can be run against a surface deliberately published
+ * without one rather than only against the tree that passes.
+ */
+function surfacesMissingGuides(
+  exportsMap: Record<string, string>,
+  files: SourceFile[],
+): string[] {
+  const byPath = new Map(files.map((f) => [f.path, f.text]));
+  const missing: string[] = [];
+  for (const [subpath, target] of Object.entries(exportsMap)) {
+    if (subpath.includes('*')) continue;
+    const filePath = target.replace(/^\.\//, '');
+    const text = byPath.get(filePath);
+    if (text === undefined || !leadingComment(text).includes(GUIDE_MARKER))
+      missing.push(subpath);
+  }
+  return missing;
+}
+
+function publishedExports(): Record<string, string> {
+  const manifest = JSON.parse(
+    readFileSync(repoPath('package.json'), 'utf8'),
+  ) as {exports: Record<string, string>};
+  return manifest.exports;
+}
+
+/**
+ * A path in the `exports` map is something outside resolving it by name, which
+ * makes it a surface someone builds on — and AGENTS.md asks every one of those
+ * to carry a guide at its entrypoint. Checked here because the alternative is
+ * finding out from whoever gets stuck on the surface that has none.
+ */
+describe('architecture — published surfaces', () => {
+  it('gives every published surface a guide at its entrypoint', () => {
+    const missing = surfacesMissingGuides(
+      publishedExports(),
+      readSourceFiles(repoRoot, ['src']),
+    );
+
+    expect(missing)
+      .withContext(
+        `published without a guide: ${missing.join(', ')} — see AGENTS.md, "Every surface someone builds on gets a guide"`,
+      )
+      .toEqual([]);
+  });
+
+  it('publishes a non-trivial number of surfaces, so "clean" means something', () => {
+    const checked = Object.keys(publishedExports()).filter(
+      (subpath) => !subpath.includes('*'),
+    );
+    expect(checked.length).toBeGreaterThan(8);
+  });
+
+  it('fails a surface published without one', () => {
+    const missing = surfacesMissingGuides({'./new': './src/new.ts'}, [
+      file('src/new.ts', `/**\n * @fileoverview\n * A module.\n */`),
+    ]);
+
+    expect(missing).toEqual(['./new']);
+  });
+
+  it('fails a surface whose entrypoint does not exist at all', () => {
+    expect(surfacesMissingGuides({'./gone': './src/gone.ts'}, [])).toEqual([
+      './gone',
+    ]);
+  });
+
+  /**
+   * The marker has to be in the *leading* comment. A `★` further down is a
+   * mention of some other entrypoint — every guide here links to its
+   * neighbours — and counting it would let a surface pass on someone else's.
+   */
+  it('does not accept a marker that appears below the fileoverview', () => {
+    const missing = surfacesMissingGuides({'./new': './src/new.ts'}, [
+      file(
+        'src/new.ts',
+        `/**\n * @fileoverview\n * A module.\n */\n// see ★ CLIENT ENTRYPOINT\n`,
+      ),
+    ]);
+
+    expect(missing).toEqual(['./new']);
   });
 });
