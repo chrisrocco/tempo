@@ -285,6 +285,13 @@ Seeding is separable from starting, because seeding is the slow part:
 and fill in behind itself with `sandbox.seed([...])`, naming what it is working
 on through `onScenario`.
 
+That is the bundler's side of it. The dashboard's side — the Worker that hosts
+the engine, the `transport` that reaches it, and why one build serves both a
+sandbox and a deployed server — is in
+[`src/remote_client.ts`](src/remote_client.ts), which is the guide to start from
+if what you are building is a dashboard. The alias table above and the shims it
+points at are documented in full in [`src/sandbox/index.ts`](src/sandbox/index.ts).
+
 What this library gives a deployment is **two entrypoints, one per artifact** —
 each a file whose whole body is one call:
 
@@ -519,7 +526,8 @@ src/
   tempo.ts        ★ WORKER ENTRYPOINT — startWorker()
   server_main.ts  ★ SERVER ENTRYPOINT — startServer()
   remote_client.ts ★ CLIENT ENTRYPOINT — reaching a server from outside it,
-                  from a browser included. Published as `workflow-engine/client`.
+                  from a browser included, and the guide to building a dashboard.
+                  Published as `workflow-engine/client`.
   testing/        ★ TESTING ENTRYPOINT — startScenario(), a real server already
                   in the states a UI has to render
   sandbox/        ★ SANDBOX ENTRYPOINT — createSandbox(), the same harness
