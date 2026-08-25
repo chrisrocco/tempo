@@ -13,7 +13,7 @@
  *     this expression a promise, is this `await` at module scope — and so it
  *     builds a real TypeScript program.
  * -   This file asks questions about the *shape of the source text*, which today
- *     is one question: how an import is spelled.
+ *     is one question asked two ways: how an import is spelled.
  *
  * The third one is not a variation on the second. A program only sees files
  * some tsconfig included, and `tools/` is in none of them — which is exactly
@@ -22,10 +22,8 @@
  * tree directly (`CHECKED_DIRS`) and stays a pure function of file contents so
  * planted breakage can be tested against it (spec/conventions.spec.ts).
  *
- * One rule, and it used to be four. The other three were the dashboard's — a
- * harness import its specs needed, bracket notation on DOM sinks, and a bundle
- * format that had to agree with the shell's `<script>` tag — and they went with
- * it. What is left applies to every hand-written file here:
+ * Two rules. Both are about how an import is spelled, and both apply to every
+ * hand-written file here:
  *
  * 1. **Namespace imports, never default imports.** `import * as path from
  *    'node:path'`, not `import path from 'node:path'`. A default import of a
@@ -36,6 +34,14 @@
  *    path` while `tools/boundaries.ts` next door imported the default. A
  *    namespace import names what the module actually exports and reads the same
  *    everywhere.
+ *
+ * 2. **No importing this package by its own name.** `../../src/libraries/schema`,
+ *    not `workflow-engine/schema`. A self-reference resolves only under a
+ *    resolver that reads this package's own `exports` map; the build system that
+ *    consumes this repo does not, so one costs that consumer a local patch on
+ *    every sync. It is here rather than in `boundaries.ts` for the same reason
+ *    rule 1 is: `tools/` and `spec/` are in no tsconfig, and the one violation
+ *    this rule has ever had was in `spec/`.
  *
  * The file keeps its plural shape — a violation type with a `rule` field, a
  * dispatch loop, a formatter — because the reach is what makes it worth having,
@@ -50,9 +56,18 @@ import type {SourceFile} from './boundaries';
 export interface ConventionViolation {
   path: string;
   line: number;
-  rule: 'namespace-import';
+  rule: 'namespace-import' | 'self-reference-import';
   message: string;
 }
+
+/**
+ * This package's own name, which nothing in the tree may import itself by.
+ *
+ * Held here rather than read from `package.json` so the checker stays a pure
+ * function of file contents; `spec/conventions.spec.ts` pins it against the
+ * manifest, so a rename cannot leave the rule quietly matching nothing.
+ */
+export const PACKAGE_NAME = 'workflow-engine';
 
 /**
  * Every directory of hand-written source in the repo. Wider than the boundary
@@ -103,6 +118,44 @@ function checkNamespaceImports(
 }
 
 /**
+ * An import of this package by its own published name, in any of the four
+ * spellings that resolve one: `from '…'`, a side-effect `import '…'`, a dynamic
+ * `import('…')`, and `require('…')`.
+ *
+ * Anchored on the importing keyword rather than on the quoted string alone,
+ * because the specifier is not the only place the package name is written —
+ * `describe('workflow-engine/schema — …')` names the surface a spec covers, and
+ * reporting that would make the rule something contributors work around.
+ */
+const SELF_REFERENCE = new RegExp(
+  String.raw`(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"]` +
+    PACKAGE_NAME +
+    String.raw`(?:\/[^'"]*)?['"]`,
+);
+
+/**
+ * Reads the *stripped* text rather than the blanked text the rule above uses:
+ * this one is about the specifier itself, and `stripCommentsAndStrings` keeps
+ * string contents for exactly that reason.
+ */
+function checkSelfReferenceImports(
+  file: SourceFile,
+  strippedText: string,
+): ConventionViolation[] {
+  const violations: ConventionViolation[] = [];
+  strippedText.split('\n').forEach((lineText, index) => {
+    if (!SELF_REFERENCE.test(lineText)) return;
+    violations.push({
+      path: file.path,
+      line: index + 1,
+      rule: 'self-reference-import',
+      message: `imports '${PACKAGE_NAME}' by package name — use a relative path. A package self-reference resolves only under a resolver that reads this package's own \`exports\` map, and the build system downstream does not, so one costs that consumer a patch on every sync. See the note in tsconfig.json`,
+    });
+  });
+  return violations;
+}
+
+/**
  * Check every supplied file against the conventions. Pure: it takes file
  * contents and returns violations, so the rules can be tested against
  * deliberately planted breakage rather than only against code that passes.
@@ -110,8 +163,11 @@ function checkNamespaceImports(
 export function checkConventions(files: SourceFile[]): ConventionViolation[] {
   const violations: ConventionViolation[] = [];
   for (const file of files) {
-    const blanked = blankStringBodies(stripCommentsAndStrings(file.text));
-    violations.push(...checkNamespaceImports(file, blanked));
+    const stripped = stripCommentsAndStrings(file.text);
+    violations.push(
+      ...checkNamespaceImports(file, blankStringBodies(stripped)),
+      ...checkSelfReferenceImports(file, stripped),
+    );
   }
   return violations;
 }

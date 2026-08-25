@@ -648,6 +648,49 @@ describe('architecture — published surfaces', () => {
     expect(checked.length).toBeGreaterThan(8);
   });
 
+  /**
+   * A subpath is only as good as the file behind it, and nothing else in the
+   * suite looks: every spec imports `../../src/...` by relative path, so a
+   * target renamed on one side of a move stays green here and is total for the
+   * consumer resolving it by name.
+   *
+   * Read from the tree rather than resolved by the module loader. Importing
+   * `workflow-engine/schema` to prove the same thing is a package
+   * self-reference, which the build system consuming this repo does not resolve
+   * — see the note in `tsconfig.json`. This asks the question that matters
+   * without depending on whose resolver is asking.
+   */
+  it('points every published subpath at a file that exists', () => {
+    const present = new Set(
+      readSourceFiles(repoRoot, ['src']).map((f) => f.path),
+    );
+    const dangling = Object.entries(publishedExports())
+      .filter(([subpath]) => !subpath.includes('*'))
+      .filter(([, target]) => !present.has(target.replace(/^\.\//, '')))
+      .map(([subpath, target]) => `${subpath} -> ${target}`);
+
+    expect(dangling)
+      .withContext(`published subpaths resolving to nothing: ${dangling}`)
+      .toEqual([]);
+  });
+
+  /**
+   * The wildcard the check above has to skip. It cannot be resolved to one
+   * file, so the thing to hold is that the directory it fans out over is really
+   * there — otherwise `./sandbox/shims/*` could name nothing at all and no test
+   * in this file would notice.
+   */
+  it('backs its one wildcard subpath with a directory that has files in it', () => {
+    const shims = readSourceFiles(repoRoot, ['src']).filter((f) =>
+      f.path.startsWith('src/sandbox/shims/'),
+    );
+
+    expect(publishedExports()['./sandbox/shims/*']).toBe(
+      './src/sandbox/shims/*.ts',
+    );
+    expect(shims.length).toBeGreaterThan(0);
+  });
+
   it('fails a surface published without one', () => {
     const missing = surfacesMissingGuides({'./new': './src/new.ts'}, [
       file('src/new.ts', `/**\n * @fileoverview\n * A module.\n */`),
