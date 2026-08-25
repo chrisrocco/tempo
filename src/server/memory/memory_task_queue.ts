@@ -72,7 +72,15 @@ export class MemoryTaskQueue implements TaskQueue {
     this.leases.ack(token); // expired token → no-op (task already redelivered)
   }
 
-  renew(token: TaskToken): boolean {
-    return this.leases.renew(token, this.leaseMs);
+  /**
+   * `leaseMs` is a request for a longer hold, never a shorter one: this queue's
+   * own default is the floor, so a caller asking for less than it changes
+   * nothing. See the port for why a caller asks at all.
+   */
+  renew(token: TaskToken, leaseMs?: number): boolean {
+    return this.leases.renew(
+      token,
+      leaseMs === undefined ? undefined : Math.max(this.leaseMs, leaseMs),
+    );
   }
 }

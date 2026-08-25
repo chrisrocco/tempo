@@ -53,6 +53,13 @@ const als = new AsyncLocalStorage<ActivityContext>();
  * Fraction of the heartbeat timeout to wait between sends. Two beats per timeout
  * window: frequent enough that one dropped call does not trip the deadline, rare
  * enough that a chatty activity is not a load source.
+ *
+ * Deliberately measured against the *timeout* and nothing else. The worker does
+ * not know the server's activity lease and must not have to: a timeout longer
+ * than twice that lease would otherwise leave gaps between beats that no lease
+ * survives, which is a coupling this side cannot see and could only guess at.
+ * The server resolves it instead, by holding a heartbeating attempt's lease
+ * past its deadline — `HEARTBEAT_LEASE_FACTOR` in `server/server_core`.
  */
 const THROTTLE_FRACTION = 0.5;
 /** Used when the activity heartbeats but declared no timeout to be judged against. */

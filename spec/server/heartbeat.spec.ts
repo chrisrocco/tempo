@@ -12,6 +12,11 @@
  */
 
 import type {ActivityOptions} from '../../src';
+import type {TaskToken} from '../../src/protocol';
+import {
+  heartbeat,
+  withActivityContext,
+} from '../../src/worker/activity_context';
 import {
   MemoryHistoryStore,
   MemoryTaskQueue,
@@ -358,5 +363,92 @@ describe('a checkpoint superseded by redelivery', () => {
     const terminal = await terminalEvents(historyStore);
     expect(terminal.length).toBe(1);
     expect(terminal[0].type).toBe('activityCompleted');
+  });
+});
+
+/**
+ * The composition, rather than either half of it.
+ *
+ * Every spec above calls `core.heartbeatActivityTask` directly, which is not how
+ * a beat reaches the server: `heartbeat()` goes through `withActivityContext`,
+ * which throttles sends to half the heartbeat timeout. A generous timeout
+ * therefore means a long *silence* between the beats that actually arrive — and
+ * the first spec in this file, "holds its claim past the lease", asserts exactly
+ * the case where that silence outlasts the lease. It passed anyway, because
+ * calling the core directly skips the throttle.
+ *
+ * So each half was proved and the seam between them was not: an author who set a
+ * heartbeat timeout longer than twice the lease had their activity redelivered
+ * and run a second time, concurrently, while the first was still working. These
+ * drive the path a deployed activity actually takes.
+ */
+describe('an activity heartbeating through the worker', () => {
+  /** One attempt, beating on every pass of its own loop the way busy work does. */
+  async function beatWhileWorking(
+    core: ServerCore,
+    token: TaskToken,
+    heartbeatTimeoutMs: number,
+    forMs: number,
+  ): Promise<void> {
+    await withActivityContext(
+      () => void core.heartbeatActivityTask(token),
+      heartbeatTimeoutMs,
+      async () => {
+        const until = Date.now() + forMs;
+        while (Date.now() < until) {
+          heartbeat();
+          await wait(5);
+        }
+      },
+    );
+  }
+
+  it('holds its claim when its heartbeat timeout is many times the lease', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await beatWhileWorking(core, task!.token, 200, 250);
+
+    expect(await core.pollActivityTask()).toBeUndefined(); // never redelivered
+    expect(await terminalEvents(historyStore)).toEqual([]); // and never failed
+  });
+
+  it('completes normally after outliving several lease periods', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await beatWhileWorking(core, task!.token, 200, 250);
+    await core.completeActivityTask(task!.token, {ok: true, result: 'rows'});
+
+    const terminal = await terminalEvents(historyStore);
+    expect(terminal.length).toBe(1);
+    expect(terminal[0].type).toBe('activityCompleted');
+  });
+
+  /**
+   * The stretched lease must not become what reaps a dead worker — that would
+   * trade a duplicate run for a slower recovery, which is the trade heartbeating
+   * exists to avoid.
+   */
+  it('is still abandoned for silence on its own deadline, not on the lease', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 60};
+    const {core, activityTaskQueue, historyStore} = coreWith(40);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token); // one beat, then the worker dies
+    await wait(120);
+
+    const terminal = await terminalEvents(historyStore);
+    expect(terminal.length).toBe(1);
+    expect(terminal[0].type).toBe('activityFailed');
+    expect(await core.pollActivityTask()).toBeUndefined(); // abandoned, not redelivered
   });
 });
