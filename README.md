@@ -508,8 +508,9 @@ src/
                   nothing, knows nothing about the engine, and has its removal
                   surface pinned by a seam spec. Location is the declaration.
     walltime/       Duration strings and wall-clock rules.
-    schema/         The validator port, the first-party `t` builder,
-                    structural JSON Schema, strict conformance.
+    schema/         ★ SCHEMA ENTRYPOINT — the `t` builder, JSON Schema
+                    rendering, strict conformance. Published on its own as
+                    `workflow-engine/schema`; reusable with none of the engine.
   schedule/       Schedules: the scheduler workflow, its client, and the
                   when-does-this-fire arithmetic (client and worker halves are
                   separate entrypoints on purpose — see schedule/index.ts).
@@ -571,6 +572,7 @@ what you are building rather than at the reading order below:
 | Anything that reads executions        | [`src/protocol/index.ts`](src/protocol/index.ts)                            |
 | A dashboard that hosts its own engine | [`src/sandbox/index.ts`](src/sandbox/index.ts)                              |
 | A connector                           | [`src/connectors/index.ts`](src/connectors/index.ts)                        |
+| Anything needing schemas              | [`src/libraries/schema/index.ts`](src/libraries/schema/index.ts)            |
 | Schedules                             | [`src/schedule/index.ts`](src/schedule/index.ts)                            |
 | A server or worker binary             | [`src/server_main.ts`](src/server_main.ts) · [`src/tempo.ts`](src/tempo.ts) |
 | Tests against a real engine           | [`src/testing/index.ts`](src/testing/index.ts)                              |

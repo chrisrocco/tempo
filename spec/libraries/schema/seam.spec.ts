@@ -2,15 +2,19 @@
  * @fileoverview
  * The `schema/` library's arm's-length contract, held mechanically.
  *
- * Standard Schema validation, structural JSON Schema with vendor emitters, and
- * strict conformance — treated like a third-party dependency the repo happens
- * to host. The checks are the shared internal-library seam
- * (`spec/support/library_seam.ts`); what is specific to schema is that today
- * its entire removal surface is `connectors/`: the library was extracted from
- * there, and deleting connectors and this library together leaves the engine
- * exactly as it was before either existed. A call site appearing *outside*
- * connectors/ is the moment this library starts paying rent for a second
- * consumer — allowed, deliberately, by naming it here.
+ * The `t` builder, JSON Schema rendering and strict conformance — treated like
+ * a third-party dependency the repo happens to host. The checks are the shared
+ * internal-library seam (`spec/support/library_seam.ts`); what is specific to
+ * schema is that its entire *in-repo* removal surface is `connectors/`, where
+ * the library was extracted from. A call site appearing outside connectors/ is
+ * the moment it starts paying rent for a second consumer in this repo —
+ * allowed, deliberately, by naming it here.
+ *
+ * **This no longer means removing it is free.** `workflow-engine/schema` is on
+ * the `exports` map, so it is also resolved by name from outside, where this
+ * spec cannot look: an empty list here would say the library is unused when it
+ * may be load-bearing for a consumer. What it still answers is the narrower
+ * question it was built for — how far the *engine* has come to depend on it.
  */
 
 import {describeLibrarySeam} from '../../support/library_seam';
