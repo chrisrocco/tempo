@@ -343,6 +343,32 @@ export interface ServerCoreDeps {
  */
 export const DEFAULT_START_TO_CLOSE_MS = 600_000;
 
+/**
+ * How far a heartbeating attempt's lease is held past its heartbeat deadline.
+ *
+ * Both clocks restart on the same event — an accepted heartbeat pushes the
+ * deadline out by `heartbeatTimeoutMs` and the lease out by this much — so the
+ * only question is which fires first when an attempt goes quiet. It has to be
+ * the deadline: that path abandons the attempt *and acks the token*, so nothing
+ * is redelivered, while a lease lapsing first hands live work to a second
+ * worker with the first still running.
+ *
+ * Proportional rather than a flat margin so the ordering holds at both ends of
+ * the range this is used across — a 200ms timeout in a spec and a ten-minute
+ * one in front of an agent — without a constant that is either uselessly large
+ * for the first or too tight for the second.
+ *
+ * The cost is bounded and worth naming: a worker that dies silently holds its
+ * task for this long instead of one lease period. It is still reaped by the
+ * heartbeat deadline first, which is the whole point of setting one.
+ */
+const HEARTBEAT_LEASE_FACTOR = 1.5;
+
+/** How long the queue should hold a lease for an attempt with this heartbeat deadline. */
+function heartbeatLeaseMs(heartbeatTimeoutMs: number): number {
+  return Math.ceil(heartbeatTimeoutMs * HEARTBEAT_LEASE_FACTOR);
+}
+
 export interface ServerCore {
   /** Build the task for an execution the worker has claimed (or undefined if gone/terminal). */
   buildWorkflowTask(workflowId: string): Promise<WorkflowTask | undefined>;
@@ -2006,7 +2032,19 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       }
       // The heartbeat clock starts now, so an attempt that never beats at all is
       // caught just as surely as one that stops partway.
-      if (heartbeats) armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
+      if (heartbeats) {
+        armAttemptTimer(task, 'heartbeat', heartbeatTimeoutMs);
+        // And the lease is stretched to outlive that deadline, so the deadline
+        // is the only thing that can end this attempt. Declaring a heartbeat
+        // timeout is the author saying "judge me on silence, not on elapsed
+        // time"; a generic lease expiring underneath would go on judging them
+        // on elapsed time, and redeliver work nobody had given up on. The
+        // duration is sticky, so every accepted beat renews for this long too.
+        activityTaskQueue.renew(
+          task.token,
+          heartbeatLeaseMs(heartbeatTimeoutMs),
+        );
+      }
       heartbeatTasks.set(task.token, task);
       return task;
     }

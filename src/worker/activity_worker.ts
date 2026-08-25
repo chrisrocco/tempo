@@ -10,8 +10,9 @@
  * settings answer genuinely different questions:
  *
  * - **Nothing set (the default).** The lease expires on elapsed time alone and
- *   the task is redelivered, so an activity slower than `ACTIVITY_LEASE_MS` runs
- *   *concurrently* with the attempt already in flight, once per lease period
+ *   the task is redelivered, so an activity slower than the server's activity
+ *   lease (30s by default, `activityLeaseMs`) runs *concurrently* with the
+ *   attempt already in flight, once per lease period
  *   until one finishes. Only the first completion reaches history
  *   (`server_core.reportActivityResult` drops the rest), but every side effect
  *   really happens. This is the at-least-once contract in
@@ -20,11 +21,12 @@
  *   takes the task out of the queue, so no second worker picks it up. Right when
  *   there is a duration past which the work is not worth waiting for.
  * - **`heartbeatTimeoutMs` + `heartbeat()`.** The attempt says it is still
- *   working; each beat renews the lease and resets the deadline. Right for work
- *   whose duration is genuinely unbounded — an agent that may think for ten
- *   minutes — because it decouples "how long this takes" from "is anyone still
- *   doing it". A dead worker is then caught in one heartbeat interval rather
- *   than one lease.
+ *   working; each beat resets the deadline, and the deadline — not the lease —
+ *   is what ends the attempt, because the server holds the lease open past it
+ *   for as long as one is declared. Right for work whose duration is genuinely
+ *   unbounded — an agent that may think for ten minutes — because it decouples
+ *   "how long this takes" from "is anyone still doing it". A dead worker is
+ *   then caught in one heartbeat interval rather than one lease.
  *
  * Under all three, an abandoned worker may still be running and may still
  * report; that late completion is dropped, because the seq already carries a

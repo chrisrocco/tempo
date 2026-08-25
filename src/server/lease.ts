@@ -13,7 +13,7 @@
 export class LeaseTable<T> {
   private readonly leases = new Map<
     string,
-    {item: T; deadline: number; holder?: string}
+    {item: T; deadline: number; timeoutMs: number; holder?: string}
   >();
   private counter = 0;
 
@@ -32,6 +32,7 @@ export class LeaseTable<T> {
     this.leases.set(token, {
       item,
       deadline: Date.now() + timeoutMs,
+      timeoutMs,
       ...(holder === undefined ? {} : {holder}),
     });
     return token;
@@ -59,19 +60,27 @@ export class LeaseTable<T> {
   }
 
   /**
-   * Push a lease's deadline out by `timeoutMs` from now, reporting whether the
-   * lease was still held. This is what a heartbeat buys: an attempt that keeps
-   * proving it is alive keeps its claim, so elapsed time alone stops being
-   * evidence that a worker died.
+   * Push a lease's deadline out, reporting whether the lease was still held.
+   * This is what a heartbeat buys: an attempt that keeps proving it is alive
+   * keeps its claim, so elapsed time alone stops being evidence that a worker
+   * died.
+   *
+   * `timeoutMs` re-sets how long this lease runs for, and is **sticky**: every
+   * later renewal uses it too, until another one replaces it. One-shot would be
+   * the more obvious signature and the wrong one — a lease that has to outlive
+   * a deadline has to keep outliving it, and a caller renewing on a heartbeat
+   * would have to re-supply the duration on every beat or silently fall back to
+   * a shorter one. Omitting it keeps whatever the lease already runs for.
    *
    * An expired token renews nothing and returns false — the task has already
    * gone to someone else, and quietly reviving it here would hand the same work
    * to two workers.
    */
-  renew(token: string, timeoutMs: number): boolean {
+  renew(token: string, timeoutMs?: number): boolean {
     const lease = this.leases.get(token);
     if (!lease) return false;
-    lease.deadline = Date.now() + timeoutMs;
+    if (timeoutMs !== undefined) lease.timeoutMs = timeoutMs;
+    lease.deadline = Date.now() + lease.timeoutMs;
     return true;
   }
 

@@ -63,10 +63,19 @@ export interface ActivityOptions {
    * that is still going. The guarantee is about what the *engine* does: one
    * attempt is dispatched, one outcome is recorded.
    *
-   * Keep it shorter than the server's `ACTIVITY_LEASE_MS` when you can: a
-   * deadline longer than the lease still decides the outcome (its failure
-   * settles the seq, and stale redeliveries are dropped at poll), but every
-   * lease period until it fires redelivers the attempt into a concurrent run.
+   * Keep it shorter than the server's activity lease when you can — 30s by
+   * default, `activityLeaseMs` on the server host. A deadline longer than the
+   * lease still decides the outcome (its failure settles the seq, and stale
+   * redeliveries are dropped at poll), but every lease period until it fires
+   * redelivers the attempt into a concurrent run.
+   *
+   * `heartbeatTimeoutMs` does not have that constraint, and the difference is
+   * not an inconsistency: a heartbeating attempt has a *tighter* reaper than
+   * the lease, so the server can hold its lease open and lose nothing. This
+   * deadline has no such backstop, so stretching the lease to match it would
+   * buy fewer duplicate runs at the price of a dead worker's task sitting
+   * unclaimed for the whole timeout. If the work is long enough for that to
+   * bite, heartbeat instead.
    */
   startToCloseTimeoutMs?: number;
   /**
@@ -81,10 +90,22 @@ export interface ActivityOptions {
    * for as long as it is demonstrably working, and is given up on within seconds
    * of its worker dying.
    *
-   * Each heartbeat also renews the task's lease, which is what stops the queue
-   * redelivering long work to a second worker. Without heartbeats that
-   * redelivery is the only outcome for anything slower than
-   * `ACTIVITY_LEASE_MS` — see `worker/activity_worker`.
+   * **Set it to the longest silence you would tolerate, not to how long the
+   * work takes.** Those come apart for exactly the work this is for: an agent
+   * that thinks for ten minutes should say something every few seconds, so its
+   * timeout is seconds and its duration is minutes.
+   *
+   * Declaring one changes what the server judges the attempt on. The heartbeat
+   * deadline becomes the reaper, and the task's lease is held past it, so the
+   * generic lease can no longer expire underneath a working attempt and
+   * redeliver it — see `HEARTBEAT_LEASE_FACTOR` in `server/server_core`. That
+   * matters because beats are throttled in the worker to half this value
+   * (`worker/activity_context`): a timeout longer than twice the lease means
+   * beats too far apart to have kept a 30-second lease alive on their own, so
+   * the lease is not what keeps it now.
+   *
+   * Without heartbeats, redelivery is the only outcome for anything slower than
+   * the lease — see `worker/activity_worker`.
    */
   heartbeatTimeoutMs?: number;
   /**

@@ -65,6 +65,14 @@ export interface TaskQueue {
    * Extend a lease because the worker holding it says it is still working.
    * Returns false if the lease had already expired, in which case the task is
    * someone else's now and must not be reclaimed.
+   *
+   * `leaseMs` sets how long this one lease runs for, now and on every later
+   * renewal — an implementation may hold it longer than that but never shorter,
+   * so the queue's own default is a floor. It exists because the server, not
+   * this port, knows when an attempt is over: an activity carrying
+   * `heartbeatTimeoutMs` is reaped by that deadline, and a generic lease
+   * expiring underneath it would redeliver work the server has not given up on.
+   * Omitted, the lease keeps whatever duration it already had.
    */
-  renew(token: TaskToken): boolean;
+  renew(token: TaskToken, leaseMs?: number): boolean;
 }
