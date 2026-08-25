@@ -10,6 +10,7 @@
     "./workflow": "./src/workflow.ts",
     "./connectors": "./src/connectors/index.ts",
     "./activity": "./src/activity.ts",
+    "./schema": "./src/libraries/schema/index.ts",
     "./schedule": "./src/schedule/index.ts",
     "./schedule/worker": "./src/schedule/worker.ts",
     "./testing": "./src/testing/index.ts",

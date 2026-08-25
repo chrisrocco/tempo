@@ -157,47 +157,30 @@ Everything is a projection of the `defineConnector` value:
 
 ### Schemas: `t`
 
-Operation inputs, outputs, and events are authored with `t`, the repo's own
-schema library (`src/libraries/schema/`). One definition does three jobs:
-validates at runtime, renders to JSON Schema for the catalogue, and infers the
-TypeScript types the proxy exposes. It is deliberately small — the catalogue
-can only render what JSON Schema can say, so the vocabulary is exactly the
-language of JSON-over-RPC shapes:
+Operation inputs, outputs, and events are authored with `t`, which one
+definition makes do three jobs: validate at runtime, render to JSON Schema for
+the catalogue, and infer the TypeScript types the proxy exposes.
 
-| Builder                  | Type               | Notes                                             |
-| ------------------------ | ------------------ | ------------------------------------------------- |
-| `t.string(opts?)`        | `string`           | `pattern`, `minLength`, `maxLength`, `format`     |
-| `t.number` / `t.integer` | `number`           | `min`, `max`                                      |
-| `t.boolean(opts?)`       | `boolean`          |                                                   |
-| `t.literal(v)`           | that value         | renders as `const`                                |
-| `t.enum('a', 'b', …)`    | `'a' \| 'b'`       | string unions                                     |
-| `t.array(inner)`         | `Inner[]`          |                                                   |
-| `t.object({…})`          | object             | `required` derived from presence; strips unknowns |
-| `t.record(value)`        | `Record<string,…>` | renders as `additionalProperties`                 |
-| `t.union(a, b, …)`       | `A \| B`           | first branch that validates wins                  |
-| `t.nullable(inner)`      | `T \| null`        |                                                   |
-| `t.optional(inner)`      | `T \| undefined`   | optional key; absent stays absent                 |
-| `t.defaulted(inner, v)`  | `T`                | optional for callers, **present for handlers**    |
-| `t.unknown()`            | `unknown`          | accepts anything; renders unconstrained           |
+`t` is not a connectors idea. It is a library of its own —
+[`workflow-engine/schema`](../libraries/schema/index.ts) — published
+separately and knowing nothing about this repo, so **the vocabulary, the three
+behaviours to know before authoring, and what it deliberately cannot express
+are all documented there**. Read that first; this section is only what
+connectors add on top.
 
-Three behaviors worth knowing:
+`workflow-engine/connectors` re-exports the schema surface, so a connector
+author has one import root and does not need both paths.
 
-- **`description` renders.** Every builder takes one, and the dashboard shows
-  it as field help. Documentation is part of the schema, not beside it.
-- **`t.defaulted` fills at parse.** The field is optional on the way in and
-  guaranteed on the way out (`InferInput` vs `InferOutput` carry the
-  difference), so handlers never write `input.limit ?? 20`.
+Two things the connector runtime does with a schema that the library does not:
+
+- **The catalogue is the reason the vocabulary is small.** A dashboard renders
+  a form from the emitted JSON Schema, so an operation's input can only say
+  what JSON Schema can say. That constraint is the library's, but this is where
+  you feel it.
 - **Tolerant in production, strict in certification.** `t.object` strips
-  unknown keys, so workflows survive a service adding a field. The live
-  harness separately checks raw responses for undeclared keys
-  (`strictProblems`), so drift turns a nightly test red instead of surprising
-  a workflow.
-
-Transforms, closure refinements, and coercion are deliberately absent: a shape
-they would express is a shape no form can render. Beneath `t` sits a
-one-interface validator port — invisible to authors, kept as the seam through
-which an external schema vendor could return as an adapter if one ever earns
-its place.
+  unknown keys, so a workflow survives a service adding a field. The live
+  harness separately runs `strictProblems` over raw responses, so that same
+  drift turns a nightly test red instead of surprising a workflow later.
 
 ### Commands and idempotency
 
