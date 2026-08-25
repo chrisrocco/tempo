@@ -1,24 +1,34 @@
 /**
  * @fileoverview
- * The schema library as a *consumer* reaches it: by the published name, not by
- * a relative path into `src/`.
+ * The entrypoint's guide, executed.
  *
- * Every other spec beside this one imports `../../../src/libraries/schema`,
- * which proves the code works and says nothing about whether anyone outside can
- * get to it. `workflow-engine/schema` is resolved through the `exports` map, so
- * a typo there, a moved file, or a subpath quietly dropped in a merge is
- * invisible to the rest of the suite and total for the consumer. This is the
- * only place that resolution is exercised.
+ * `src/libraries/schema/index.ts` opens with a worked example, and a guide is
+ * the one kind of comment a reader acts on without checking — so the example is
+ * this file's tests, line for line. Writing them the first time caught two
+ * things the guide had wrong (`runSchema` returns a result rather than throwing;
+ * `strictProblems` reads the rendered `jsonSchema`, not the builder), which is
+ * the argument for keeping them: an API change that falsifies the guide now
+ * fails here instead of misleading whoever reads it. See AGENTS.md, "There is
+ * no examples/ tree".
  *
- * It doubles as the executable copy of the entrypoint's guide: the example in
- * that fileoverview is this file's first test, so an API change that falsifies
- * the guide fails here rather than misleading whoever reads it. See AGENTS.md,
- * "There is no examples/ tree".
+ * Imported by relative path like every other spec, **not** by the published
+ * name. The self-referencing import this started with proved something real —
+ * that Node's resolver can follow the `exports` map — and cost more than it was
+ * worth: a package self-reference does not resolve in the build system that
+ * consumes this repo (see the note in `tsconfig.json`), so it became a local
+ * patch on every sync. What it actually protected against, a subpath pointing
+ * at a file that is not there, is checked without running anything in
+ * `spec/architecture.spec.ts` under "published surfaces".
  */
 
-import {runSchema, strictProblems, t, type OutOf} from 'workflow-engine/schema';
+import {
+  runSchema,
+  strictProblems,
+  t,
+  type OutOf,
+} from '../../../src/libraries/schema';
 
-describe('workflow-engine/schema — the published surface', () => {
+describe('workflow-engine/schema — the surface its guide describes', () => {
   const Search = t.object({
     query: t.string({description: 'What to search for'}),
     limit: t.defaulted(t.integer({min: 1, max: 100}), 20),

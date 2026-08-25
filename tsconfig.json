@@ -14,12 +14,20 @@
   //     style checker enforces that; entrypoints use `void run().then(…)`.
   //
   // `Node16` rather than plain `CommonJS` because it is the resolver that reads
-  // `exports` maps, and this package publishes one: `.`, `./protocol`,
-  // `./workflow`, `./activity`. Nothing in this tree imports itself by package
-  // name — the dashboard did, and it is gone — so the map is checked here only
-  // in the sense that this is the resolution mode a consumer will be using. The
-  // older resolver cannot see a subpath at all, which would make the published
-  // surface untestable from any angle.
+  // `exports` maps, and this package publishes one: `.`, `./client`,
+  // `./protocol`, `./workflow`, `./schema` and the rest. This is the resolution
+  // mode a consumer will be using, and the older resolver cannot see a subpath
+  // at all.
+  //
+  // **Nothing in this tree may import itself by package name.** Not a style
+  // preference: a package self-reference does not resolve in the build system
+  // that consumes this code, so one costs that consumer a patch on every sync —
+  // which is what happened the one time a spec did it, to prove the `exports`
+  // map resolves. The property worth holding, that every published subpath
+  // names a file that is really there, is checked without a resolver in
+  // `spec/architecture.spec.ts` under "published surfaces". Same trade as
+  // `import.meta` above: this repo bends so the downstream build does not have
+  // to.
   "compilerOptions": {
     "target": "ES2022",
     "module": "Node16",

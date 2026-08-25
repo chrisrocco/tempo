@@ -57,6 +57,13 @@ export class ConnectorError extends Error {
     this.name = 'ConnectorError';
     this.kind = kind;
     this.details = options.details;
+    // keep `instanceof` working when compiled down to ES5-ish targets, as
+    // `core/errors` and `VersionConflictError` already do. Not cosmetic here:
+    // `connector.ts` uses `instanceof` to decide that a failure is
+    // non-retryable and must cross the activity boundary as an envelope, so a
+    // broken prototype chain silently turns every connector error back into a
+    // retryable one and the engine retries what was meant to fail fast.
+    Object.setPrototypeOf(this, ConnectorError.prototype);
   }
 
   get retryable(): boolean {

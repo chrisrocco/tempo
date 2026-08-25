@@ -8,17 +8,20 @@
  *
  * The rules and the reasoning behind each are in
  * [`tools/conventions.ts`](../tools/conventions.ts); this file is where they are
- * pinned down. Three of the four were the dashboard's and left with it, so what
- * remains is the namespace-import rule and the checker's reach.
+ * pinned down — the namespace-import rule, the self-reference rule, and the
+ * checker's reach.
  */
+
+import {readFileSync} from 'node:fs';
 
 import {
   CHECKED_DIRS,
+  PACKAGE_NAME,
   checkConventions,
   readCheckedFiles,
 } from '../tools/conventions';
 import type {SourceFile} from '../tools/boundaries';
-import {REPO_ROOT} from './support/repo_root';
+import {REPO_ROOT, repoPath} from './support/repo_root';
 
 // See spec/support/repo_root.ts — fixed to this file, not to the caller's cwd.
 const repoRoot = REPO_ROOT;
@@ -121,6 +124,92 @@ describe('conventions — namespace imports', () => {
       file(
         'spec/conventions.spec.ts',
         'const planted = `import path from "node:path";`;',
+      ),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+});
+
+/**
+ * The planted specifiers below are interpolated rather than written out, and
+ * that is not fussiness: this rule reads string *contents*, because a specifier
+ * is one — so unlike the namespace rule above, it cannot be fooled into
+ * ignoring a violation quoted inside a test. A literal `from 'workflow-engine'`
+ * anywhere in this file would be a real violation of the rule the file exists
+ * to pin down. Interpolation keeps the name out of the one position the rule
+ * looks at while leaving the planted file exactly what a reader expects.
+ */
+const NAME = PACKAGE_NAME;
+
+describe('conventions — self-referencing imports', () => {
+  it('names the package the rule is about, as the manifest spells it', () => {
+    const manifest = JSON.parse(
+      readFileSync(repoPath('package.json'), 'utf8'),
+    ) as {name: string};
+
+    // Held as a constant for purity's sake, so this is what stops a rename
+    // leaving the rule matching a name nothing is called any more.
+    expect(PACKAGE_NAME).toBe(manifest.name);
+  });
+
+  it('rejects importing this package by its published name', () => {
+    const violations = checkConventions([
+      file(
+        'spec/libraries/schema/guide.spec.ts',
+        `import {t} from '${NAME}/schema';`,
+      ),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('self-reference-import');
+    expect(violations[0].message).toContain('relative path');
+  });
+
+  it('rejects the package root as readily as a subpath', () => {
+    const violations = checkConventions([
+      file('spec/x.spec.ts', `import {startServer} from '${NAME}';`),
+    ]);
+
+    expect(violations.length).toBe(1);
+  });
+
+  /** Four spellings resolve a specifier, and a rule that caught one would be a rule about that one. */
+  it('rejects the side-effect, dynamic, and require spellings too', () => {
+    const violations = checkConventions([
+      file('spec/a.spec.ts', `import '${NAME}/schema';`),
+      file('spec/b.spec.ts', `const m = await import('${NAME}');`),
+      file('spec/c.spec.ts', `const m = require('${NAME}/protocol');`),
+    ]);
+
+    expect(violations.length).toBe(3);
+    expect(violations.every((v) => v.rule === 'self-reference-import')).toBe(
+      true,
+    );
+  });
+
+  it('accepts the relative path it asks for', () => {
+    const violations = checkConventions([
+      file('spec/x.spec.ts', `import {t} from '../../src/libraries/schema';`),
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * The specifier is not the only place the name is written. A `describe` naming
+   * the surface under test reads as prose, and a rule that reported it would be
+   * a rule people rename their tests to get around.
+   */
+  it('does not mistake the package name in prose for an import of it', () => {
+    const violations = checkConventions([
+      file(
+        'spec/libraries/schema/guide.spec.ts',
+        `describe('workflow-engine/schema — the surface its guide describes', () => {});`,
+      ),
+      file(
+        'spec/client/entrypoint.spec.ts',
+        `it('is the file the exports map publishes as workflow-engine/client', () => {});`,
       ),
     ]);
 
