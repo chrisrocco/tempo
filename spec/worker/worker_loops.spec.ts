@@ -152,7 +152,7 @@ describe('worker loops — failure reporting', () => {
 
   it('rate-limits a repeating failure but always reports a new one', () => {
     const lines: string[] = [];
-    const report = createErrorReporter('workflow worker', (l) =>
+    const report = createErrorReporter('workflow worker', 'poll', (l) =>
       lines.push(l.trim()),
     );
 
@@ -165,6 +165,118 @@ describe('worker loops — failure reporting', () => {
       'workflow worker: poll failed (2x): connection refused',
       'workflow worker: poll failed (4x): connection refused',
       'workflow worker: poll failed (6x): socket hang up',
+    ]);
+  });
+});
+
+/**
+ * A heartbeat is fire-and-forget — nothing waits on it, nothing retries it — but
+ * an undelivered one is the invisible half of a very visible failure. The server
+ * abandons the attempt for silence and reports it against the activity, so
+ * without a line here the only evidence names the wrong thing.
+ */
+describe('worker loops — heartbeat delivery', () => {
+  /** One task, then an idle queue; the activity beats `beats` times. */
+  function beatingHarness(
+    beats: number,
+    heartbeatOutcome: (n: number) => void,
+    pollAfter: () => undefined | never = () => undefined,
+  ) {
+    let served = false;
+    let sent = 0;
+    const service = fakeService({
+      pollActivityTask: async () => {
+        if (served) return pollAfter();
+        served = true;
+        return {
+          token: 't0',
+          workflowId: 'wf',
+          seq: 0,
+          name: 'work',
+          args: [],
+          options: {},
+        } satisfies LeasedActivityTask;
+      },
+      heartbeatActivityTask: async () => {
+        heartbeatOutcome((sent += 1));
+      },
+    });
+    const worker: ActivityWorker = {
+      runTask: async (_task: ActivityTask, sendHeartbeat) => {
+        for (let i = 0; i < beats; i++) {
+          sendHeartbeat!();
+          // The send settles on the microtask queue, which drains before any
+          // timer — so one timer tick is enough to make the order deterministic
+          // without racing a duration against it.
+          await wait(1);
+        }
+        return {ok: true, result: undefined};
+      },
+    };
+    return {service, worker};
+  }
+
+  it('reports an undelivered heartbeat, and stops once one lands', async () => {
+    const seen: {message: string; consecutive: number}[] = [];
+    // fail, fail, deliver, fail — the last is a fresh incident, not a 3rd.
+    const {service, worker} = beatingHarness(4, (n) => {
+      if (n !== 3) throw new Error('socket hang up');
+    });
+
+    const loop = runActivityWorker(service, worker, {
+      pollIntervalMs: 1,
+      onError: (error, consecutive) =>
+        seen.push({message: (error as Error).message, consecutive}),
+    });
+
+    try {
+      await until(() => seen.length >= 3);
+    } finally {
+      await loop.stop();
+    }
+
+    expect(seen.map((s) => s.consecutive)).toEqual([1, 2, 1]);
+    expect(seen[0].message).toBe('socket hang up');
+  });
+
+  /**
+   * The counters have to stay apart. The poll count drives the backoff before
+   * the next poll and measures whether the server can hand out work at all;
+   * folding a failed heartbeat into it would slow a worker whose polling is
+   * fine, and misreport how long the outage it is actually in has lasted.
+   */
+  it('counts heartbeat failures apart from poll failures', async () => {
+    const seen: {message: string; consecutive: number}[] = [];
+    const {service, worker} = beatingHarness(
+      2,
+      () => {
+        throw new Error('socket hang up');
+      },
+      () => {
+        throw new Error('connection refused');
+      },
+    );
+
+    const loop = runActivityWorker(service, worker, {
+      pollIntervalMs: 1,
+      errorBackoffMs: 1,
+      maxErrorBackoffMs: 1,
+      onError: (error, consecutive) =>
+        seen.push({message: (error as Error).message, consecutive}),
+    });
+
+    try {
+      await until(() => seen.some((s) => s.message === 'connection refused'));
+    } finally {
+      await loop.stop();
+    }
+
+    // Two beats lost in a row, then a poll failure that starts from 1 rather
+    // than continuing to 3.
+    expect(seen.slice(0, 3)).toEqual([
+      {message: 'socket hang up', consecutive: 1},
+      {message: 'socket hang up', consecutive: 2},
+      {message: 'connection refused', consecutive: 1},
     ]);
   });
 });

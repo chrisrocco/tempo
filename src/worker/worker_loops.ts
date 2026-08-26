@@ -10,6 +10,13 @@
  * makes that fault invisible: a loop that catches everything, retries on the 5ms
  * idle interval and prints nothing leaves a misconfigured worker looking healthy
  * to its supervisor while doing no work and hammering a dead endpoint.
+ *
+ * That covers the heartbeats the activity loop sends for a running attempt as
+ * well as its polls. Those sends are fire-and-forget — nothing waits on one and
+ * none is retried — but an undelivered heartbeat is the invisible cause of a
+ * very visible failure: the server abandons the attempt for silence and reports
+ * it against the *activity*, which is where an operator looks and where the
+ * evidence is not. Reporting the send is what leaves that evidence somewhere.
  */
 
 import * as os from 'node:os';
@@ -100,7 +107,13 @@ export interface WorkerLoopOptions {
    * unknown rather than as serving nothing. See `PollRequest.servesHash`.
    */
   servesHash?: string;
-  /** Where failures are reported. Defaults to a rate-limited stderr reporter. */
+  /**
+   * Where failures are reported. Defaults to a rate-limited stderr reporter.
+   *
+   * Receives poll failures and, on the activity loop, heartbeats that could not
+   * be delivered. The two are counted separately, so `consecutive` is a run
+   * within its own kind rather than a total across both.
+   */
   onError?: (error: unknown, consecutive: number) => void;
 }
 
@@ -121,9 +134,16 @@ export function errorBackoffMs(
  * Report the first failure, then on a doubling schedule (1st, 2nd, 4th, 8th…), and
  * always report a *different* message. A persistent outage stays visible in the
  * log without burying everything else in it.
+ *
+ * `action` names what failed, because a worker has more than one thing that can.
+ * A poll that cannot reach the server and a heartbeat that cannot be delivered
+ * are different faults with different consequences — one stops the worker taking
+ * work, the other loses work already in flight — and the line has to say which
+ * of them an operator is looking at.
  */
 export function createErrorReporter(
   role: string,
+  action = 'poll',
   write: (line: string) => void = (line) => process.stderr.write(line),
 ): (error: unknown, consecutive: number) => void {
   let lastMessage: string | undefined;
@@ -132,7 +152,7 @@ export function createErrorReporter(
     const isDoubling = (consecutive & (consecutive - 1)) === 0;
     if (message === lastMessage && !isDoubling) return;
     lastMessage = message;
-    write(`${role}: poll failed (${consecutive}x): ${message}\n`);
+    write(`${role}: ${action} failed (${consecutive}x): ${message}\n`);
   };
 }
 
@@ -298,6 +318,16 @@ export function runActivityWorker(
   options: WorkerLoopOptions = {},
 ): WorkerLoop {
   const identity = options.identity ?? DEFAULT_IDENTITY;
+  // Heartbeat delivery is counted on its own stream rather than the poll loop's.
+  // That counter measures one thing — whether the server is reachable to take
+  // work — and drives the delay before the next poll; a heartbeat failing on a
+  // task already in flight must neither lengthen that delay nor be read as a
+  // poll that failed. One counter for the loop rather than one per attempt,
+  // because what it reports is a property of the connection, not of any single
+  // activity: with several tasks in flight they are all failing for one reason.
+  const reportHeartbeat =
+    options.onError ?? createErrorReporter('activity worker', 'heartbeat');
+  let heartbeatFailures = 0;
   return runPollLoop('activity worker', options, async () => {
     const task = await service.pollActivityTask({
       taskQueue: options.taskQueue,
@@ -311,9 +341,24 @@ export function runActivityWorker(
     // (at-least-once), unless the attempt heartbeats to keep its claim.
     return async () => {
       const result = await worker.runTask(task, (checkpoint) => {
+        // Voided on purpose: an activity must not block on its own heartbeat,
+        // and a lost beat is survivable by construction — the send window is a
+        // fraction of the deadline precisely so the next one still lands in
+        // time (`THROTTLE_FRACTION` in `worker/activity_context`). What is not
+        // survivable is losing them silently, so the failure is counted and
+        // reported even though nothing here can retry it.
         void service
           .heartbeatActivityTask(task.token, checkpoint)
-          .catch(() => {});
+          .then(() => {
+            // A delivered beat ends the run: the next failure is a fresh
+            // incident and reported as one, rather than rate-limited away as
+            // the continuation of an outage that is over.
+            heartbeatFailures = 0;
+          })
+          .catch((e: unknown) => {
+            heartbeatFailures += 1;
+            reportHeartbeat(e, heartbeatFailures);
+          });
       });
       await service.completeActivityTask(task.token, result);
     };

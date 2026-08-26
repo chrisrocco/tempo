@@ -93,9 +93,38 @@ describe('heartbeat from inside an activity', () => {
       return 'done';
     });
 
-    // Window is half the timeout, so 20ms — the 40ms wait clears it.
+    // Window is a fifth of the timeout, so 8ms — the 40ms wait clears it.
     await createActivityWorker(registry).runTask(
       task({heartbeatTimeoutMs: 40}),
+      () => {
+        sends += 1;
+      },
+    );
+
+    expect(sends).toBe(2);
+  });
+
+  /**
+   * The window is what stands between a live activity and a deadline that fires
+   * on it, so its size is a guarantee rather than a tuning detail. Beats inside
+   * it are dropped rather than deferred, which means the spacing between the
+   * sends that leave reaches *twice* the window for an activity beating just
+   * faster than it reopens — so only a window well under half the timeout keeps
+   * that doubled gap clear of the deadline. A fifth doubles to 40% of it.
+   */
+  it('reopens the window a fifth of the way into the timeout', async () => {
+    let sends = 0;
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat();
+      await wait(60);
+      heartbeat();
+      return 'done';
+    });
+
+    // 60ms clears a fifth of 200ms; it would not clear a half.
+    await createActivityWorker(registry).runTask(
+      task({heartbeatTimeoutMs: 200}),
       () => {
         sends += 1;
       },

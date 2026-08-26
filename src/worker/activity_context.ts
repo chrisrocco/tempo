@@ -33,7 +33,8 @@
  * - **No throttle**, as a documented sharp edge. Adds a failure mode and removes
  *   none: beating too rarely still times out, while beating per row opens
  *   unbounded fire-and-forget requests (`worker/worker_loops` voids them and
- *   swallows their errors) and exhausts sockets before the server notices.
+ *   reports their failures out of band) and exhausts sockets before the server
+ *   notices.
  * - **A debounce** — a different function, and a bug here. It fires after a quiet
  *   period, so an activity beating in a tight loop never sends and is abandoned
  *   for silence while working hardest.
@@ -50,9 +51,27 @@ interface ActivityContext {
 const als = new AsyncLocalStorage<ActivityContext>();
 
 /**
- * Fraction of the heartbeat timeout to wait between sends. Two beats per timeout
- * window: frequent enough that one dropped call does not trip the deadline, rare
- * enough that a chatty activity is not a load source.
+ * Fraction of the heartbeat timeout to wait between sends. Five beats per
+ * timeout window at a steady cadence: often enough that several consecutive
+ * sends can be lost without the deadline firing, rare enough that a chatty
+ * activity is not a load source.
+ *
+ * **The margin covers this throttle's own quantization, not only lost beats.**
+ * A beat inside the window is dropped rather than deferred, so the spacing
+ * between the sends that actually leave is the caller's cadence rounded up to a
+ * multiple of this window — which reaches *twice* the interval for an activity
+ * beating just faster than the window reopens. One beating every 0.49 of its
+ * timeout sends, drops the next, and sends again 0.98 of the timeout later,
+ * with nothing lost by the network at all. So the fraction has to leave the
+ * deadline clear at twice its value: a fifth doubles to 0.4 of the timeout,
+ * where a half doubles onto the deadline itself and reaps activities that are
+ * heartbeating exactly as asked.
+ *
+ * The cost sits on the other side and is worth naming. The server's deadline
+ * fires a full timeout after the last beat it accepted, so a tighter cadence
+ * leaves a fresher clock behind when an activity really does die, and reaping
+ * it takes nearer the whole timeout rather than whatever remained of it. That
+ * number is the one the author asked for; paying it is the point of setting it.
  *
  * Deliberately measured against the *timeout* and nothing else. The worker does
  * not know the server's activity lease and must not have to: a timeout longer
@@ -61,7 +80,7 @@ const als = new AsyncLocalStorage<ActivityContext>();
  * The server resolves it instead, by holding a heartbeating attempt's lease
  * past its deadline — `HEARTBEAT_LEASE_FACTOR` in `server/server_core`.
  */
-const THROTTLE_FRACTION = 0.5;
+const THROTTLE_FRACTION = 0.2;
 /** Used when the activity heartbeats but declared no timeout to be judged against. */
 const DEFAULT_THROTTLE_MS = 5_000;
 

@@ -371,15 +371,17 @@ describe('a checkpoint superseded by redelivery', () => {
  *
  * Every spec above calls `core.heartbeatActivityTask` directly, which is not how
  * a beat reaches the server: `heartbeat()` goes through `withActivityContext`,
- * which throttles sends to half the heartbeat timeout. A generous timeout
- * therefore means a long *silence* between the beats that actually arrive — and
- * the first spec in this file, "holds its claim past the lease", asserts exactly
- * the case where that silence outlasts the lease. It passed anyway, because
- * calling the core directly skips the throttle.
+ * which throttles sends to a fraction of the heartbeat timeout
+ * (`THROTTLE_FRACTION`). A generous timeout therefore means a long *silence*
+ * between the beats that actually arrive — and the first spec in this file,
+ * "holds its claim past the lease", asserts exactly the case where that silence
+ * outlasts the lease. It passes anyway, because calling the core directly skips
+ * the throttle.
  *
- * So each half was proved and the seam between them was not: an author who set a
- * heartbeat timeout longer than twice the lease had their activity redelivered
- * and run a second time, concurrently, while the first was still working. These
+ * So each half is proved by those and the seam between them is not: without the
+ * stretched lease, an author whose heartbeat timeout was long enough against the
+ * lease for one throttled gap to outlast it had their activity redelivered and
+ * run a second time, concurrently, while the first was still working. These
  * drive the path a deployed activity actually takes.
  */
 describe('an activity heartbeating through the worker', () => {
