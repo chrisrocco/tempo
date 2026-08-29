@@ -40,7 +40,10 @@ describe('createWorkflow — the reference and the registry', () => {
     await expectAsync(greet.impl({name: 'unit'})).toBeResolvedTo('hi unit');
   });
 
-  it('accepts the described literal and attaches the descriptor to the body', () => {
+  // The pre-rendered form, kept on purpose while the block below covers the
+  // schema one: a document a caller already holds is still a way to describe a
+  // workflow, and this is what pins that it goes through untouched.
+  it('accepts a pre-rendered props document and attaches the descriptor to the body', () => {
     const nightly = createWorkflow({
       key: 'nightly',
       title: 'Nightly report',

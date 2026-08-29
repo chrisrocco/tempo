@@ -15,12 +15,16 @@
  *
  * `createWorkflow`'s *other* half — the reference it returns, and what calling
  * that reference dispatches — is `spec/workflow_registry.spec.ts`.
+ *
+ * Props are written as a schema (`t.object({...})`) throughout, which is the
+ * form to reach for: `createWorkflow` renders it into the descriptor read back
+ * here and types the body from the same value. That a pre-rendered document is
+ * still accepted, and carried through untouched, is pinned in that file too.
  */
 
 import 'jasmine';
-import type {WorkflowPropsSchema} from '../../src/protocol';
 import {createLocalRuntime} from '../../src';
-import {createWorkflow} from '../../src/workflow';
+import {createWorkflow, t} from '../../src/workflow';
 import {workflowDescriptor} from '../../src/workflow_descriptor';
 import {isolateWorkflowRegistry} from '../support/isolate_workflow_registry';
 
@@ -52,14 +56,12 @@ describe('createWorkflow — describing a workflow', () => {
   });
 
   it('reads back everything except the key and the function', () => {
-    const props: WorkflowPropsSchema = {
-      type: 'object',
-      properties: {
-        customerId: {type: 'string'},
-        locale: {description: 'Defaults to the account language.'},
-      },
-      required: ['customerId'],
-    };
+    const props = t.object({
+      customerId: t.string(),
+      locale: t.optional(
+        t.unknown({description: 'Defaults to the account language.'}),
+      ),
+    });
     const ref = createWorkflow({
       key: 'greeter',
       title: 'Greet a customer',
@@ -73,7 +75,16 @@ describe('createWorkflow — describing a workflow', () => {
     expect(workflowDescriptor(ref.impl)).toEqual({
       title: 'Greet a customer',
       description: 'Sends the welcome email.',
-      props,
+      // The schema's own rendering: one definition behind both the document a
+      // form draws and the type the body is checked against.
+      props: {
+        type: 'object',
+        properties: {
+          customerId: {type: 'string'},
+          locale: {description: 'Defaults to the account language.'},
+        },
+        required: ['customerId'],
+      },
     });
   });
 
@@ -188,13 +199,9 @@ describe('a described workflow on a runtime', () => {
     const greeter = createWorkflow({
       key: 'greeter',
       title: 'Greet a customer',
-      props: {
-        type: 'object',
-        properties: {name: {type: 'string'}},
-        required: ['name'],
-      },
-      async run(props: {name: string}) {
-        return `hello ${props.name}`;
+      props: t.object({name: t.string()}),
+      async run({name}) {
+        return `hello ${name}`;
       },
     });
     // The reference goes in as-is; `registerWorkflow` unwraps it. Registering the
