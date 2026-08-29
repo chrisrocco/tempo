@@ -72,17 +72,17 @@ export type AnyWorkflowFn = (props?: any) => Promise<unknown>;
  * key and the description arrive together there, so there is no second place a
  * workflow can be described and no way for two descriptions to race.
  *
- * ## The props type is written once, in `run`
+ * ## The props type and the props document come from one definition
  *
- * TypeScript infers it from the method, so the object literal in `run(props: {...})` is
- * the only place the shape is written as a type. The `props` JSON Schema beside it is the
- * *runtime* description, and the two are related by convention rather than by the
- * compiler.
+ * `createWorkflow` takes the props as a schema (`t.object({...})`, from the
+ * `schema/` internal library), renders it into the descriptor written here, and
+ * infers `run`'s parameter from the same value — so the shape is authored once
+ * and the runtime description cannot drift from the type.
  *
- * That duplication is real, and is the price of taking no schema library: deriving one from
- * the other needs one, which would be a runtime dependency this package does not have —
- * and one whose major versions would then skew against every consumer that had its own
- * copy.
+ * A pre-rendered JSON Schema is still accepted, and there the two halves are
+ * related by convention rather than by the compiler: the document says one
+ * thing, `run(props: {...})` says another, and nothing compares them. That is
+ * the form to reach for only when the document is what you already have.
  */
 export function describeWorkflow<S extends AnyWorkflowFn>(
   run: S,

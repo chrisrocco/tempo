@@ -5,10 +5,14 @@
  * The `t` builder, JSON Schema rendering and strict conformance — treated like
  * a third-party dependency the repo happens to host. The checks are the shared
  * internal-library seam (`spec/support/library_seam.ts`); what is specific to
- * schema is that its entire *in-repo* removal surface is `connectors/`, where
- * the library was extracted from. A call site appearing outside connectors/ is
- * the moment it starts paying rent for a second consumer in this repo —
- * allowed, deliberately, by naming it here.
+ * schema is which parts of the engine have come to depend on it. It was
+ * `connectors/` alone, where the library was extracted from; workflow props are
+ * the second consumer, and the two files below it costs are the whole of it —
+ * `createWorkflow` renders an author's schema into the descriptor, and the
+ * author entrypoint re-exports `t` so a workflow module can write one without
+ * reaching past it. A call site appearing anywhere else is the moment the
+ * library starts paying rent for a third consumer — allowed, deliberately, by
+ * naming it here.
  *
  * **This no longer means removing it is free.** `workflow-engine/schema` is on
  * the `exports` map, so it is also resolved by name from outside, where this
@@ -22,6 +26,14 @@ import {describeLibrarySeam} from '../../support/library_seam';
 describeLibrarySeam({
   library: 'schema',
   removalSurface: [
+    {
+      path: 'src/workflow_registry.ts',
+      why: 'createWorkflow renders a props schema into the workflow descriptor',
+    },
+    {
+      path: 'src/workflow.ts',
+      why: 're-exports `t`, the one runtime import a workflow module is allowed',
+    },
     {
       path: 'src/connectors/definition.ts',
       why: 'operation inputs/outputs/events are StandardSchemaV1',

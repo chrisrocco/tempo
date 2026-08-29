@@ -2,9 +2,10 @@
  * @fileoverview
  * ★ AUTHOR ENTRYPOINT — workflow code imports ONLY from here.
  *
- * This module re-exports exclusively the deterministic primitives from `core`.
- * Nothing here touches I/O, the clock, or randomness, which is the whole point:
- * the boundary checker (`tools/boundaries.ts`, run by `npm run lint` and by
+ * This module re-exports the deterministic primitives from `core`, plus the two
+ * pure libraries an author needs beside them — the schema builder `t` and
+ * `Duration`. Nothing here touches I/O, the clock, or randomness, which is the
+ * whole point: the boundary checker (`tools/boundaries.ts`, run by `npm run lint` and by
  * spec/architecture.spec.ts) keys on this file to keep the determinism boundary
  * enforced rather than merely documented. If you find yourself wanting to add a
  * non-deterministic capability here, it belongs on the runtime/host side instead.
@@ -148,9 +149,28 @@ export {
 export type {AnyWorkflowFn} from './workflow_descriptor';
 export {
   createWorkflow,
+  type SchemaWorkflowRegistration,
+  type WorkflowDeclaration,
   type WorkflowRef,
   type WorkflowRegistration,
 } from './workflow_registry';
+
+/**
+ * The schema builder, so a workflow module can describe its props where it
+ * declares them — `createWorkflow({props: t.object({...})})` renders the
+ * catalogue's document and types `run` from the one definition.
+ *
+ * Re-exported rather than imported directly because workflow code may import
+ * only this module at runtime (`tools/boundaries.ts`), and `t` is safe on this
+ * side of the boundary by construction: the library is pure and synchronous,
+ * with no clock, no I/O and no host state, so evaluating a schema at module
+ * scope of a workflow module is as deterministic as declaring a constant.
+ * `workflow-engine/connectors` re-exports the same builder for the same reason.
+ *
+ * The full library — `runSchema`, `strictProblems`, the validator port — is
+ * `workflow-engine/schema`. What is here is what a workflow module can use.
+ */
+export {t, type InOf, type OutOf, type TSchema} from './libraries/schema';
 
 // author-facing option types (erased at runtime; safe on the deterministic surface)
 export type {
