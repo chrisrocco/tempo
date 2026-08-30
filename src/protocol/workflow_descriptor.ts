@@ -17,7 +17,10 @@
  * workflow starts, and that stays true deliberately: whether props are checked belongs
  * in the workflow's own first lines or in the caller, and moving it here would change
  * failure semantics for every execution — a separate decision with its own argument to
- * make. `WorkflowPropsSchema` records what taking a schema shape cost.
+ * make. It stays true of the schema-authored form too: `createWorkflow` renders a
+ * `t.object({...})` into this field and parses nothing with it, so a schema an author
+ * wants enforced is one they run themselves. `WorkflowPropsSchema` records what taking
+ * a schema shape cost.
  *
  * ## Every field is optional
  *
@@ -33,9 +36,10 @@
  * Deliberately structural and open. Nothing here validates, so the fields named
  * are only the ones a *renderer* reads; the index signature carries everything
  * else — `$schema`, `enum`, `format`, `allOf` — through untouched, which is what
- * lets a schema emitted by Zod or Valibot be passed straight in. Inventing a
- * closed type would mean tracking a spec this package has no reason to
- * implement, and rejecting valid schemas whenever it fell behind.
+ * lets a document rendered by any tool — the schema library's `t`, or a vendor a
+ * consumer already uses — be passed straight in. Inventing a closed type would
+ * mean tracking a spec this package has no reason to implement, and rejecting
+ * valid schemas whenever it fell behind.
  */
 export interface JsonSchema {
   type?: string;
@@ -56,11 +60,12 @@ export interface JsonSchema {
  * it, which in practice is insertion order for string keys and is not promised
  * by the format.
  *
- * Taken anyway, because the alternative cost more. Every consumer generating
- * this from Zod, Valibot or ArkType already holds a JSON Schema, and a bespoke
- * list meant converting into a shape only this package understands — then back
- * out again in whatever reads it. A renderer that needs a specific order can
- * carry one; a caller that had to translate had no way to avoid it.
+ * Taken anyway, because the alternative cost more. Anything that generates this
+ * — `createWorkflow` rendering a `t` schema, or a consumer holding one from the
+ * vendor they already use — holds a JSON Schema, and a bespoke list meant
+ * converting into a shape only this package understands, then back out again in
+ * whatever reads it. A renderer that needs a specific order can carry one; a
+ * caller that had to translate had no way to avoid it.
  *
  * The other half of the trade is a caveat that dies here: the list could only
  * describe a workflow that already took one object, so a variadic one *"still

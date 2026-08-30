@@ -12,7 +12,8 @@
  */
 
 import {createLocalRuntime} from '../src';
-import {condition, createWorkflow, sleep} from '../src/workflow';
+import {condition, createWorkflow, sleep, t} from '../src/workflow';
+import type {Schema} from '../src/libraries/schema';
 import {workflowDescriptor} from '../src/workflow_descriptor';
 import {
   registeredWorkflowImpls,
@@ -39,7 +40,10 @@ describe('createWorkflow — the reference and the registry', () => {
     await expectAsync(greet.impl({name: 'unit'})).toBeResolvedTo('hi unit');
   });
 
-  it('accepts the described literal and attaches the descriptor to the body', () => {
+  // The pre-rendered form, kept on purpose while the block below covers the
+  // schema one: a document a caller already holds is still a way to describe a
+  // workflow, and this is what pins that it goes through untouched.
+  it('accepts a pre-rendered props document and attaches the descriptor to the body', () => {
     const nightly = createWorkflow({
       key: 'nightly',
       title: 'Nightly report',
@@ -54,6 +58,13 @@ describe('createWorkflow — the reference and the registry', () => {
     });
 
     expect(workflowDescriptor(nightly.impl)?.title).toBe('Nightly report');
+    // A rendered document is carried as written: this form is for a schema a
+    // caller already holds, so nothing here reshapes it.
+    expect(workflowDescriptor(nightly.impl)?.props).toEqual({
+      type: 'object',
+      properties: {day: {type: 'string'}},
+      required: ['day'],
+    });
   });
 
   it('throws a directing error when called outside a workflow', () => {
@@ -129,6 +140,116 @@ describe('createWorkflow — the reference and the registry', () => {
     expect(() =>
       startWorker({name: 'listed', workflows: [plain]}),
     ).toThrowError(/workflows\[0\] is a plain function/);
+  });
+});
+
+/**
+ * The props shape written once: `t.object({...})` renders the document a
+ * catalogue publishes *and* types the body beside it, so the two cannot drift
+ * the way a hand-written JSON Schema and a `run(props: {...})` annotation can.
+ *
+ * What the second test asserts is mostly that it **compiles**: the bodies below
+ * annotate nothing, so a props type that stopped being inferred from the schema
+ * would fail `npm run typecheck` rather than any expectation here.
+ */
+describe('createWorkflow — props authored as a schema', () => {
+  isolateWorkflowRegistry();
+
+  const Nightly = t.object({
+    day: t.string({description: 'The date to total, as YYYY-MM-DD.'}),
+  });
+
+  it('renders the props schema into the descriptor a catalogue publishes', () => {
+    const nightly = createWorkflow({
+      key: 'nightlyFromSchema',
+      title: 'Nightly revenue report',
+      props: Nightly,
+      async run({day}) {
+        return day;
+      },
+    });
+
+    expect(workflowDescriptor(nightly.impl)?.props).toEqual({
+      type: 'object',
+      properties: {
+        day: {type: 'string', description: 'The date to total, as YYYY-MM-DD.'},
+      },
+      required: ['day'],
+    });
+  });
+
+  it('infers the props of the body from the schema, with nothing annotated', async () => {
+    const nightly = createWorkflow({
+      key: 'nightlyTyped',
+      props: Nightly,
+      async run({day}) {
+        return `totalled ${day}`;
+      },
+    });
+
+    await expectAsync(nightly.impl({day: '2026-08-29'})).toBeResolvedTo(
+      'totalled 2026-08-29',
+    );
+  });
+
+  /**
+   * The half of `t.defaulted` that does not survive the trip: the engine
+   * describes and does not validate, so nothing parses props on the way in and
+   * a default reaches a form — through the rendered document — without ever
+   * reaching the handler. Hence `InferInput` rather than `InferOutput`, and
+   * hence a body that wants the filled value parsing the props itself.
+   */
+  it('publishes a default without filling one, so the body sees what the caller sent', async () => {
+    const Search = t.object({
+      query: t.string(),
+      limit: t.defaulted(t.integer({min: 1, max: 100}), 20),
+    });
+    const search = createWorkflow({
+      key: 'searchDefaults',
+      props: Search,
+      async run(props) {
+        return props.limit ?? 'unfilled';
+      },
+    });
+
+    expect(
+      (
+        workflowDescriptor(search.impl)?.props?.['properties'] as Record<
+          string,
+          unknown
+        >
+      )['limit'],
+    ).toEqual({type: 'integer', minimum: 1, maximum: 100, default: 20});
+    await expectAsync(search.impl({query: 'durable'})).toBeResolvedTo(
+      'unfilled',
+    );
+    // Which is what parsing in the body is for — the same schema value, run by
+    // whoever declared it.
+    const parsed = Search.validate({query: 'durable'});
+    expect(parsed.ok && parsed.value.limit).toBe(20);
+  });
+
+  /**
+   * `toJsonSchema` is the validator port's optional half, so a schema that
+   * renders nothing lists as undescribed rather than taking a workflow that
+   * runs perfectly well off its queue — the tolerance `connectors/catalogue.ts`
+   * shows an unrenderable operation schema.
+   */
+  it('leaves the props undescribed when the schema renders nothing', () => {
+    const unrenderable: Schema<{id: string}> = {
+      validate: (value) => ({ok: true, value: value as {id: string}}),
+    };
+    const opaque = createWorkflow({
+      key: 'opaque',
+      title: 'Opaque',
+      props: unrenderable,
+      async run({id}) {
+        return id;
+      },
+    });
+
+    expect(workflowDescriptor(opaque.impl)?.title).toBe('Opaque');
+    expect(workflowDescriptor(opaque.impl)?.props).toBeUndefined();
   });
 });
 

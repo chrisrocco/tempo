@@ -53,6 +53,28 @@
  * names the escape hatch — an explicit `startWorker({workflows})` entry, which
  * wins over anything registered here.
  *
+ * ## Props are described once, in the schema
+ *
+ * `props` takes either a rendered JSON Schema or a schema value from the
+ * `schema/` library (`t.object({...})`), and the second form is the one to
+ * reach for: the schema renders itself into the descriptor the catalogue
+ * publishes *and* types the `run` it sits beside, so the props shape is written
+ * once instead of twice — a hand-written JSON Schema and a `run(props: {...})`
+ * annotation that nothing checks against it. `workflow.ts` re-exports `t` for
+ * exactly this, so a workflow module can author one at module scope without
+ * reaching past the author entrypoint.
+ *
+ * **The schema describes; it does not run.** `createWorkflow` renders it and
+ * keeps nothing else: no wrapper parses props before the body, because that
+ * would move where a bad start fails — out of the caller and into a workflow
+ * task, on replay as well as on the first attempt — which
+ * `protocol/workflow_descriptor.ts` argues is a separate decision with its own
+ * failure semantics to choose. So the props a body receives are the props the
+ * caller sent, and `run` is typed `InferInput` rather than `InferOutput`: a
+ * `t.defaulted` key is optional for the caller and *absent* for the handler,
+ * because nothing filled it. A workflow that wants the filled value parses in
+ * its own first lines, with the same schema value it declared.
+ *
  * ## What it costs
  *
  * The same thing the activity registry cost, admitted the same way:
@@ -75,7 +97,8 @@ import {
   type ChildOptions,
 } from './core';
 import {describeWorkflow, type AnyWorkflowFn} from './workflow_descriptor';
-import type {WorkflowDescriptor} from './protocol';
+import type {InferInput, Schema} from './libraries/schema';
+import type {WorkflowDescriptor, WorkflowPropsSchema} from './protocol';
 
 /** Any callable. `any[]` rest params are required for assignability — see `core/workflow_api`. */
 type AnyFn = (...args: any[]) => unknown;
@@ -153,17 +176,18 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
 }
 
 /**
- * A workflow's whole declaration: its key, its body, and what it says about
- * itself.
+ * What both declaration forms carry: a workflow's key and what it says about
+ * itself, short of the props the two forms differ over.
  *
  * One object rather than `(key, definition)` because the key is a property of
  * the workflow like the rest of them, and a positional first argument made the
  * described and undescribed forms read as two different APIs — one a pair, one a
  * literal. There is also no argument order to get backwards.
+ *
+ * Split out rather than repeated so `title` and `description` keep one home:
+ * they are `WorkflowDescriptor`'s, and both forms inherit them from there.
  */
-export interface WorkflowRegistration<
-  F extends AnyWorkflowFn,
-> extends WorkflowDescriptor {
+export interface WorkflowDeclaration extends Omit<WorkflowDescriptor, 'props'> {
   /**
    * The wire name: what `client.start` takes, what a task is routed by, and what
    * a second `createWorkflow` claiming it collides with.
@@ -174,6 +198,27 @@ export interface WorkflowRegistration<
    * silently.
    */
   key: string;
+}
+
+/**
+ * The declaration with its props written as a rendered JSON Schema: the form
+ * for a shape that arrives already rendered, and the only form for a workflow
+ * that describes no props at all.
+ *
+ * The props shape is written twice here — once as the document, once as `run`'s
+ * parameter annotation — and nothing relates the two. `SchemaWorkflowRegistration`
+ * is the form that closes that gap; this one stays because a JSON Schema is
+ * sometimes what a caller has (generated, or read from a file), and because a
+ * workflow taking no props needs no schema library to say so.
+ */
+export interface WorkflowRegistration<
+  F extends AnyWorkflowFn,
+> extends WorkflowDeclaration {
+  /**
+   * What must be passed to start it, as the document the catalogue publishes —
+   * see `WorkflowDescriptor.props`, which this is carried straight into.
+   */
+  props?: WorkflowPropsSchema;
   /**
    * The workflow itself, taking the props described above as one object.
    *
@@ -186,6 +231,78 @@ export interface WorkflowRegistration<
 }
 
 /**
+ * The declaration with its props written as a **schema** — `t.object({...})`
+ * from `workflow-engine/schema`, re-exported by the author entrypoint — which
+ * both renders the descriptor and types the body beside it.
+ *
+ * ```ts
+ * const Nightly = Tempo.t.object({
+ *   day: Tempo.t.string({description: 'The date to total, as YYYY-MM-DD.'}),
+ * });
+ *
+ * export const nightlyReport = Tempo.createWorkflow({
+ *   key: 'nightlyReport',
+ *   title: 'Nightly revenue report',
+ *   props: Nightly,
+ *   async run({day}) {   // {day: string}, inferred — not annotated
+ *     return total(day);
+ *   },
+ * });
+ * ```
+ *
+ * `props` is **required** here, which is what makes this shape the one
+ * TypeScript picks: a declaration without it, or with a rendered document, is
+ * a `WorkflowRegistration` and types `run` from the annotation the author
+ * wrote. There is no third state to disambiguate at the call site.
+ *
+ * `run` is a method rather than a property so its parameter stays bivariant:
+ * a body written against a narrower props type — the common case, since the
+ * schema is what determined it — is still assignable. And it is typed
+ * `InferInput`, not `InferOutput`, because nothing parses the props on the way
+ * in (fileoverview): a `t.defaulted` key is optional for the caller and absent
+ * for the handler until the handler parses it.
+ */
+export interface SchemaWorkflowRegistration<
+  S extends Schema,
+  R,
+> extends WorkflowDeclaration {
+  /** The props schema: rendered into the descriptor, and typing `run` beside it. */
+  props: S;
+  /** The workflow itself, taking the props the schema describes. */
+  run(props: InferInput<S>): Promise<R>;
+}
+
+/** Both forms as one shape, which is what the implementation reads. */
+type AnyWorkflowRegistration<F extends AnyWorkflowFn> = Omit<
+  WorkflowRegistration<F>,
+  'props'
+> & {props?: WorkflowPropsSchema | Schema};
+
+/**
+ * The descriptor's `props`, from either form of declaration.
+ *
+ * A schema is told apart from a rendered document by its `validate` method
+ * rather than by a brand or an `instanceof`: the port is an interface anything
+ * may implement, and a JSON Schema document has no methods at all, so one
+ * function-valued key separates them without either side declaring which it is.
+ *
+ * A schema that renders nothing — `toJsonSchema` is the port's optional half —
+ * leaves the descriptor with no props, which reads as "not described", exactly
+ * like a workflow that said nothing. Same tolerance as
+ * `connectors/catalogue.ts` shows an unrenderable operation schema, and for the
+ * same reason: refusing to register would take a workflow that runs perfectly
+ * well off its queue over missing documentation.
+ */
+function renderProps(
+  props: WorkflowPropsSchema | Schema,
+): WorkflowPropsSchema | undefined {
+  const schema = props as Schema;
+  if (typeof schema.validate !== 'function')
+    return props as WorkflowPropsSchema;
+  return schema.toJsonSchema?.() as WorkflowPropsSchema | undefined;
+}
+
+/**
  * Define a workflow, register it, and return the dispatching reference — see the
  * fileoverview for why the reference is not the function.
  *
@@ -193,14 +310,29 @@ export interface WorkflowRegistration<
  * `workflowDescriptor` read as before, so a workflow that describes itself and
  * one that does not are the same call with more fields.
  *
+ * Two declaration forms, told apart by `props`: a schema
+ * (`SchemaWorkflowRegistration` — it types `run` as well as describing it) or a
+ * rendered JSON Schema (`WorkflowRegistration`, which is also the form of a
+ * workflow that describes no props). Either way what is stored is the rendered
+ * document, so nothing downstream of here knows which was written.
+ *
  * Registering the **same** function under a key twice is a no-op — a module
  * genuinely can evaluate twice. A *different* function under a taken key is
  * recorded for `startWorker` to refuse, never thrown here (fileoverview).
  */
+export function createWorkflow<S extends Schema, R>(
+  registration: SchemaWorkflowRegistration<S, R>,
+): WorkflowRef<(props: InferInput<S>) => Promise<R>>;
 export function createWorkflow<F extends AnyWorkflowFn>(
   registration: WorkflowRegistration<F>,
+): WorkflowRef<F>;
+export function createWorkflow<F extends AnyWorkflowFn>(
+  registration: AnyWorkflowRegistration<F>,
 ): WorkflowRef<F> {
-  const {key: name, run, ...descriptor} = registration;
+  const {key: name, run, props, ...rest} = registration;
+  const rendered = props === undefined ? undefined : renderProps(props);
+  const descriptor: WorkflowDescriptor =
+    rendered === undefined ? {...rest} : {...rest, props: rendered};
   // Unconditional: this is the only thing that writes a descriptor, so there is
   // never an existing one to overwrite. An empty one reads as "not described"
   // everywhere it is consumed.

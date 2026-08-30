@@ -48,7 +48,10 @@ on npm and makes no stability promises — clone it, read it, run it.
   `workflowId`/policy knobs), `.detached()` spawns it fire-and-forget, and
   defining it registers it — so a worker names only its
   root workflows and everything they invoke rides along on the import graph,
-  the same way `proxyActivities` registers activities
+  the same way `proxyActivities` registers activities. It also says what the
+  workflow is: a title, a sentence, and a props schema authored with `t`, which
+  renders the JSON Schema a dashboard draws a start form from _and_ types the
+  body beside it, so the props shape is written once
 - **Cancellation**, cascading to children, surfacing as a catchable failure —
   plus `terminate` for when cooperative cancellation cannot land
 - **`continueAsNew`** to bound history on long-lived workflows

@@ -36,7 +36,8 @@
  * is `walltime/`'s, "would this API make sense published on its own?", and
  * `library-boundary` fails the first import that answers no. Reach for it
  * wherever a shape has to be described once and used three ways — an
- * agent's tool definitions, an API's request bodies, a form's fields.
+ * agent's tool definitions, an API's request bodies, a form's fields, or a
+ * workflow's props — which is what the engine's second consumer of it does.
  *
  * ## The vocabulary
  *
@@ -106,9 +107,12 @@
  *   import that would make it unsafe.
  * - **The engine touches it only at named call sites.** The seam is asserted by
  *   `spec/libraries/schema/seam.spec.ts` (built on
- *   `spec/support/library_seam.ts`), which names every one: today they are all
- *   in `connectors/`, so removing connectors would take the library's only
- *   in-repo consumer with it.
+ *   `spec/support/library_seam.ts`), which names every one: `connectors/`,
+ *   where the library was extracted from, plus the two files that let a
+ *   workflow describe its props with it — `workflow_registry.ts`, which renders
+ *   an author's schema into the descriptor a catalogue publishes, and
+ *   `workflow.ts`, which re-exports `t` because workflow code may import
+ *   nothing else.
  * - **Consumers import this index**, the way they would import a package root —
  *   deep imports would make the seam a lie about the real coupling.
  *
