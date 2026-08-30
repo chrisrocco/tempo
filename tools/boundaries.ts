@@ -22,7 +22,8 @@
  *    at all rather than a folder inside `core/` — same-layer imports are not
  *    checked, so as long as both lived in `core/` that direction was unsayable.
  * 2. **Determinism purity** — no clock, randomness, I/O, or ambient host state in
- *    `core/` *or* `patterns/`: both run inside a replay. One documented exception
+ *    `core/` *or* `patterns/`: both run inside a replay. `REPLAY_MODULES` adds
+ *    the files that run there without being a layer. One documented exception
  *    (see `ALLOWED_HOST_COUPLING`).
  * 3. **The author entrypoint** — workflow modules import only `workflow.ts` at
  *    runtime, and obey the same purity rule as the core they run inside. A
@@ -152,6 +153,19 @@ const LAYER_RATIONALE: Record<string, string> = {
   connectors:
     'connectors/ is service-wrapping machinery built for workflow authors, so it may import only workflow.ts — the same deterministic surface its consumers use. Needing anything the author entrypoint does not re-export would mean a connector concept the author surface cannot express, which is a gap to fix there, not a dependency to add here',
 };
+
+/**
+ * Modules that run inside a replay without being a layer that declares it.
+ *
+ * Purity is otherwise decided by directory — `core/`, `patterns/`, `walltime/`
+ * — because a layer is a directory. `workflow_props.ts` is a file at `src/`
+ * root and runs on **every activation**: `createWorkflow` puts a declared props
+ * schema's parse in front of the body, so a clock or a random value reaching
+ * that code would diverge a replay exactly as one in `core/` would. Named here
+ * rather than moved into a layer, because where it lives is decided by what it
+ * is glue between (author code and the host), not by when it runs.
+ */
+const REPLAY_MODULES: readonly string[] = ['src/workflow_props.ts'];
 
 /** Constructs that make replay irreproducible, so they cannot appear on the deterministic side. */
 const NONDETERMINISTIC = [
@@ -727,7 +741,12 @@ export function checkBoundaries(files: SourceFile[]): Violation[] {
     // `ALLOWED_HOST_COUPLING`, which is what keeps the rest of the library
     // checked rather than trusted.
     const layer = layerOf(file.path);
-    if (layer === 'core' || layer === 'patterns' || layer === 'walltime') {
+    if (
+      layer === 'core' ||
+      layer === 'patterns' ||
+      layer === 'walltime' ||
+      REPLAY_MODULES.includes(file.path)
+    ) {
       violations.push(...checkPurity(file, stripped, 'core-purity'));
     }
   }

@@ -7,12 +7,12 @@
  * internal-library seam (`spec/support/library_seam.ts`); what is specific to
  * schema is which parts of the engine have come to depend on it. It was
  * `connectors/` alone, where the library was extracted from; workflow props are
- * the second consumer, and the two files below it costs are the whole of it —
- * `createWorkflow` renders an author's schema into the descriptor, and the
- * author entrypoint re-exports `t` so a workflow module can write one without
- * reaching past it. A call site appearing anywhere else is the moment the
- * library starts paying rent for a third consumer — allowed, deliberately, by
- * naming it here.
+ * the second consumer, and the three files below it costs are the whole of it —
+ * `workflow_props.ts` renders a declared schema and parses props with it,
+ * `createWorkflow` types a declaration from it, and the author entrypoint
+ * re-exports `t` so a workflow module can write one without reaching past it.
+ * A call site appearing anywhere else is the moment the library starts paying
+ * rent for a third consumer — allowed, deliberately, by naming it here.
  *
  * **This no longer means removing it is free.** `workflow-engine/schema` is on
  * the `exports` map, so it is also resolved by name from outside, where this
@@ -27,8 +27,12 @@ describeLibrarySeam({
   library: 'schema',
   removalSurface: [
     {
+      path: 'src/workflow_props.ts',
+      why: 'renders a declared props schema, and parses props with it before the body',
+    },
+    {
       path: 'src/workflow_registry.ts',
-      why: 'createWorkflow renders a props schema into the workflow descriptor',
+      why: 'createWorkflow types a schema-declared workflow from its props schema',
     },
     {
       path: 'src/workflow.ts',

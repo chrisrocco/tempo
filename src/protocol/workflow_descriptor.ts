@@ -11,16 +11,19 @@
  * In `protocol/` because it is data that will cross the wire to a reader who has no
  * access to the functions. Nothing here is used during replay.
  *
- * ## The engine describes; it does not validate
+ * ## The engine describes; the workflow validates
  *
- * A props schema is carried and handed to whoever asked. It is not enforced when a
- * workflow starts, and that stays true deliberately: whether props are checked belongs
- * in the workflow's own first lines or in the caller, and moving it here would change
- * failure semantics for every execution — a separate decision with its own argument to
- * make. It stays true of the schema-authored form too: `createWorkflow` renders a
- * `t.object({...})` into this field and parses nothing with it, so a schema an author
- * wants enforced is one they run themselves. `WorkflowPropsSchema` records what taking
- * a schema shape cost.
+ * A props schema is carried and handed to whoever asked. **Nothing on this side of the
+ * wire enforces it**: a start is accepted whatever its props, and a document reported
+ * here is a description rather than a gate — which is what lets a workflow with no live
+ * worker, or one two workers describe differently, still be started and still be listed.
+ *
+ * Enforcement lives where the schema does. A workflow declared with a schema
+ * (`createWorkflow`) parses its props before its body, so bad props fail that execution
+ * with the schema's own message; see `workflow_props.ts` for why the parse sits there
+ * rather than in front of the start, and what it would take to move it. The document
+ * here is what that schema rendered, and a form drawing it is reading the same rules the
+ * workflow will apply. `WorkflowPropsSchema` records what taking a schema shape cost.
  *
  * ## Every field is optional
  *
@@ -139,8 +142,9 @@ export interface WorkflowDescriptor {
    *
    * Absent means "not described", which a form renders as nothing rather than as
    * a workflow taking no arguments. It is metadata, never validated here: the
-   * engine starts what it is asked to start, and a schema that disagrees with the
-   * props is a bug in the caller that this will not arbitrate.
+   * engine starts what it is asked to start. A workflow that declared its props
+   * as a schema rejects props this document disagrees with when it runs, which
+   * is a failed execution rather than a refused start.
    */
   props?: WorkflowPropsSchema;
 }

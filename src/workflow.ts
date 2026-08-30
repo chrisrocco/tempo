@@ -172,6 +172,13 @@ export {
  */
 export {t, type InOf, type OutOf, type TSchema} from './libraries/schema';
 
+/**
+ * A props schema as the document alone, for a `createWorkflow` that should
+ * describe its props without enforcing them — see `workflow_props.ts`, which
+ * owns both halves of what a declared schema means.
+ */
+export {describeProps} from './workflow_props';
+
 // author-facing option types (erased at runtime; safe on the deterministic surface)
 export type {
   ActivityOptions,

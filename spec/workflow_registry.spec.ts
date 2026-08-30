@@ -12,7 +12,13 @@
  */
 
 import {createLocalRuntime} from '../src';
-import {condition, createWorkflow, sleep, t} from '../src/workflow';
+import {
+  condition,
+  createWorkflow,
+  describeProps,
+  sleep,
+  t,
+} from '../src/workflow';
 import type {Schema} from '../src/libraries/schema';
 import {workflowDescriptor} from '../src/workflow_descriptor';
 import {
@@ -145,12 +151,17 @@ describe('createWorkflow — the reference and the registry', () => {
 
 /**
  * The props shape written once: `t.object({...})` renders the document a
- * catalogue publishes *and* types the body beside it, so the two cannot drift
- * the way a hand-written JSON Schema and a `run(props: {...})` annotation can.
+ * catalogue publishes, types the body beside it, and parses what reaches it —
+ * three things that cannot drift the way a hand-written JSON Schema and a
+ * `run(props: {...})` annotation can.
  *
- * What the second test asserts is mostly that it **compiles**: the bodies below
- * annotate nothing, so a props type that stopped being inferred from the schema
- * would fail `npm run typecheck` rather than any expectation here.
+ * What the inference test asserts is mostly that it **compiles**: the bodies
+ * below annotate nothing, so a props type that stopped being inferred from the
+ * schema would fail `npm run typecheck` rather than any expectation here.
+ *
+ * Where a rejection *lands* — a failed execution rather than a refused start —
+ * is the claim worth seeing end to end, so it is made on a runtime below rather
+ * than against `.impl`.
  */
 describe('createWorkflow — props authored as a schema', () => {
   isolateWorkflowRegistry();
@@ -192,23 +203,22 @@ describe('createWorkflow — props authored as a schema', () => {
     );
   });
 
+  const Search = t.object({
+    query: t.string(),
+    limit: t.defaulted(t.integer({min: 1, max: 100}), 20),
+  });
+
   /**
-   * The half of `t.defaulted` that does not survive the trip: the engine
-   * describes and does not validate, so nothing parses props on the way in and
-   * a default reaches a form — through the rendered document — without ever
-   * reaching the handler. Hence `InferInput` rather than `InferOutput`, and
-   * hence a body that wants the filled value parsing the props itself.
+   * `t.defaulted` both ends: the document a form draws carries the default, and
+   * the body is handed it filled — which is what makes `InferOutput` the honest
+   * type for `run` and `?? 20` unnecessary inside it.
    */
-  it('publishes a default without filling one, so the body sees what the caller sent', async () => {
-    const Search = t.object({
-      query: t.string(),
-      limit: t.defaulted(t.integer({min: 1, max: 100}), 20),
-    });
+  it('fills a default before the body, and publishes it for a form as well', async () => {
     const search = createWorkflow({
       key: 'searchDefaults',
       props: Search,
       async run(props) {
-        return props.limit ?? 'unfilled';
+        return props.limit;
       },
     });
 
@@ -220,13 +230,120 @@ describe('createWorkflow — props authored as a schema', () => {
         >
       )['limit'],
     ).toEqual({type: 'integer', minimum: 1, maximum: 100, default: 20});
-    await expectAsync(search.impl({query: 'durable'})).toBeResolvedTo(
-      'unfilled',
+    await expectAsync(search.impl({query: 'durable'})).toBeResolvedTo(20);
+  });
+
+  // `t.object` strips what it does not declare rather than rejecting it, which
+  // is what lets a caller add a field before the workflow knows about it.
+  it('strips an undeclared key rather than failing on it', async () => {
+    const search = createWorkflow({
+      key: 'searchStrips',
+      props: Search,
+      async run(props) {
+        return Object.keys(props).sort().join(',');
+      },
+    });
+
+    await expectAsync(
+      search.impl({query: 'durable', andThis: 'is not declared'} as never),
+    ).toBeResolvedTo('limit,query');
+  });
+
+  it('rejects props the schema refuses, naming the workflow and every issue', async () => {
+    const search = createWorkflow({
+      key: 'searchRejects',
+      props: Search,
+      async run(props) {
+        return props.query;
+      },
+    });
+
+    await expectAsync(search.impl({limit: 500} as never)).toBeRejectedWithError(
+      /searchRejects was started with props its schema rejects: query: expected string/,
     );
-    // Which is what parsing in the body is for — the same schema value, run by
-    // whoever declared it.
-    const parsed = Search.validate({query: 'durable'});
-    expect(parsed.ok && parsed.value.limit).toBe(20);
+  });
+
+  /**
+   * The parse runs before the body, so it must not be the thing that suspends a
+   * replay on a promise the engine never handed out. A validator that returns
+   * one is refused by name rather than awaited.
+   */
+  it('refuses an async props schema rather than awaiting it inside a replay', async () => {
+    const slow: Schema<{id: string}> = {
+      validate: async (value) => ({ok: true, value: value as {id: string}}),
+    };
+    const later = createWorkflow({
+      key: 'laterProps',
+      props: slow,
+      async run({id}) {
+        return id;
+      },
+    });
+
+    await expectAsync(later.impl({id: 'x'})).toBeRejectedWithError(
+      /laterProps declares an async props schema/,
+    );
+  });
+
+  /**
+   * Wrapping the body must not invent a conflict. A module that evaluates twice
+   * hands `createWorkflow` the same function twice — tolerated everywhere else —
+   * and two parses around it are two different functions, so the comparison has
+   * to reach the body underneath.
+   */
+  it('tolerates the same schema-declared workflow being registered twice', () => {
+    const run = async ({day}: {day: string}): Promise<string> => day;
+    createWorkflow({key: 'twice', props: Nightly, run});
+    createWorkflow({key: 'twice', props: Nightly, run});
+
+    expect(workflowNameConflicts()).toEqual([]);
+  });
+
+  // The escape hatch, and the reason it needs no flag: what arrives is a
+  // document rather than a schema, so there is nothing to parse with.
+  it('describes without enforcing when handed the schema’s rendered document', async () => {
+    const described = createWorkflow({
+      key: 'describedOnly',
+      props: describeProps(Search),
+      async run(props: {query?: string; limit?: number}) {
+        return props.limit ?? 'nothing filled';
+      },
+    });
+
+    expect(workflowDescriptor(described.impl)?.props).toEqual(
+      describeProps(Search),
+    );
+    await expectAsync(described.impl({})).toBeResolvedTo('nothing filled');
+  });
+
+  /**
+   * Where a rejection lands, end to end: the start is accepted the way any
+   * start is — the server checks nothing and could not, holding only a rendered
+   * document — and the execution it created settles failed on its first
+   * activation. That is the trade `workflow_props.ts` argues, made visible.
+   */
+  it('accepts the start and fails the execution when props do not match', async () => {
+    const search = createWorkflow({
+      key: 'searchOnRuntime',
+      props: Search,
+      async run(props) {
+        return props.query;
+      },
+    });
+    const rt = createLocalRuntime().registerWorkflow(
+      search.workflowName,
+      search,
+    );
+
+    try {
+      const handle = rt.start('searchOnRuntime', {limit: 5});
+      await expectAsync(handle.result()).toBeRejectedWithError(
+        /searchOnRuntime was started with props its schema rejects: query: expected string/,
+      );
+      expect(handle.status()).toBe('failed');
+    } finally {
+      rt.shutdown();
+    }
   });
 
   /**
@@ -235,7 +352,7 @@ describe('createWorkflow — props authored as a schema', () => {
    * runs perfectly well off its queue — the tolerance `connectors/catalogue.ts`
    * shows an unrenderable operation schema.
    */
-  it('leaves the props undescribed when the schema renders nothing', () => {
+  it('leaves the props undescribed when the schema renders nothing', async () => {
     const unrenderable: Schema<{id: string}> = {
       validate: (value) => ({ok: true, value: value as {id: string}}),
     };
@@ -250,6 +367,10 @@ describe('createWorkflow — props authored as a schema', () => {
 
     expect(workflowDescriptor(opaque.impl)?.title).toBe('Opaque');
     expect(workflowDescriptor(opaque.impl)?.props).toBeUndefined();
+    // Undescribable says nothing about unparseable: it still runs the schema.
+    await expectAsync(opaque.impl({id: 'still parsed'})).toBeResolvedTo(
+      'still parsed',
+    );
   });
 });
 

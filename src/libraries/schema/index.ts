@@ -37,7 +37,8 @@
  * `library-boundary` fails the first import that answers no. Reach for it
  * wherever a shape has to be described once and used three ways — an
  * agent's tool definitions, an API's request bodies, a form's fields, or a
- * workflow's props — which is what the engine's second consumer of it does.
+ * workflow's props, where one schema is the form's fields, the handler's type
+ * and the check at the door.
  *
  * ## The vocabulary
  *
@@ -108,11 +109,11 @@
  * - **The engine touches it only at named call sites.** The seam is asserted by
  *   `spec/libraries/schema/seam.spec.ts` (built on
  *   `spec/support/library_seam.ts`), which names every one: `connectors/`,
- *   where the library was extracted from, plus the two files that let a
- *   workflow describe its props with it — `workflow_registry.ts`, which renders
- *   an author's schema into the descriptor a catalogue publishes, and
- *   `workflow.ts`, which re-exports `t` because workflow code may import
- *   nothing else.
+ *   where the library was extracted from, plus the three files that let a
+ *   workflow declare its props with it — `workflow_props.ts`, which renders the
+ *   document a catalogue publishes and parses props before a body runs,
+ *   `workflow_registry.ts`, which types the declaration, and `workflow.ts`,
+ *   which re-exports `t` because workflow code may import nothing else.
  * - **Consumers import this index**, the way they would import a package root —
  *   deep imports would make the seam a lie about the real coupling.
  *
@@ -155,5 +156,5 @@ export {
   type TOptional,
   type TSchema,
 } from './builder';
-export {runSchema, type Validated} from './validate';
+export {formatIssues, runSchema, type Validated} from './validate';
 export {strictProblems} from './strict';

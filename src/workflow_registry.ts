@@ -27,8 +27,10 @@
  * parent's history and it would half-work until it didn't. So the reference
  * wraps `executeChild` (and `startChild`, via `.detached()`), the *registry* holds
  * the real function for the engine to invoke, and a unit test that wants the
- * body calls `.impl`, which is the same function the author wrote: the
- * descriptor rides on it, and nothing about it changed.
+ * body calls `.impl` — the workflow as the engine runs it, which is the
+ * author's function itself unless a props schema was declared, in which case it
+ * is that function behind the parse the schema asked for. Either way it is what
+ * the engine invokes, so a unit test and a deployment run the same thing.
  *
  * ## The name is the author's now
  *
@@ -64,16 +66,14 @@
  * exactly this, so a workflow module can author one at module scope without
  * reaching past the author entrypoint.
  *
- * **The schema describes; it does not run.** `createWorkflow` renders it and
- * keeps nothing else: no wrapper parses props before the body, because that
- * would move where a bad start fails — out of the caller and into a workflow
- * task, on replay as well as on the first attempt — which
- * `protocol/workflow_descriptor.ts` argues is a separate decision with its own
- * failure semantics to choose. So the props a body receives are the props the
- * caller sent, and `run` is typed `InferInput` rather than `InferOutput`: a
- * `t.defaulted` key is optional for the caller and *absent* for the handler,
- * because nothing filled it. A workflow that wants the filled value parses in
- * its own first lines, with the same schema value it declared.
+ * **A declared schema is enforced.** The body registered here is the author's
+ * behind the parse: props are validated before the first line runs, so `run`
+ * takes `InferOutput` — a `t.defaulted` key is optional for the caller and
+ * *filled* for the handler — and props that do not match fail the execution
+ * rather than reaching the body. `workflow_props.ts` owns that decision, what
+ * it costs, and what changing a live schema does to executions already running.
+ * A declaration handed a document instead (`props: describeProps(Search)`)
+ * describes without enforcing.
  *
  * ## What it costs
  *
@@ -97,7 +97,13 @@ import {
   type ChildOptions,
 } from './core';
 import {describeWorkflow, type AnyWorkflowFn} from './workflow_descriptor';
-import type {InferInput, Schema} from './libraries/schema';
+import {
+  parsingBody,
+  propsSchema,
+  renderProps,
+  workflowBody,
+} from './workflow_props';
+import type {InferInput, InferOutput, Schema} from './libraries/schema';
 import type {WorkflowDescriptor, WorkflowPropsSchema} from './protocol';
 
 /** Any callable. `any[]` rest params are required for assignability — see `core/workflow_api`. */
@@ -140,6 +146,10 @@ export interface WorkflowRef<F extends AnyWorkflowFn> {
   /**
    * The implementation itself — what the engine replays, and what a unit test
    * calls to run the body directly, since calling the reference dispatches.
+   *
+   * With a props schema declared this is the author's body behind that schema's
+   * parse, so a unit test sees the defaults and the rejections a deployment
+   * sees. The author's function is unchanged and still theirs to call.
    */
   readonly impl: F;
   /**
@@ -258,18 +268,20 @@ export interface WorkflowRegistration<
  * `run` is a method rather than a property so its parameter stays bivariant:
  * a body written against a narrower props type — the common case, since the
  * schema is what determined it — is still assignable. And it is typed
- * `InferInput`, not `InferOutput`, because nothing parses the props on the way
- * in (fileoverview): a `t.defaulted` key is optional for the caller and absent
- * for the handler until the handler parses it.
+ * `InferOutput`, because the props reaching it have been parsed: a `t.defaulted`
+ * key is optional for whoever starts the workflow and filled by the time the
+ * body reads it. The reference's own signature keeps `InferInput`, which is the
+ * same difference read from the two ends — a caller may omit what a handler is
+ * guaranteed.
  */
 export interface SchemaWorkflowRegistration<
   S extends Schema,
   R,
 > extends WorkflowDeclaration {
-  /** The props schema: rendered into the descriptor, and typing `run` beside it. */
+  /** The props schema: rendered into the descriptor, parsed before `run`, and typing it. */
   props: S;
-  /** The workflow itself, taking the props the schema describes. */
-  run(props: InferInput<S>): Promise<R>;
+  /** The workflow itself, taking the props the schema parsed. */
+  run(props: InferOutput<S>): Promise<R>;
 }
 
 /** Both forms as one shape, which is what the implementation reads. */
@@ -277,30 +289,6 @@ type AnyWorkflowRegistration<F extends AnyWorkflowFn> = Omit<
   WorkflowRegistration<F>,
   'props'
 > & {props?: WorkflowPropsSchema | Schema};
-
-/**
- * The descriptor's `props`, from either form of declaration.
- *
- * A schema is told apart from a rendered document by its `validate` method
- * rather than by a brand or an `instanceof`: the port is an interface anything
- * may implement, and a JSON Schema document has no methods at all, so one
- * function-valued key separates them without either side declaring which it is.
- *
- * A schema that renders nothing — `toJsonSchema` is the port's optional half —
- * leaves the descriptor with no props, which reads as "not described", exactly
- * like a workflow that said nothing. Same tolerance as
- * `connectors/catalogue.ts` shows an unrenderable operation schema, and for the
- * same reason: refusing to register would take a workflow that runs perfectly
- * well off its queue over missing documentation.
- */
-function renderProps(
-  props: WorkflowPropsSchema | Schema,
-): WorkflowPropsSchema | undefined {
-  const schema = props as Schema;
-  if (typeof schema.validate !== 'function')
-    return props as WorkflowPropsSchema;
-  return schema.toJsonSchema?.() as WorkflowPropsSchema | undefined;
-}
 
 /**
  * Define a workflow, register it, and return the dispatching reference — see the
@@ -311,10 +299,11 @@ function renderProps(
  * one that does not are the same call with more fields.
  *
  * Two declaration forms, told apart by `props`: a schema
- * (`SchemaWorkflowRegistration` — it types `run` as well as describing it) or a
- * rendered JSON Schema (`WorkflowRegistration`, which is also the form of a
- * workflow that describes no props). Either way what is stored is the rendered
- * document, so nothing downstream of here knows which was written.
+ * (`SchemaWorkflowRegistration` — it types and parses `run`'s props as well as
+ * describing them) or a rendered JSON Schema (`WorkflowRegistration`, which is
+ * also the form of a workflow that describes no props). The *descriptor* is the
+ * rendered document either way, so nothing reading a catalogue knows which was
+ * written; what a schema adds is the parse in front of the body.
  *
  * Registering the **same** function under a key twice is a no-op — a module
  * genuinely can evaluate twice. A *different* function under a taken key is
@@ -333,13 +322,21 @@ export function createWorkflow<F extends AnyWorkflowFn>(
   const rendered = props === undefined ? undefined : renderProps(props);
   const descriptor: WorkflowDescriptor =
     rendered === undefined ? {...rest} : {...rest, props: rendered};
+  const schema = props === undefined ? undefined : propsSchema(props);
   // Unconditional: this is the only thing that writes a descriptor, so there is
   // never an existing one to overwrite. An empty one reads as "not described"
   // everywhere it is consumed.
-  const impl = describeWorkflow(run, descriptor);
+  const impl = describeWorkflow(
+    schema === undefined ? run : parsingBody(name, schema, run),
+    descriptor,
+  );
 
   const existing = registered.get(name);
-  if (existing && existing !== impl) conflicted.add(name);
+  // Compared by *body*, since a schema-declared workflow registers a parse
+  // around it: two evaluations of one module hand this the same body twice and
+  // must stay a no-op, and two wrappers around it are never the same function.
+  if (existing && workflowBody(existing) !== workflowBody(impl))
+    conflicted.add(name);
   registered.set(name, impl);
 
   const execute = (

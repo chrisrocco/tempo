@@ -148,6 +148,21 @@ describe('architecture — core purity', () => {
     expect(violations[0].message).toContain('Date.now()');
   });
 
+  /**
+   * Purity is a question about *where code runs*, not about which directory it
+   * sits in — and the props parse runs on every activation from a file at `src/`
+   * root. Planted here because the rule would otherwise be silently narrower
+   * than the claim it makes.
+   */
+  it('rejects a clock in a module that runs inside a replay', () => {
+    const violations = checkBoundaries([
+      file('src/workflow_props.ts', `const at = Date.now();`),
+    ]);
+
+    expect(violations.length).toBe(1);
+    expect(violations[0].rule).toBe('core-purity');
+  });
+
   it('rejects randomness inside the core', () => {
     const violations = checkBoundaries([
       file('src/core/condition.ts', `const r = Math.random();`),

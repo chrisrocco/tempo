@@ -18,8 +18,12 @@
  *
  * Props are written as a schema (`t.object({...})`) throughout, which is the
  * form to reach for: `createWorkflow` renders it into the descriptor read back
- * here and types the body from the same value. That a pre-rendered document is
- * still accepted, and carried through untouched, is pinned in that file too.
+ * here, types the body from the same value, and parses props against it before
+ * that body runs. The parse is the one thing describing does change about
+ * running, so it is pinned here beside the invisibility it qualifies; what the
+ * parse *does* — defaults, rejections, where a failure lands — is
+ * `spec/workflow_registry.spec.ts`, along with the pre-rendered form that
+ * describes without enforcing.
  */
 
 import 'jasmine';
@@ -36,6 +40,26 @@ describe('createWorkflow — describing a workflow', () => {
 
     expect(createWorkflow({key: 'greeter', title: 'Greeter', run}).impl).toBe(
       run,
+    );
+  });
+
+  // The exception, and the only one: a declared schema is enforced, so `.impl`
+  // is the body behind its parse — the same thing the engine invokes, which is
+  // what makes calling `.impl` in a unit test worth anything.
+  it('puts the parse in front of the body when props are a schema', async () => {
+    const run = async ({day}: {day: string}): Promise<string> => day;
+    const nightly = createWorkflow({
+      key: 'nightly',
+      props: t.object({day: t.string()}),
+      run,
+    });
+
+    expect(nightly.impl).not.toBe(run);
+    await expectAsync(nightly.impl({day: '2026-08-30'})).toBeResolvedTo(
+      '2026-08-30',
+    );
+    await expectAsync(nightly.impl({} as never)).toBeRejectedWithError(
+      /nightly was started with props its schema rejects/,
     );
   });
 

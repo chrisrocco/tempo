@@ -49,9 +49,11 @@ on npm and makes no stability promises — clone it, read it, run it.
   defining it registers it — so a worker names only its
   root workflows and everything they invoke rides along on the import graph,
   the same way `proxyActivities` registers activities. It also says what the
-  workflow is: a title, a sentence, and a props schema authored with `t`, which
-  renders the JSON Schema a dashboard draws a start form from _and_ types the
-  body beside it, so the props shape is written once
+  workflow is: a title, a sentence, and a props schema authored with `t` — one
+  definition that renders the JSON Schema a dashboard draws a start form from,
+  types the body beside it, and is **parsed before that body runs**, so defaults
+  are filled and props that do not match fail the execution with the schema's
+  own message (`describeProps(S)` describes without enforcing)
 - **Cancellation**, cascading to children, surfacing as a catchable failure —
   plus `terminate` for when cooperative cancellation cannot land
 - **`continueAsNew`** to bound history on long-lived workflows
@@ -542,6 +544,8 @@ src/
   workflow_registry.ts    createWorkflow — a child reference that registers itself
   workflow_descriptor.ts  the descriptor createWorkflow binds to the function;
                           a worker reads it back for its catalogue
+  workflow_props.ts       what a declared props schema means: the document a
+                          catalogue publishes, and the parse a body runs first
 bin/              server-main.ts — the reference server binary, one call
 spec/             the executable documentation; spec/support/greeter_worker.ts
                   is the reference worker binary the process-level specs deploy

@@ -19,7 +19,14 @@ export async function runSchema<S extends Schema>(
   return {ok: false, message: formatIssues(result.issues)};
 }
 
-function formatIssues(issues: readonly SchemaIssue[]): string {
+/**
+ * Every issue as one string — what `runSchema` puts in `message`, exported for
+ * a caller that has to validate synchronously and cannot go through it.
+ *
+ * Located rather than merely listed: an issue that says where it happened is
+ * prefixed with its path, so one message reads the way a reader scans a form.
+ */
+export function formatIssues(issues: readonly SchemaIssue[]): string {
   return issues
     .map((issue) => {
       const path = issue.path?.map(String).join('.');

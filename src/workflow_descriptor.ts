@@ -21,7 +21,9 @@
  * non-enumerable, so it does not appear in `Object.keys`, spreads, or `JSON.stringify`, and
  * the descriptor is frozen so a reader cannot alter what other readers see. The function is
  * otherwise unchanged in every way an author can observe: same reference, same signature,
- * still directly callable in a unit test — which is what `WorkflowRef.impl` hands back.
+ * still directly callable in a unit test. Describing wraps nothing — a workflow that
+ * declared a props schema is handed here already behind its parse
+ * (`workflow_props.ts`), and this attaches the description to whatever it is given.
  */
 
 import type {WorkflowDescriptor} from './protocol';
@@ -72,17 +74,19 @@ export type AnyWorkflowFn = (props?: any) => Promise<unknown>;
  * key and the description arrive together there, so there is no second place a
  * workflow can be described and no way for two descriptions to race.
  *
- * ## The props type and the props document come from one definition
+ * ## The props type, the props document and the parse come from one definition
  *
  * `createWorkflow` takes the props as a schema (`t.object({...})`, from the
- * `schema/` internal library), renders it into the descriptor written here, and
- * infers `run`'s parameter from the same value — so the shape is authored once
- * and the runtime description cannot drift from the type.
+ * `schema/` internal library), renders it into the descriptor written here,
+ * infers `run`'s parameter from the same value, and parses props against it
+ * before the body — so the shape is authored once and the description, the type
+ * and what actually reaches the workflow cannot drift apart.
  *
- * A pre-rendered JSON Schema is still accepted, and there the two halves are
+ * A pre-rendered JSON Schema is still accepted, and there the halves are
  * related by convention rather than by the compiler: the document says one
- * thing, `run(props: {...})` says another, and nothing compares them. That is
- * the form to reach for only when the document is what you already have.
+ * thing, `run(props: {...})` says another, nothing compares them, and nothing
+ * enforces either. That is the form to reach for when the document is what you
+ * already have, or when describing is all you want.
  */
 export function describeWorkflow<S extends AnyWorkflowFn>(
   run: S,
