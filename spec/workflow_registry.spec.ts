@@ -54,18 +54,14 @@ describe('createWorkflow — the reference and the registry', () => {
       title: 'Nightly report',
       description: 'Totals a day.',
     });
-    // Described but undescribing its props: the form left once the pre-rendered
-    // document was removed, and still a complete declaration.
+    // Described but undescribing its props: still a complete declaration.
     expect(workflowDescriptor(nightly.impl)?.props).toBeUndefined();
   });
 
-  /**
-   * The removed form: a rendered JSON Schema where a schema belongs. A typed
-   * caller cannot write it at all — the `@ts-expect-error` below pins that,
-   * on the call rather than the key because that is where an overload
-   * mismatch is reported — so what this covers is the JavaScript caller, who
-   * reaches the throw and its migration message.
-   */
+  // The removed form: a rendered JSON Schema where a schema belongs. The
+  // `@ts-expect-error` pins that a typed caller cannot write it — on the call,
+  // since that is where an overload mismatch lands — so what runs here is the
+  // JavaScript caller's path to the throw.
   it('refuses a pre-rendered props document, naming the schema to write instead', () => {
     const declare = () =>
       // @ts-expect-error props is a schema now, never a rendered document.
@@ -83,11 +79,10 @@ describe('createWorkflow — the reference and the registry', () => {
       });
 
     expect(declare).toThrowError(/props must be a schema/);
-    // The message has to carry the migration, since the throw is all an author
-    // who never read a release note is going to see.
+    // The message carries the migration: the throw is all an author who never
+    // read a release note will see.
     expect(declare).toThrowError(/t\.object/);
-    // And it throws before registering: a refused declaration leaves no
-    // half-described workflow behind for a worker to serve.
+    // And it throws before registering, leaving no half-described workflow.
     expect(registeredWorkflowImpls()).toEqual([]);
   });
 

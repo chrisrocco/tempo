@@ -79,12 +79,10 @@ export type AnyWorkflowFn = (props?: any) => Promise<unknown>;
  * infers `run`'s parameter from the same value — so the shape is authored once
  * and the runtime description cannot drift from the type.
  *
- * That is the only way to describe props now. A pre-rendered JSON Schema was
- * once accepted beside it, where the two halves were related by convention
- * rather than by the compiler — the document said one thing, `run(props:
- * {...})` said another, and nothing compared them. `workflow_registry.ts`
- * argues why that form is gone; what reaches this file is unchanged either way,
- * since a rendered document is what was always written here.
+ * That is the only way to describe props: a pre-rendered JSON Schema was once
+ * accepted beside it, and `workflow_registry.ts` argues why it is gone. What
+ * reaches this file is unchanged either way — a rendered document is what was
+ * always written here.
  */
 export function describeWorkflow<S extends AnyWorkflowFn>(
   run: S,

@@ -61,31 +61,22 @@
  * once. `workflow.ts` re-exports `t` for exactly this, so a workflow module can
  * author one at module scope without reaching past the author entrypoint.
  *
- * A **pre-rendered JSON Schema document used to be accepted here too**, for a
- * caller who already held one. It no longer is. The two forms were one API with
- * two truths: the document form wrote the props shape twice — once as the
- * document, once as `run`'s annotation — with nothing relating them, which is
- * the duplication the schema form exists to end. Keeping both meant the
- * guarantee could only ever be "written once, if you picked the right form",
- * and every reader of a declaration had to ask which form produced it. So the
- * form that cannot drift is the only one now.
+ * A pre-rendered JSON Schema document used to be accepted here too, and no
+ * longer is: it wrote the props shape twice — once as the document, once as
+ * `run`'s annotation, with nothing relating them — which is the duplication the
+ * schema form exists to end, so keeping both made the guarantee "written once,
+ * if you picked the right form". The cost is a document that cannot be
+ * re-authored (generated elsewhere, read from a file) having no form here: such
+ * a workflow describes its props with `t` or registers undescribed, which is
+ * what `WorkflowRegistration` is now. Nothing downstream moved — the descriptor
+ * still carries a rendered `WorkflowPropsSchema`.
  *
- * What that costs is real and was taken deliberately: a document that cannot be
- * re-authored — generated elsewhere, or read from a file — has no form here any
- * more. Such a workflow describes its props with `t` or registers undescribed,
- * which `WorkflowRegistration` is now the whole of. Nothing downstream moved:
- * the descriptor still carries a rendered `WorkflowPropsSchema`, so the
- * catalogue, the wire, and every reader of one see exactly what they did
- * before.
- *
- * A `props` that is not a schema is **thrown at the call site**, the one thing
- * this file throws at module load. The conflict rule above records rather than
- * throws because a conflict is emergent across modules and only `startWorker`
- * holds enough to report it; this is the opposite — a local authoring mistake
- * in the file the stack trace names, already refused by TypeScript for anyone
- * who has types, and whose only other outcome would be registering with no
- * props: silently publishing an undescribed workflow, which is the failure a
- * descriptor exists to prevent.
+ * A `props` that is not a schema **throws**, the one thing this file throws at
+ * module load. The conflict rule above records instead, because a conflict is
+ * emergent across modules and only `startWorker` holds enough to report it;
+ * this is a local mistake in the file the stack trace names, and its only other
+ * outcome would be registering with no props — silently publishing an
+ * undescribed workflow, which is the failure a descriptor exists to prevent.
  *
  * **The schema describes; it does not run.** `createWorkflow` renders it and
  * keeps nothing else: no wrapper parses props before the body, because that
@@ -225,28 +216,20 @@ export interface WorkflowDeclaration extends Omit<WorkflowDescriptor, 'props'> {
 
 /**
  * The declaration for a workflow that **describes no props**: its key, whatever
- * else it says about itself, and the body.
- *
- * This was also the form that carried a pre-rendered JSON Schema document.
- * That half is gone (fileoverview), and what is left is the case a schema
- * library was never needed for: a workflow whose props are not described, which
- * still lists under its name like a workflow with no descriptor at all.
+ * else it says about itself, and the body. It carried a pre-rendered JSON
+ * Schema document too until that form was removed (fileoverview), leaving the
+ * case a schema library was never needed for.
  */
 export interface WorkflowRegistration<
   F extends AnyWorkflowFn,
 > extends WorkflowDeclaration {
   /**
-   * Not a document. Props are described by a schema now — `t.object({...})`
-   * from `workflow-engine/schema`, re-exported by the author entrypoint — and a
-   * declaration carrying one is a `SchemaWorkflowRegistration`.
+   * Not a document: props are described by a schema now (`t.object({...})`),
+   * which makes such a declaration a `SchemaWorkflowRegistration`.
    *
-   * Declared as `never` rather than left off the interface so the key survives
-   * as somewhere to write this down: a rendered document fails to compile
-   * either way, but only this way is there a `props` to hover over when it
-   * does. The compiler's own message will not explain the migration — an
-   * overload mismatch is reported against the call, not the key — so the
-   * explanation lives here, in the throw an untyped caller gets, and in the
-   * fileoverview.
+   * `never` rather than left off the interface so there is still a `props` to
+   * hover over when one fails to compile — TypeScript reports an overload
+   * mismatch against the call, not the key, so it will not say why on its own.
    */
   props?: never;
   /**
@@ -284,8 +267,7 @@ export interface WorkflowRegistration<
  * `props` is **required** here, which is what makes this shape the one
  * TypeScript picks: a declaration without it is a `WorkflowRegistration` and
  * types `run` from the annotation the author wrote. There is no third state to
- * disambiguate at the call site — the rendered document that used to be one is
- * no longer a form (fileoverview).
+ * disambiguate at the call site.
  *
  * `run` is a method rather than a property so its parameter stays bivariant:
  * a body written against a narrower props type — the common case, since the
@@ -315,11 +297,10 @@ type AnyWorkflowRegistration<F extends AnyWorkflowFn> = Omit<
  *
  * A schema is recognised by its `validate` method rather than by a brand or an
  * `instanceof`, because the port is an interface anything may implement and
- * nothing implementing it declares that it does. What fails that check was the
- * pre-rendered document being carried through untouched; there is no such form
- * now, so failing it is an authoring mistake and throws (fileoverview) naming
- * what to write instead. Only an untyped caller can get here — TypeScript
- * refuses a non-schema `props` at the declaration.
+ * nothing implementing it declares that it does. Failing that check used to
+ * mean a rendered document to carry through; it is an authoring mistake now, so
+ * it throws with the form to write instead — reachable only from untyped code,
+ * since TypeScript refuses a non-schema `props` at the declaration.
  *
  * A schema that renders nothing — `toJsonSchema` is the port's optional half —
  * leaves the descriptor with no props, which reads as "not described", exactly
@@ -335,9 +316,7 @@ function renderProps(
   if (typeof props?.validate !== 'function') {
     throw new Error(
       `createWorkflow('${name}'): props must be a schema, not a rendered JSON Schema document. ` +
-        `Author it with t from workflow-engine/schema — props: t.object({day: t.string()}) — ` +
-        `which renders the same document into the descriptor and types run beside it. ` +
-        `A document you cannot re-author has no form here: describe the props with t, ` +
+        `Author it with t from workflow-engine/schema (props: t.object({day: t.string()})), ` +
         `or drop props and register the workflow undescribed.`,
     );
   }
@@ -354,10 +333,8 @@ function renderProps(
  *
  * Two declaration forms, told apart by `props`: a schema
  * (`SchemaWorkflowRegistration` — it types `run` as well as describing it), or
- * no props at all (`WorkflowRegistration`). A rendered JSON Schema document is
- * no longer either of them, and passing one throws with the schema to write
- * instead. What is stored is the rendered document, as it always was, so
- * nothing downstream of here knows which form was written.
+ * no props at all (`WorkflowRegistration`). What is stored is the rendered
+ * document either way, so nothing downstream of here knows which was written.
  *
  * Registering the **same** function under a key twice is a no-op — a module
  * genuinely can evaluate twice. A *different* function under a taken key is
