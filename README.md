@@ -51,7 +51,9 @@ on npm and makes no stability promises — clone it, read it, run it.
   the same way `proxyActivities` registers activities. It also says what the
   workflow is: a title, a sentence, and a props schema authored with `t`, which
   renders the JSON Schema a dashboard draws a start form from _and_ types the
-  body beside it, so the props shape is written once
+  body beside it, so the props shape is written once. That is the only way to
+  describe props — a pre-rendered JSON Schema document is not accepted, so a
+  workflow either describes them with `t` or describes none
 - **Cancellation**, cascading to children, surfacing as a catchable failure —
   plus `terminate` for when cooperative cancellation cannot land
 - **`continueAsNew`** to bound history on long-lived workflows

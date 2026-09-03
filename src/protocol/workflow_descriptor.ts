@@ -17,7 +17,7 @@
  * workflow starts, and that stays true deliberately: whether props are checked belongs
  * in the workflow's own first lines or in the caller, and moving it here would change
  * failure semantics for every execution — a separate decision with its own argument to
- * make. It stays true of the schema-authored form too: `createWorkflow` renders a
+ * make. It stays true of the only form there is: `createWorkflow` renders a
  * `t.object({...})` into this field and parses nothing with it, so a schema an author
  * wants enforced is one they run themselves. `WorkflowPropsSchema` records what taking
  * a schema shape cost.
