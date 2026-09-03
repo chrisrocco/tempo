@@ -40,31 +40,50 @@ describe('createWorkflow — the reference and the registry', () => {
     await expectAsync(greet.impl({name: 'unit'})).toBeResolvedTo('hi unit');
   });
 
-  // The pre-rendered form, kept on purpose while the block below covers the
-  // schema one: a document a caller already holds is still a way to describe a
-  // workflow, and this is what pins that it goes through untouched.
-  it('accepts a pre-rendered props document and attaches the descriptor to the body', () => {
+  it('attaches the descriptor to the body, so whatever holds one holds the other', () => {
     const nightly = createWorkflow({
       key: 'nightly',
       title: 'Nightly report',
-      props: {
-        type: 'object',
-        properties: {day: {type: 'string'}},
-        required: ['day'],
-      },
+      description: 'Totals a day.',
       async run(props: {day: string}) {
         return props.day;
       },
     });
 
-    expect(workflowDescriptor(nightly.impl)?.title).toBe('Nightly report');
-    // A rendered document is carried as written: this form is for a schema a
-    // caller already holds, so nothing here reshapes it.
-    expect(workflowDescriptor(nightly.impl)?.props).toEqual({
-      type: 'object',
-      properties: {day: {type: 'string'}},
-      required: ['day'],
+    expect(workflowDescriptor(nightly.impl)).toEqual({
+      title: 'Nightly report',
+      description: 'Totals a day.',
     });
+    // Described but undescribing its props: still a complete declaration.
+    expect(workflowDescriptor(nightly.impl)?.props).toBeUndefined();
+  });
+
+  // The removed form: a rendered JSON Schema where a schema belongs. The
+  // `@ts-expect-error` pins that a typed caller cannot write it — on the call,
+  // since that is where an overload mismatch lands — so what runs here is the
+  // JavaScript caller's path to the throw.
+  it('refuses a pre-rendered props document, naming the schema to write instead', () => {
+    const declare = () =>
+      // @ts-expect-error props is a schema now, never a rendered document.
+      createWorkflow({
+        key: 'nightlyDocument',
+        title: 'Nightly report',
+        props: {
+          type: 'object',
+          properties: {day: {type: 'string'}},
+          required: ['day'],
+        },
+        async run(props: {day: string}) {
+          return props.day;
+        },
+      });
+
+    expect(declare).toThrowError(/props must be a schema/);
+    // The message carries the migration: the throw is all an author who never
+    // read a release note will see.
+    expect(declare).toThrowError(/t\.object/);
+    // And it throws before registering, leaving no half-described workflow.
+    expect(registeredWorkflowImpls()).toEqual([]);
   });
 
   it('throws a directing error when called outside a workflow', () => {
