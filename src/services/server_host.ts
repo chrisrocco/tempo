@@ -21,6 +21,7 @@ import type {
   ExecutionFilter,
   ExecutionGroups,
   ExecutionPage,
+  HeartbeatReply,
   LeasedActivityTask,
   PollRequest,
   QueueWorkers,
@@ -137,7 +138,10 @@ export interface ServerHost {
     request?: PollRequest,
   ): Promise<LeasedActivityTask | undefined>;
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
-  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
+  heartbeatActivityTask(
+    token: TaskToken,
+    checkpoint?: unknown,
+  ): Promise<HeartbeatReply>;
   /** Re-drive persisted executions after a restart. */
   resume(): Promise<void>;
   /** Stop background timers so the process can exit. */

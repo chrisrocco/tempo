@@ -149,6 +149,7 @@ import type {
   ActivityScheduledEvent,
   Command,
   ContinueAsNewCommand,
+  HeartbeatReply,
   HistoryEvent,
   LeasedActivityTask,
   PollRequest,
@@ -513,12 +514,17 @@ export interface ServerCore {
   completeActivityTask(token: TaskToken, result: ActivityResult): Promise<void>;
   /**
    * The attempt behind `token` is still alive: renew its lease and reset its
-   * silence deadline. Ignored once the server has given up on that attempt.
+   * silence deadline, and tell it whether to stop. Ignored once the server has
+   * given up on that attempt — and the reply then says to stop, since nothing
+   * such an attempt reports will be consumed.
    *
    * `checkpoint` replaces this attempt's checkpoint, readable back through
    * `activityCheckpoints`. Omitting it leaves the previous one standing.
    */
-  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
+  heartbeatActivityTask(
+    token: TaskToken,
+    checkpoint?: unknown,
+  ): Promise<HeartbeatReply>;
   /**
    * What each of `workflowId`'s in-flight attempts last reported, keyed by seq.
    *
@@ -1192,17 +1198,27 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     delayMs: number,
   ): void {
     const enqueue = (): void => {
-      activityTaskQueue.enqueue(
-        {
-          workflowId,
-          seq: scheduled.seq,
-          name: scheduled.name,
-          args: scheduled.args,
-          options: scheduled.options,
-        },
-        scheduled.options.taskQueue ?? taskQueue,
-      );
-      kickActivityWorker();
+      // Re-read at fire time, because the backoff is exactly the window in
+      // which the activity can stop being wanted: a cancel lands, `requestCancel`
+      // settles the seq as cancelled, and a timer armed before that would
+      // otherwise hand a worker a fresh attempt — an agent turn, a charge — for
+      // an execution that will never read it. The store is the authority on
+      // whether the seq is still open; nothing in this closure is.
+      void historyStore.get(workflowId).then((rec) => {
+        if (!rec || rec.status !== 'running') return;
+        if (completedSeqs(rec.history).activities.has(scheduled.seq)) return;
+        activityTaskQueue.enqueue(
+          {
+            workflowId,
+            seq: scheduled.seq,
+            name: scheduled.name,
+            args: scheduled.args,
+            options: scheduled.options,
+          },
+          scheduled.options.taskQueue ?? taskQueue,
+        );
+        kickActivityWorker();
+      });
     };
     if (delayMs <= 0) {
       enqueue();
@@ -1290,7 +1306,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       (e): e is ActivityScheduledEvent =>
         e.type === 'activityScheduled' && e.seq === seq,
     );
-    if (!result.ok) {
+    // A non-success for a cancelled execution is the activity's outcome, not an
+    // attempt to retry. The workflow was handed `CancelledFailure` when the cancel
+    // was applied and will never read this seq again, so another attempt would be
+    // real work — an agent turn, a charge — done for nobody. `requestCancel` is
+    // the usual caller here, settling every open activity the moment it records
+    // the cancel; the history check covers a worker's own report that was already
+    // in flight when it did. Either way the cancel decided the activity's fate.
+    const cancelled =
+      !result.ok &&
+      (result.cancelled === true ||
+        rec.history.some((e) => e.type === 'cancelRequested'));
+    if (!result.ok && !cancelled) {
       const retry = scheduled?.options.retry;
       const attempts = await historyStore.recordActivityAttempt(
         workflowId,
@@ -1343,12 +1370,14 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       workflowId,
       result.ok
         ? {type: 'activityCompleted', seq, result: result.result}
-        : {
-            type: 'activityFailed',
-            seq,
-            error: result.error,
-            stack: result.stack,
-          },
+        : cancelled
+          ? {type: 'activityCancelled', seq, error: result.error}
+          : {
+              type: 'activityFailed',
+              seq,
+              error: result.error,
+              stack: result.stack,
+            },
     );
     await historyStore.clearActivityAttempts(workflowId, seq);
     // The seq is settled, so no attempt still out — an expired-lease sibling,
@@ -1361,6 +1390,7 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       name: scheduled?.name,
       ok: result.ok,
       ...(result.ok ? {} : {error: result.error}),
+      ...(cancelled ? {cancelled: true} : {}),
     });
     wake(workflowId);
   }
@@ -1429,6 +1459,27 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     if (!rec || rec.status !== 'running') return;
     if (rec.history.some((e) => e.type === 'cancelRequested')) return;
     await appendEvent(workflowId, {type: 'cancelRequested'});
+    // Every activity still open is settled as cancelled here, now, rather than
+    // when its attempt gets round to reporting. Applying `cancelRequested`
+    // rejects every waiter unconditionally (`core/apply_event`), so from this
+    // moment no result for these seqs can be consumed — and the workflow settles
+    // on its next task, which sweeps the attempts' records and turns their later
+    // acks away as stragglers. Recording the disposition here is what keeps
+    // history honest about them: an `activityScheduled` with no terminal event
+    // would read as work still in flight for an execution that is over.
+    //
+    // Going through `reportActivityResult` rather than appending directly is
+    // deliberate: it dedups against a report that raced this one, clears the
+    // retry state, sweeps the attempt records for the seq — which is what makes
+    // the next heartbeat from a still-running attempt answer "stop" — and logs
+    // the settlement like any other. The attempt itself learns on that heartbeat
+    // (`heartbeatActivityTask`); what it reports afterwards is not consumed.
+    for (const open of pendingWork(rec.history).activities)
+      await reportActivityResult(workflowId, open.seq, {
+        ok: false,
+        error: 'execution cancelled',
+        cancelled: true,
+      });
     const kids = childrenByParent.get(workflowId);
     // Every child, whatever its parent-close policy: cancelling says *stop this
     // work*, and a subtree of it is still that work. The policy answers the
@@ -1871,11 +1922,12 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   /**
    * Stop waiting on an attempt and record it as failed.
    *
-   * The server cannot stop a worker mid-activity — there is no channel back into
-   * a running attempt, with or without heartbeats. What it can do is stop
-   * *waiting*, record the outcome, and take the task out of the queue so the
-   * lease does not later redeliver it into a second concurrent run. That ack is
-   * what turns a deadline into a bound rather than just an early failure.
+   * The server cannot stop a worker mid-activity. The one channel back into a
+   * running attempt is the heartbeat reply, and a deadline is precisely the case
+   * where the attempt is not speaking. What it can do is stop *waiting*, record
+   * the outcome, and take the task out of the queue so the lease does not later
+   * redeliver it into a second concurrent run. That ack is what turns a deadline
+   * into a bound rather than just an early failure.
    *
    * Two deadlines end here and they mean different things: `startToClose` says
    * the attempt took too long, `heartbeat` says it went quiet. Both are failures
@@ -2053,14 +2105,21 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   async function heartbeatActivityTask(
     token: TaskToken,
     checkpoint?: unknown,
-  ): Promise<void> {
+  ): Promise<HeartbeatReply> {
     const lease = activityLeases.get(token);
     const task = heartbeatTasks.get(token);
     // Silence is the only signal the server has, so a heartbeat for an attempt
     // it already gave up on must not resurrect anything: the task belongs to
-    // whoever holds it now.
-    if (!lease || !task) return;
-    if (!activityTaskQueue.renew(token)) return;
+    // whoever holds it now. It *is* told to stop. An attempt the server holds no
+    // record of is one whose result will not be consumed — its execution was
+    // cancelled and settled, its seq settled through a redelivered sibling, or
+    // a deadline gave up on it and possibly started another — and in every one
+    // of those, an attempt that keeps going is either wasted work or the
+    // duplicate the deadline existed to prevent. The reason is not carried,
+    // because the attempt has nothing different to do with it.
+    const stop: HeartbeatReply = {cancelRequested: true};
+    if (!lease || !task) return stop;
+    if (!activityTaskQueue.renew(token)) return stop;
     const timeoutMs = task.options.heartbeatTimeoutMs;
     if (timeoutMs !== undefined && timeoutMs > 0)
       armAttemptTimer(task, 'heartbeat', timeoutMs);
@@ -2074,6 +2133,19 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       seq: lease.seq,
       name: task.name,
     });
+    // A live attempt whose execution has been cancelled but not yet settled — the
+    // window between `requestCancel` recording the cancel and the sweep that
+    // follows it. Read from history rather than from a set `requestCancel`
+    // maintains, so the answer is the durable fact and not one server's memory
+    // of it — the shape a second server behind the same store will need. A store
+    // read per heartbeat is bounded by the worker-side throttle, which exists
+    // for exactly this.
+    const rec = await historyStore.get(lease.workflowId);
+    return {
+      cancelRequested:
+        rec !== undefined &&
+        rec.history.some((e) => e.type === 'cancelRequested'),
+    };
   }
 
   /**

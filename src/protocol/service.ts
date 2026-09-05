@@ -1089,10 +1089,38 @@ export interface WorkflowService {
    * `checkpoint` replaces whatever this attempt last reported, surfacing on
    * `PendingActivityView.checkpoint`. Last write wins; no history event.
    *
-   * A no-op for an attempt the server has already given up on — the worker finds
-   * out when it reports a result and the completion is dropped, not here.
+   * **The reply is the one channel back into a running attempt.** The server
+   * cannot reach a worker mid-activity; it can only answer when the worker speaks,
+   * and a heartbeat is the worker speaking. So the reply carries what the attempt
+   * most needs to hear and cannot otherwise learn: that nobody wants its result
+   * any more. An activity that never heartbeats never hears it, which is the same
+   * bargain heartbeats already strike — liveness has to come from the work.
+   *
+   * For an attempt the server has already given up on, the lease is not revived
+   * and the reply says to stop — see `HeartbeatReply`.
    */
-  heartbeatActivityTask(token: TaskToken, checkpoint?: unknown): Promise<void>;
+  heartbeatActivityTask(
+    token: TaskToken,
+    checkpoint?: unknown,
+  ): Promise<HeartbeatReply>;
+}
+
+/**
+ * What the server says back to a heartbeat.
+ *
+ * `cancelRequested` means **the server no longer wants this attempt to
+ * continue**. It is true once the execution's history holds a `cancelRequested`
+ * event — the same fact `Client.cancel` records and the workflow unwinds on — and
+ * it is equally true for an attempt the server holds no record of: one whose
+ * execution has settled, whose seq was settled by a redelivered sibling, or that a
+ * deadline gave up on. Those are different stories on the server, but the attempt
+ * has one thing to do in all of them, which is stop — its result will not be
+ * consumed and the server will not retry it (see `ActivityCancelledEvent`), and an
+ * attempt abandoned by a deadline that keeps going is the duplicate the deadline
+ * existed to prevent. One field, because there is one decision.
+ */
+export interface HeartbeatReply {
+  cancelRequested: boolean;
 }
 
 /**
@@ -1125,15 +1153,31 @@ export interface ActivityTask {
   options: ActivityOptions;
 }
 
-/** What an activity worker reports back after running an activity function. */
 /**
+ * What an activity worker reports back after running an activity function.
+ *
  * `stack` is the activity's own stack, captured in the worker that ran it — the
  * only process that ever holds the thrown `Error`. Without it a failure arrives
  * as a bare message ("Cannot read properties of undefined") naming no file and no
  * line, and the frames are unrecoverable: they died with the object.
+ *
+ * `cancelled` says the attempt threw **after a heartbeat reply told it to stop**.
+ * The worker sets it from the attempt's own context rather than the server
+ * inferring it, because the worker is the only party that knows whether the
+ * attempt had heard. Any throw after that point counts — an `AbortError` out of a
+ * `fetch` handed the cancellation signal is the usual shape, and asking authors to
+ * throw one particular class instead would be a rule with nothing to buy.
+ *
+ * Usually the server has already settled the seq as cancelled by the time this
+ * arrives (`requestCancel` does so at once), and the report is turned away as a
+ * straggler. It matters in the window where it has not: a report already in
+ * flight when the cancel landed is recorded as `activityCancelled`, not retried.
+ * The server also uses the same shape internally, for the settlement it writes
+ * on the execution's behalf.
  */
 export type ActivityResult =
-  {ok: true; result: unknown} | {ok: false; error: string; stack?: string};
+  | {ok: true; result: unknown}
+  | {ok: false; error: string; stack?: string; cancelled?: boolean};
 
 /** An activity task handed to a worker, with the lease token to complete it. */
 export interface LeasedActivityTask extends ActivityTask {

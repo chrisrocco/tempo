@@ -21,6 +21,7 @@ import type {
   ExecutionFilter,
   ExecutionGroups,
   ExecutionPage,
+  HeartbeatReply,
   QueueWorkers,
   WorkflowReportRequest,
   WorkflowSummary,
@@ -248,8 +249,12 @@ export function createRemoteService(
     async heartbeatActivityTask(
       token: TaskToken,
       checkpoint?: unknown,
-    ): Promise<void> {
-      await call({method: 'heartbeatActivityTask', token, checkpoint});
+    ): Promise<HeartbeatReply> {
+      return (await call({
+        method: 'heartbeatActivityTask',
+        token,
+        checkpoint,
+      })) as HeartbeatReply;
     },
   };
 }

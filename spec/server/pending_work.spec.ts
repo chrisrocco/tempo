@@ -53,6 +53,21 @@ describe('pendingWork', () => {
     expect(pendingWork(history).activities).toEqual([]);
   });
 
+  it('treats a cancelled activity as finished, not outstanding', () => {
+    const history: HistoryEvent[] = [
+      {
+        type: 'activityScheduled',
+        seq: 0,
+        name: 'agent',
+        args: [],
+        options: {},
+      },
+      {type: 'cancelRequested'},
+      {type: 'activityCancelled', seq: 0, error: 'aborted'},
+    ];
+    expect(pendingWork(history).activities).toEqual([]);
+  });
+
   it('reports an unfired timer with the absolute time it fires at', () => {
     const history: HistoryEvent[] = [
       {type: 'timerStarted', seq: 1, fireAt: 1234},

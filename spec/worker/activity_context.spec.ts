@@ -2,11 +2,15 @@
  * @fileoverview
  * `heartbeat()` as an activity author meets it: ambient, callable as often as is
  * convenient, and inert outside an activity so an activity function stays an
- * ordinary function you can call from a test.
+ * ordinary function you can call from a test. And its reply as the author meets
+ * that: `cancellationRequested()` and `cancellationSignal()`, which flip on the
+ * beat that hears the execution was cancelled and never otherwise.
  */
 
-import type {ActivityTask} from '../../src/protocol';
+import type {ActivityTask, HeartbeatReply} from '../../src/protocol';
 import {
+  cancellationRequested,
+  cancellationSignal,
   createActivityRegistry,
   createActivityWorker,
   heartbeat,
@@ -29,9 +33,9 @@ describe('heartbeat from inside an activity', () => {
       return 'done';
     });
 
-    const result = await createActivityWorker(registry).runTask(task(), () =>
-      beats.push(Date.now()),
-    );
+    const result = await createActivityWorker(registry).runTask(task(), () => {
+      beats.push(Date.now());
+    });
 
     expect(result).toEqual({ok: true, result: 'done'});
     expect(beats.length).toBe(1);
@@ -53,9 +57,9 @@ describe('heartbeat from inside an activity', () => {
       return 'done';
     });
 
-    await createActivityWorker(registry).runTask(task({}), () =>
-      beats.push(Date.now()),
-    );
+    await createActivityWorker(registry).runTask(task({}), () => {
+      beats.push(Date.now());
+    });
 
     expect(beats.length).toBeGreaterThan(0);
   });
@@ -141,9 +145,9 @@ describe('heartbeat from inside an activity', () => {
       return 'done';
     });
 
-    await createActivityWorker(registry).runTask(task(), (checkpoint) =>
-      sent.push(checkpoint),
-    );
+    await createActivityWorker(registry).runTask(task(), (checkpoint) => {
+      sent.push(checkpoint);
+    });
 
     expect(sent).toEqual([{jobId: 'q-8823', pct: 40}]);
   });
@@ -162,7 +166,9 @@ describe('heartbeat from inside an activity', () => {
 
     await createActivityWorker(registry).runTask(
       task({heartbeatTimeoutMs: 10_000}),
-      (checkpoint) => sent.push(checkpoint),
+      (checkpoint) => {
+        sent.push(checkpoint);
+      },
     );
 
     expect(sent).toEqual([{pct: 10}]); // the first survives, and it is complete
@@ -180,7 +186,9 @@ describe('heartbeat from inside an activity', () => {
 
     await createActivityWorker(registry).runTask(
       task({heartbeatTimeoutMs: 40}),
-      (checkpoint) => sent.push(checkpoint),
+      (checkpoint) => {
+        sent.push(checkpoint);
+      },
     );
 
     expect(sent).toEqual([{pct: 10}, {pct: 90}]);
@@ -201,5 +209,148 @@ describe('heartbeat from inside an activity', () => {
     const result = await createActivityWorker(registry).runTask(task());
 
     expect(result).toEqual({ok: true, result: 'done'});
+  });
+});
+
+describe('cancellation from inside an activity', () => {
+  /** A server that answers `cancelRequested` from the `n`th beat onward. */
+  function serverCancellingAfter(beats: number): () => Promise<HeartbeatReply> {
+    let sent = 0;
+    return async () => ({cancelRequested: ++sent > beats});
+  }
+
+  /** Beats every few ms until told to stop, then throws — the shape of an agent loop. */
+  function loopUntilCancelled(observed: {stoppedAfter?: number}) {
+    return async (): Promise<string> => {
+      for (let i = 0; i < 200; i++) {
+        heartbeat();
+        await wait(2);
+        if (cancellationRequested()) {
+          observed.stoppedAfter = i;
+          throw new Error('stopped: execution cancelled');
+        }
+      }
+      return 'ran to the end';
+    };
+  }
+
+  it('flips cancellationRequested on the beat that hears it, and not before', async () => {
+    const seen: boolean[] = [];
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      seen.push(cancellationRequested()); // before any beat
+      heartbeat();
+      await wait(5); // let the reply land
+      seen.push(cancellationRequested());
+      return 'done';
+    });
+
+    await createActivityWorker(registry).runTask(
+      task({heartbeatTimeoutMs: 4}),
+      serverCancellingAfter(0),
+    );
+
+    expect(seen).toEqual([false, true]);
+  });
+
+  it('aborts cancellationSignal at the same moment', async () => {
+    let aborted: boolean | undefined;
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      const signal = cancellationSignal();
+      const before = signal.aborted;
+      heartbeat();
+      await wait(5);
+      aborted = signal.aborted;
+      return before;
+    });
+
+    const result = await createActivityWorker(registry).runTask(
+      task({heartbeatTimeoutMs: 4}),
+      serverCancellingAfter(0),
+    );
+
+    expect(result).toEqual({ok: true, result: false}); // not aborted before the beat
+    expect(aborted).toBeTrue();
+  });
+
+  /**
+   * The point of the whole mechanism: a long loop that heartbeats stops within
+   * one throttle window of the cancel, rather than running to the end.
+   */
+  it('lets a looping activity stop early, reported as cancelled rather than failed', async () => {
+    const observed: {stoppedAfter?: number} = {};
+    const registry = createActivityRegistry();
+    registry.set('agent', loopUntilCancelled(observed));
+
+    const result = await createActivityWorker(registry).runTask(
+      task({heartbeatTimeoutMs: 4}),
+      serverCancellingAfter(2),
+    );
+
+    expect(result).toEqual(
+      jasmine.objectContaining({
+        ok: false,
+        error: 'stopped: execution cancelled',
+        cancelled: true,
+      }),
+    );
+    expect(observed.stoppedAfter).toBeLessThan(200);
+  });
+
+  it('reports a throw before any cancellation as a plain failure', async () => {
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat();
+      throw new Error('boom');
+    });
+
+    const result = await createActivityWorker(registry).runTask(
+      task(),
+      serverCancellingAfter(99),
+    );
+
+    expect(result).toEqual(
+      jasmine.objectContaining({ok: false, error: 'boom'}),
+    );
+    expect('cancelled' in result).toBeFalse();
+  });
+
+  /** The work happened; a return is a completion whatever the server said. */
+  it('reports a return after cancellation as a completion', async () => {
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat();
+      await wait(5);
+      return cancellationRequested() ? 'finished anyway' : 'never heard';
+    });
+
+    const result = await createActivityWorker(registry).runTask(
+      task({heartbeatTimeoutMs: 4}),
+      serverCancellingAfter(0),
+    );
+
+    expect(result).toEqual({ok: true, result: 'finished anyway'});
+  });
+
+  it('never learns from a beat that failed to reach the server', async () => {
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat();
+      await wait(5);
+      return cancellationRequested();
+    });
+
+    const result = await createActivityWorker(registry).runTask(
+      task({heartbeatTimeoutMs: 4}),
+      async () => undefined, // what the loop hands over when the RPC failed
+    );
+
+    expect(result).toEqual({ok: true, result: false});
+  });
+
+  it('is inert outside an activity: never cancelled, never aborted', () => {
+    expect(cancellationRequested()).toBeFalse();
+    expect(cancellationSignal().aborted).toBeFalse();
   });
 });
