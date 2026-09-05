@@ -23,8 +23,9 @@ export function greet(name: string): string {
 }
 ```
 
-This is a working reference implementation, not a published package. It is not
-on npm and makes no stability promises — clone it, read it, run it.
+Built for orchestrating agentic workloads and data materialization pipelines, and
+in use for the first of those. It is not on npm: consume it from source, and read
+[`ROADMAP.md`](ROADMAP.md) for what is stable and what is still being built.
 
 ## What it does
 
