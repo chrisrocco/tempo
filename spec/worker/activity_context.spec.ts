@@ -7,7 +7,11 @@
  * beat that hears the execution was cancelled and never otherwise.
  */
 
-import type {ActivityTask, HeartbeatReply} from '../../src/protocol';
+import {
+  MAX_CHECKPOINT_BYTES,
+  type ActivityTask,
+  type HeartbeatReply,
+} from '../../src/protocol';
 import {
   cancellationRequested,
   cancellationSignal,
@@ -352,5 +356,51 @@ describe('cancellation from inside an activity', () => {
   it('is inert outside an activity: never cancelled, never aborted', () => {
     expect(cancellationRequested()).toBeFalse();
     expect(cancellationSignal().aborted).toBeFalse();
+  });
+});
+
+describe('a checkpoint over the cap', () => {
+  /**
+   * The same rule as carryover, and the same size: a checkpoint is what the
+   * next attempt would need to resume — ids and a position — not the work in
+   * progress. Thrown from the beat that would send it, so the attempt fails at
+   * the first call that crosses the line, with the cap in the message.
+   */
+  it('fails the attempt at the beat, naming the cap', async () => {
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat({rows: 'x'.repeat(MAX_CHECKPOINT_BYTES)});
+      return 'never';
+    });
+
+    const result = await createActivityWorker(registry).runTask(
+      task(),
+      () => {},
+    );
+
+    expect(result).toEqual(
+      jasmine.objectContaining({
+        ok: false,
+        error: jasmine.stringMatching(
+          /checkpoint is \d+ bytes, over the \d+ limit/,
+        ),
+      }),
+    );
+  });
+
+  it('lets a checkpoint that fits through', async () => {
+    const sent: unknown[] = [];
+    const registry = createActivityRegistry();
+    registry.set('agent', async () => {
+      heartbeat({jobId: 'q-8823', pct: 40});
+      return 'done';
+    });
+
+    const result = await createActivityWorker(registry).runTask(task(), (c) => {
+      sent.push(c);
+    });
+
+    expect(result).toEqual({ok: true, result: 'done'});
+    expect(sent).toEqual([{jobId: 'q-8823', pct: 40}]);
   });
 });

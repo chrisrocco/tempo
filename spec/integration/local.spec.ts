@@ -621,7 +621,7 @@ describe('local runtime — cancellation', () => {
     const activities = {
       agent: async () => {
         for (let i = 0; i < 500; i++) {
-          heartbeat();
+          heartbeat({turn: i});
           if (cancellationRequested()) {
             stopped = true;
             throw new Error('stopped: execution cancelled');
@@ -653,6 +653,10 @@ describe('local runtime — cancellation', () => {
       'cancelRequested',
       'activityCancelled',
     ]);
+    // Where it got to, on the event that stopped it: the last turn the agent
+    // reported before the cancel landed.
+    const cancelledEvent = detail!.history[3] as {checkpoint?: {turn: number}};
+    expect(cancelledEvent.checkpoint?.turn).toBeGreaterThanOrEqual(0);
     rt.shutdown();
   });
 

@@ -471,8 +471,11 @@ export interface PendingActivityView {
    * `worker/activity_context`. A consumer treating this as a stream of progress
    * events will silently miss most of them; history is where a trail lives.
    *
-   * Absent until the attempt beats, and gone once it settles: live state about
-   * an attempt in flight, so an activity waiting out a backoff has none.
+   * Absent until the attempt beats, and gone from here once it settles: live
+   * state about an attempt in flight, so an activity waiting out a backoff has
+   * none. Its last value survives on the terminal event in history
+   * (`ActivityOutcomeBase.checkpoint`), which is where a settled execution's
+   * reader looks.
    */
   checkpoint?: unknown;
   /**
@@ -1087,7 +1090,9 @@ export interface WorkflowService {
    * redelivered, and resets the `heartbeatTimeoutMs` deadline if one is set.
    *
    * `checkpoint` replaces whatever this attempt last reported, surfacing on
-   * `PendingActivityView.checkpoint`. Last write wins; no history event.
+   * `PendingActivityView.checkpoint`. Last write wins, and no history event of
+   * its own: the last value is carried onto the event that settles the seq
+   * (`ActivityOutcomeBase.checkpoint`), and nothing in between is kept.
    *
    * **The reply is the one channel back into a running attempt.** The server
    * cannot reach a worker mid-activity; it can only answer when the worker speaks,
@@ -1205,6 +1210,18 @@ export type Carryover = Record<string, unknown>;
  * offending state, at the moment the code that grows it is first run.
  */
 export const MAX_CARRYOVER_BYTES = 16 * 1024;
+
+/**
+ * A ceiling on one serialized checkpoint, enforced at the beat that would send
+ * it — the attempt fails there, at the first call that crosses the line.
+ *
+ * The same size as carryover, and for the same reason: a checkpoint is what the
+ * *next* attempt would need to resume — a job id, a cursor, a position — not the
+ * work in progress. It rides every sent beat, sits in server memory per live
+ * attempt, and its last value is copied onto the activity's terminal event, so a
+ * checkpoint carrying rows would be paid for three times over.
+ */
+export const MAX_CHECKPOINT_BYTES = 16 * 1024;
 
 /**
  * A ceiling on the serialized arguments of one activity call, and separately on
