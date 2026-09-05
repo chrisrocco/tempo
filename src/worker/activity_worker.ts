@@ -35,7 +35,12 @@
  * deadline bounds what the *engine* does, not what the activity already did.
  */
 
-import type {ActivityResult, ActivityTask, HeartbeatReply} from '../protocol';
+import {
+  MAX_ACTIVITY_PAYLOAD_BYTES,
+  type ActivityResult,
+  type ActivityTask,
+  type HeartbeatReply,
+} from '../protocol';
 import {cancellationRequested, withActivityContext} from './activity_context';
 import type {ActivityRegistry} from './activity_registry';
 
@@ -71,7 +76,27 @@ export function createActivityWorker(
         task.options.heartbeatTimeoutMs,
         async () => {
           try {
-            return {ok: true, result: await fn(...task.args)};
+            const result = await fn(...task.args);
+            // The result is about to be written into `activityCompleted` and
+            // replayed on every later task, so it is held to the same cap as the
+            // arguments were on the way in (`MAX_ACTIVITY_PAYLOAD_BYTES`). A
+            // failure rather than a throw, because this is the attempt's outcome:
+            // it is reported like any other failure, retried under the policy —
+            // uselessly, but boundedly — and reaches the workflow as a catchable
+            // error naming the cap. Inside the `try` so a result that cannot be
+            // serialized at all fails the same way, with the serializer's message.
+            const size = JSON.stringify(result)?.length ?? 0;
+            if (size > MAX_ACTIVITY_PAYLOAD_BYTES)
+              return {
+                ok: false,
+                error:
+                  `activity "${task.name}" returned ${size} bytes, over the ` +
+                  `${MAX_ACTIVITY_PAYLOAD_BYTES} limit. A result is written into ` +
+                  `history and replayed on every task, so return a reference — an ` +
+                  `id, a path, a revision — never the data itself. Write the data ` +
+                  `where it lives and return where.`,
+              };
+            return {ok: true, result};
           } catch (e) {
             // This is the only place in the system holding the thrown Error, so
             // it is the only place the stack can be taken from. Everything

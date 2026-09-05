@@ -31,8 +31,10 @@ import {
   type WorkflowFn,
 } from '../core';
 import {
+  MAX_ACTIVITY_PAYLOAD_BYTES,
   MAX_CARRYOVER_BYTES,
   type Carryover,
+  type Command,
   type WorkflowTask,
   type WorkflowTaskResult,
 } from '../protocol';
@@ -60,6 +62,44 @@ function assertCarryoverFits(name: string, carryover: Carryover): void {
       `task and copied into every run, so it must stay small — keep a cursor, not a ` +
       `collection. To avoid acting on an item twice, give its child an explicit workflowId.`,
   );
+}
+
+/**
+ * Refuse a task that would dispatch an activity with arguments over the cap.
+ *
+ * The same seam and severity as the carryover cap, for the same reason: the
+ * arguments are about to be written into `activityScheduled` and replayed on
+ * every later task, and the worker is where the code that built them just ran.
+ * A task failure is retried rather than fatal, so shipping a fix — pass an id,
+ * write the rows somewhere and pass where — and rolling the workers recovers the
+ * execution, and nothing durable has been written.
+ *
+ * Only the commands the server has yet to see are checked. A command replay
+ * suppressed because history already holds it was checked when it was first
+ * issued; checking it again would be paying the serialization on every task for
+ * a decision already made.
+ *
+ * Checked here rather than inside `runActivity`, where it would reject the
+ * promise workflow code is awaiting. Workflow code could catch that, and a caught
+ * cap violation is an execution that failed for a reason the author cannot fix
+ * without redeploying anyway — the task-failure path is the one built for that.
+ */
+function assertActivityArgsFit(name: string, commands: Command[]): void {
+  for (const cmd of commands) {
+    if (cmd.type !== 'scheduleActivity') continue;
+    const size = JSON.stringify(cmd.args).length;
+    if (size <= MAX_ACTIVITY_PAYLOAD_BYTES) continue;
+    const biggest = cmd.args
+      .map((arg, index) => ({index, size: JSON.stringify(arg)?.length ?? 0}))
+      .sort((a, b) => b.size - a.size)[0];
+    throw new Error(
+      `workflow "${name}" called activity "${cmd.name}" with ${size} bytes of arguments, ` +
+        `over the ${MAX_ACTIVITY_PAYLOAD_BYTES} limit (largest is argument ${biggest?.index} ` +
+        `at ${biggest?.size}). Arguments are written into history and replayed on every ` +
+        `task, so hand an activity a reference — an id, a path, a revision — never the ` +
+        `data itself. Write the data where it lives and pass where.`,
+    );
+  }
 }
 
 export interface WorkflowWorker {
@@ -118,6 +158,7 @@ export function createWorkflowWorker(
       );
       await replay(ctx, fn);
       assertCarryoverFits(name, ctx.carryoverNext);
+      assertActivityArgsFit(name, ctx.commands);
       return {
         done: ctx.done,
         result: ctx.result,

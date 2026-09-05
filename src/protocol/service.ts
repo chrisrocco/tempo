@@ -1206,6 +1206,38 @@ export type Carryover = Record<string, unknown>;
  */
 export const MAX_CARRYOVER_BYTES = 16 * 1024;
 
+/**
+ * A ceiling on the serialized arguments of one activity call, and separately on
+ * its serialized result.
+ *
+ * Both are written into history — `activityScheduled.args` and
+ * `activityCompleted.result` — and history is replayed on every task, so an
+ * activity handed a batch of rows costs that batch on every task for the rest of
+ * the run, and a workflow that does it in a loop grows its history by the batch
+ * per iteration. Nothing about that is visible until replay is slow. The cap
+ * converts it into a loud failure at the first call that crosses the line, naming
+ * the activity and the size, and with it states the rule the engine is built on:
+ * **an activity is handed a reference and returns a reference** — an id, a path,
+ * a revision, a cursor — never the thing itself. What the thing is lives where it
+ * lives; history records that it was pointed at.
+ *
+ * Deliberately large next to the other two caps. Carryover and `awaiting` are
+ * *state*, meant to fit in a few ids; an activity's arguments legitimately carry a
+ * prompt, a query, or a document to act on, and an agent turn's messages are not
+ * small. Temporal warns at this size and refuses at 2 MB; this refuses here,
+ * because a warning nobody reads is not a rule. It is a guardrail against rows,
+ * not a budget to spend up to.
+ *
+ * Read it together with `DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD` in
+ * `server/server_core`: that bounds how many events a run accumulates before the
+ * engine suggests a rollover, and this bounds how large the worst of them can be.
+ * Their product is the most history a run can be asked to replay. Enforced at the
+ * two seams that produce the values — `worker/workflow_worker` for arguments,
+ * `worker/activity_worker` for results — so the failure lands where the offending
+ * code just ran.
+ */
+export const MAX_ACTIVITY_PAYLOAD_BYTES = 256 * 1024;
+
 export interface WorkflowTask {
   token: TaskToken;
   workflowId: string;
