@@ -60,7 +60,11 @@ export function completedSeqs(history: HistoryEvent[]): CompletedSeqs {
   const timers = new Set<number>();
   const children = new Set<number>();
   for (const ev of history) {
-    if (ev.type === 'activityCompleted' || ev.type === 'activityFailed')
+    if (
+      ev.type === 'activityCompleted' ||
+      ev.type === 'activityFailed' ||
+      ev.type === 'activityCancelled'
+    )
       activities.add(ev.seq);
     else if (ev.type === 'timerFired') timers.add(ev.seq);
     else if (ev.type === 'childCompleted' || ev.type === 'childFailed')

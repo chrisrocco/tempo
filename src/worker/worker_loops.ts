@@ -340,26 +340,30 @@ export function runActivityWorker(
     // One attempt per delivery; the lease redelivers on failure/crash
     // (at-least-once), unless the attempt heartbeats to keep its claim.
     return async () => {
-      const result = await worker.runTask(task, (checkpoint) => {
-        // Voided on purpose: an activity must not block on its own heartbeat,
-        // and a lost beat is survivable by construction — the send window is a
-        // fraction of the deadline precisely so the next one still lands in
-        // time (`THROTTLE_FRACTION` in `worker/activity_context`). What is not
+      const result = await worker.runTask(task, (checkpoint) =>
+        // Not awaited by the activity: the context consumes the reply as it lands,
+        // so an activity never blocks on its own heartbeat, and a lost beat is
+        // survivable by construction — the send window is a fraction of the
+        // deadline precisely so the next one still lands in time
+        // (`THROTTLE_FRACTION` in `worker/activity_context`). What is not
         // survivable is losing them silently, so the failure is counted and
-        // reported even though nothing here can retry it.
-        void service
+        // reported even though nothing here can retry it. A lost beat also says
+        // nothing about cancellation; the next one asks again.
+        service
           .heartbeatActivityTask(task.token, checkpoint)
-          .then(() => {
+          .then((reply) => {
             // A delivered beat ends the run: the next failure is a fresh
             // incident and reported as one, rather than rate-limited away as
             // the continuation of an outage that is over.
             heartbeatFailures = 0;
+            return reply;
           })
           .catch((e: unknown) => {
             heartbeatFailures += 1;
             reportHeartbeat(e, heartbeatFailures);
-          });
-      });
+            return undefined;
+          }),
+      );
       await service.completeActivityTask(task.token, result);
     };
   });

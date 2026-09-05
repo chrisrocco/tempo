@@ -46,6 +46,7 @@
 import type {
   ActivityResult,
   ExecutionStatus,
+  HeartbeatReply,
   LeasedActivityTask,
   PollRequest,
   StartWorkflowOptions,
@@ -201,9 +202,9 @@ export function createLocalService(
             // Retry is the server's decision now, so both modes get the same
             // policy from the same code — and the attempt count survives this
             // process dying, which an in-loop retry never could.
-            const result = await activityWorker.runTask(task, (checkpoint) => {
-              void core.heartbeatActivityTask(task.token, checkpoint);
-            });
+            const result = await activityWorker.runTask(task, (checkpoint) =>
+              core.heartbeatActivityTask(task.token, checkpoint),
+            );
             await core.completeActivityTask(task.token, result); // acks + reports
           }
         } while (actPending);
@@ -377,7 +378,7 @@ export function createLocalService(
     heartbeatActivityTask(
       token: TaskToken,
       checkpoint?: unknown,
-    ): Promise<void> {
+    ): Promise<HeartbeatReply> {
       return core.heartbeatActivityTask(token, checkpoint);
     },
     async resume() {

@@ -5,9 +5,10 @@
  * the server invokes it directly; in the distributed form `worker/worker_loops`
  * polls a leased task, calls it once, and reports the outcome.
  *
- * The server cannot reach into a running attempt — it can only decide when to
- * stop waiting. What it decides on is the author's choice, and the three
- * settings answer genuinely different questions:
+ * The server cannot reach into a running attempt — it can answer a heartbeat
+ * (which is how cancellation arrives; see `activity_context`), and otherwise
+ * only decide when to stop waiting. What it decides on is the author's choice,
+ * and the three settings answer genuinely different questions:
  *
  * - **Nothing set (the default).** The lease expires on elapsed time alone and
  *   the task is redelivered, so an activity slower than the server's activity
@@ -34,19 +35,22 @@
  * deadline bounds what the *engine* does, not what the activity already did.
  */
 
-import type {ActivityResult, ActivityTask} from '../protocol';
-import {withActivityContext} from './activity_context';
+import type {ActivityResult, ActivityTask, HeartbeatReply} from '../protocol';
+import {cancellationRequested, withActivityContext} from './activity_context';
 import type {ActivityRegistry} from './activity_registry';
 
 export interface ActivityWorker {
   /**
    * Run one attempt. `sendHeartbeat` is how `heartbeat()` inside the activity
-   * reaches the server; omit it and heartbeats are silently discarded, which is
-   * what a direct unit-test call wants.
+   * reaches the server, and what it resolves to is how the server reaches back
+   * (see `HeartbeatReply`); omit it and heartbeats are silently discarded, which
+   * is what a direct unit-test call wants.
    */
   runTask(
     task: ActivityTask,
-    sendHeartbeat?: (checkpoint?: unknown) => void,
+    sendHeartbeat?: (
+      checkpoint?: unknown,
+    ) => Promise<HeartbeatReply | undefined> | void,
   ): Promise<ActivityResult>;
 }
 
@@ -56,7 +60,9 @@ export function createActivityWorker(
   return {
     async runTask(
       task: ActivityTask,
-      sendHeartbeat: (checkpoint?: unknown) => void = () => {},
+      sendHeartbeat: (
+        checkpoint?: unknown,
+      ) => Promise<HeartbeatReply | undefined> | void = () => {},
     ): Promise<ActivityResult> {
       const fn = registry.get(task.name);
       if (!fn) return {ok: false, error: `no activity ${task.name}`};
@@ -72,10 +78,15 @@ export function createActivityWorker(
             // downstream sees strings. A thrown non-Error has no message field —
             // reading one anyway recorded the literal text "undefined" — so it
             // is coerced whole: `throw 'a bare string'` fails as 'a bare string'.
+            //
+            // `cancelled` is read inside the catch, where the attempt's context is
+            // still the active one: a throw after the attempt was told to stop is
+            // the stop, whatever the message says — see `ActivityResult.cancelled`.
             return {
               ok: false,
               error: e instanceof Error ? e.message : String(e),
               stack: e instanceof Error ? e.stack : undefined,
+              ...(cancellationRequested() ? {cancelled: true} : {}),
             };
           }
         },

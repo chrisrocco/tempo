@@ -78,6 +78,39 @@ export interface ActivityFailedEvent extends CompletionEventBase {
   stack?: string;
 }
 
+/**
+ * The activity's outcome once its execution was cancelled: no result will be
+ * consumed and no retry will run.
+ *
+ * Its own event rather than an `activityFailed` with a flag, because the two are
+ * read differently by everything that reads history. A failure is something the
+ * workflow can handle and the retry policy applies to; this is neither — the
+ * workflow has already been handed `CancelledFailure` by the `cancelRequested`
+ * that precedes this event, and the server writes this *instead of* scheduling
+ * another attempt. An operator reading a settled execution wants "the agent was
+ * stopped", not "the agent failed" with a footnote.
+ *
+ * Written by the server the moment the cancel is recorded, once for every
+ * activity still open (`server_core.requestCancel`), rather than when each
+ * attempt gets round to reporting. Applying `cancelRequested` rejects every
+ * waiter unconditionally, so from that moment nothing can consume these seqs;
+ * settling them at once is what keeps history from reading as work still in
+ * flight for an execution that is over, and it is the settlement that sweeps the
+ * attempt records — which is how a still-running attempt's next heartbeat learns
+ * to stop. What that attempt reports afterwards is turned away as a straggler,
+ * like any report for a settled seq; the log's heartbeat lines are where "did it
+ * actually stop" is answered. A report already in flight when the cancel landed
+ * is recorded as this event too, whatever it said, and never retried.
+ *
+ * `error` is the server's note when it wrote the settlement, or what the attempt
+ * said in the in-flight case — kept because "execution cancelled" and "connection
+ * reset by peer" are different stories about the same cancellation.
+ */
+export interface ActivityCancelledEvent extends CompletionEventBase {
+  type: 'activityCancelled';
+  error: string;
+}
+
 export interface TimerFiredEvent extends CompletionEventBase {
   type: 'timerFired';
 }
@@ -585,6 +618,7 @@ export interface CancelRequestedEvent extends HistoryEventBase {
 export type CompletionEvent =
   | ActivityCompletedEvent
   | ActivityFailedEvent
+  | ActivityCancelledEvent
   | TimerFiredEvent
   | ChildCompletedEvent
   | ChildFailedEvent;

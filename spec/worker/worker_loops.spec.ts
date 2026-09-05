@@ -58,7 +58,7 @@ function fakeService(overrides: Partial<WorkflowService>): WorkflowService {
     failWorkflowTask: async () => {},
     pollActivityTask: async () => undefined,
     completeActivityTask: async () => {},
-    heartbeatActivityTask: async () => {},
+    heartbeatActivityTask: async () => ({cancelRequested: false}),
     ...overrides,
   };
 }
@@ -199,12 +199,13 @@ describe('worker loops — heartbeat delivery', () => {
       },
       heartbeatActivityTask: async () => {
         heartbeatOutcome((sent += 1));
+        return {cancelRequested: false};
       },
     });
     const worker: ActivityWorker = {
       runTask: async (_task: ActivityTask, sendHeartbeat) => {
         for (let i = 0; i < beats; i++) {
-          sendHeartbeat!();
+          void sendHeartbeat!();
           // The send settles on the microtask queue, which drains before any
           // timer — so one timer tick is enough to make the order deterministic
           // without racing a duration against it.

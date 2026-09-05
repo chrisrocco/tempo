@@ -487,4 +487,42 @@ describe('core applyEvent — cancellation', () => {
     expect(ctx.completions.size).toBe(0);
     expect(ctx.blockedConditions.size).toBe(0);
   });
+
+  /**
+   * The work cancellation rejected is still running somewhere, and its outcome
+   * lands in history *after* the cancel — as `activityCancelled` from an attempt
+   * that heard, or as a plain completion from one that finished anyway. Neither
+   * has a waiter left to find, and neither is evidence the code has moved.
+   */
+  it('accepts an outcome for work the cancel already rejected', () => {
+    const ctx = createContext([], []);
+    parkWaiter(ctx, 0);
+    parkWaiter(ctx, 1);
+    applyEvent(ctx, {type: 'cancelRequested'});
+
+    expect(() =>
+      applyEvent(ctx, {type: 'activityCancelled', seq: 0, error: 'aborted'}),
+    ).not.toThrow();
+    expect(() =>
+      applyEvent(ctx, {type: 'activityCompleted', seq: 1, result: 'late'}),
+    ).not.toThrow();
+  });
+
+  /** Outside cancellation the old rule stands: an unknown seq is a divergence. */
+  it('still rejects an outcome for an unknown seq when nothing was cancelled', () => {
+    const ctx = createContext([], []);
+
+    expect(() =>
+      applyEvent(ctx, {type: 'activityCancelled', seq: 0, error: 'aborted'}),
+    ).toThrowError(NondeterminismError);
+  });
+
+  it('hands a waiter, if one is somehow present, the same CancelledFailure', () => {
+    const ctx = createContext([], []);
+    const activity = parkWaiter(ctx, 0);
+
+    applyEvent(ctx, {type: 'activityCancelled', seq: 0, error: 'aborted'});
+
+    expect(activity.error).toBeInstanceOf(CancelledFailure);
+  });
 });

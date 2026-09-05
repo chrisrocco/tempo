@@ -55,8 +55,10 @@ in use for the first of those. It is not on npm: consume it from source, and rea
   body beside it, so the props shape is written once. That is the only way to
   describe props — a pre-rendered JSON Schema document is not accepted, so a
   workflow either describes them with `t` or describes none
-- **Cancellation**, cascading to children, surfacing as a catchable failure —
-  plus `terminate` for when cooperative cancellation cannot land
+- **Cancellation**, cascading to children, surfacing as a catchable failure in
+  the workflow and, on its next heartbeat, as `cancellationRequested()` inside a
+  running activity — plus `terminate` for when cooperative cancellation cannot
+  land
 - **`continueAsNew`** to bound history on long-lived workflows
 - **Versioning** — `patched('some-change')` lets a workflow's body gain a branch
   while executions of it are running: the choice is recorded in each execution's

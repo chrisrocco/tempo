@@ -1,8 +1,9 @@
 /**
  * @fileoverview
- * What an activity can reach while it runs. Today that is one thing: `heartbeat`,
- * the way a long attempt tells the server it is still alive and, optionally,
- * where it has got to.
+ * What an activity can reach while it runs: `heartbeat`, the way a long attempt
+ * tells the server it is still alive and, optionally, where it has got to; and
+ * `cancellationRequested` / `cancellationSignal`, the way it hears back that
+ * nobody wants the result.
  *
  * Carried through `AsyncLocalStorage` rather than passed as an argument, for the
  * same reason the workflow context is (see `core/context`): an activity stays an
@@ -38,14 +39,34 @@
  * - **A debounce** — a different function, and a bug here. It fires after a quiet
  *   period, so an activity beating in a tight loop never sends and is abandoned
  *   for silence while working hardest.
+ *
+ * ## Cancellation rides the heartbeat, and only the heartbeat
+ *
+ * The server cannot reach into a running attempt; it can only answer when the
+ * attempt speaks, and the heartbeat is the attempt speaking. So the reply to a
+ * beat carries `cancelRequested`, and this module turns it into two things an
+ * activity can consult: a boolean, and an `AbortSignal` for anything that takes
+ * one. The consequence is the honest one — **an activity that never heartbeats
+ * never learns it was cancelled**, and one that heartbeats under a throttle learns
+ * within one throttle window. An agent that sets `heartbeatTimeoutMs` gets both
+ * liveness and cancellation at the same cadence, which is the point of pairing
+ * them: an author already arranging to be heard is the author who wants to hear.
+ *
+ * Both reads are inert outside an activity, as `heartbeat` is: never cancelled,
+ * never aborted, so an activity stays callable from a test with no engine.
  */
 
 import {AsyncLocalStorage} from 'node:async_hooks';
+import type {HeartbeatReply} from '../protocol';
 
 /** The ambient state of the activity attempt currently running on this stack. */
 interface ActivityContext {
   /** Send a heartbeat now, subject to throttling. */
   beat(checkpoint?: unknown): void;
+  /** Set once a heartbeat reply said the execution was cancelled. Never unset. */
+  cancelRequested: boolean;
+  /** Aborted at the same moment `cancelRequested` is set. */
+  controller: AbortController;
 }
 
 const als = new AsyncLocalStorage<ActivityContext>();
@@ -116,11 +137,50 @@ export function heartbeat(checkpoint?: unknown): void {
 }
 
 /**
- * Run `fn` with `heartbeat()` wired to `send`, throttled against `timeoutMs`.
- * Used by the activity worker; activity authors only ever see `heartbeat`.
+ * Has the server stopped wanting this attempt's result?
+ *
+ * True once a heartbeat reply has said so, and only then — this reads what the
+ * attempt has heard, it does not ask. It says so when the execution was
+ * cancelled, and equally when the server gave up on this attempt for another
+ * reason (a deadline, or the seq settling through a redelivered sibling); see
+ * `HeartbeatReply` for why one flag covers both. Check it after a `heartbeat()`
+ * in the loop that does the work, and stop when it answers: nothing reported
+ * from here on is consumed, and the server will not retry. An `AbortError`
+ * escaping from a `fetch` is a perfectly good way out.
+ *
+ * Outside an activity, always false.
+ */
+export function cancellationRequested(): boolean {
+  return als.getStore()?.cancelRequested ?? false;
+}
+
+/**
+ * An `AbortSignal` that fires when the execution is cancelled, for anything that
+ * takes one — `fetch`, an SDK client, a child process. The same fact as
+ * `cancellationRequested`, in the shape a library expects; it aborts at the
+ * moment the boolean flips, and learns of the cancellation the same way, on a
+ * heartbeat reply.
+ *
+ * Outside an activity, a signal that never aborts.
+ */
+export function cancellationSignal(): AbortSignal {
+  return (als.getStore()?.controller ?? new AbortController()).signal;
+}
+
+/**
+ * Run `fn` with `heartbeat()` wired to `send`, throttled against `timeoutMs`,
+ * and with what `send` resolves to feeding `cancellationRequested()`. Used by the
+ * activity worker; activity authors only ever see the exports above.
+ *
+ * `send` may return nothing (a test with nowhere to send) or a promise of a reply
+ * that may be `undefined` (a beat that failed to reach the server, which says
+ * nothing either way). Only a reply that says `cancelRequested` changes anything,
+ * and it changes it once: cancellation does not un-happen. The activity is never
+ * blocked on the reply — the beat returns at once and the answer lands whenever
+ * it lands.
  */
 export function withActivityContext<T>(
-  send: (checkpoint?: unknown) => void,
+  send: (checkpoint?: unknown) => Promise<HeartbeatReply | undefined> | void,
   timeoutMs: number | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
@@ -129,11 +189,27 @@ export function withActivityContext<T>(
       ? timeoutMs * THROTTLE_FRACTION
       : DEFAULT_THROTTLE_MS;
   let lastSentAt = 0;
-  const beat = (checkpoint?: unknown): void => {
+  const ctx: ActivityContext = {
+    beat,
+    cancelRequested: false,
+    controller: new AbortController(),
+  };
+  function beat(checkpoint?: unknown): void {
     const now = Date.now();
     if (now - lastSentAt < interval) return;
     lastSentAt = now;
-    send(checkpoint);
-  };
-  return als.run({beat}, fn);
+    const reply = send(checkpoint);
+    if (!reply) return;
+    void reply.then(
+      (r) => {
+        if (!r?.cancelRequested || ctx.cancelRequested) return;
+        ctx.cancelRequested = true;
+        ctx.controller.abort();
+      },
+      // A reply that never came is a beat that never landed; the next one asks
+      // again. Nothing to do here, and nothing that should surface as a rejection.
+      () => {},
+    );
+  }
+  return als.run(ctx, fn);
 }

@@ -16,7 +16,7 @@
  */
 
 import {createLocalRuntime} from '../../src';
-import {heartbeat} from '../../src/activity';
+import {cancellationRequested, heartbeat} from '../../src/activity';
 import {
   CancelledFailure,
   condition,
@@ -607,6 +607,53 @@ describe('local runtime — cancellation', () => {
     await wait(5);
     handle.cancel();
     await expectAsync(handle.result()).toBeResolvedTo('cleaned up');
+  });
+
+  /**
+   * Cancellation reaching the *activity*, not just the workflow. An agent loop
+   * that heartbeats hears about the cancel on its next beat and stops; history
+   * records the activity as cancelled the moment the cancel landed; and the
+   * execution did not wait for the attempt — the workflow unwound as soon as
+   * the cancel was applied.
+   */
+  it('reaches a running activity on its next heartbeat, and records that it stopped', async () => {
+    let stopped = false;
+    const activities = {
+      agent: async () => {
+        for (let i = 0; i < 500; i++) {
+          heartbeat();
+          if (cancellationRequested()) {
+            stopped = true;
+            throw new Error('stopped: execution cancelled');
+          }
+          await wait(2);
+        }
+        return 'ran to the end';
+      },
+    };
+    // A short heartbeat timeout sets the cadence cancellation travels at too.
+    const {agent} = proxyActivities(activities, {heartbeatTimeoutMs: 10});
+    const rt = createLocalRuntime()
+      .registerActivity('agent', activities.agent)
+      .registerWorkflow('wf', async () => agent());
+
+    const handle = rt.start('wf');
+    await wait(15);
+    handle.cancel();
+    await expectAsync(handle.result()).toBeRejectedWithError(CancelledFailure);
+
+    // The attempt was still running when the execution settled; give it a
+    // heartbeat window to hear and stop.
+    await wait(40);
+    expect(stopped).toBeTrue();
+    const detail = await handle.describe();
+    expect(detail!.history.map((e) => e.type)).toEqual([
+      'activityScheduled',
+      'activityStarted',
+      'cancelRequested',
+      'activityCancelled',
+    ]);
+    rt.shutdown();
   });
 
   it('terminates a workflow outright, without giving it a chance to clean up', async () => {

@@ -264,15 +264,29 @@ export function applyEvent(ctx: WorkflowContext, ev: HistoryEvent): void {
   }
   // ev is now a CompletionEvent — guaranteed to carry a seq
   const waiter = ctx.completions.get(ev.seq);
-  if (!waiter)
+  if (!waiter) {
+    // A completion for work this run was no longer awaiting is a divergence —
+    // unless cancellation is why it stopped awaiting. `cancelRequested` rejects
+    // every waiter at once, but the work it rejected is still running somewhere,
+    // and its outcome lands in history after the cancel: an `activityCancelled`
+    // from an attempt that heard, or a plain completion from one that finished
+    // anyway. Either is the expected epilogue of a cancel, not evidence the code
+    // has moved. Outside cancellation there is no such excuse.
+    if (ctx.cancelled) return;
     throw new NondeterminismError({
       seq: ev.seq,
       expected: 'is not awaiting that seq',
       actual: ev.type,
     });
+  }
   ctx.completions.delete(ev.seq);
   if (ev.type === 'activityFailed' || ev.type === 'childFailed')
     waiter.reject(failureError(ev, waiter.site));
+  // Unreachable in practice — the cancel that precedes this event has already
+  // rejected the waiter — but if it were reached, the right answer is the same
+  // one the workflow already got, not an Error dressed as a failure.
+  else if (ev.type === 'activityCancelled')
+    waiter.reject(new CancelledFailure());
   else if (ev.type === 'timerFired') waiter.resolve(undefined);
   else waiter.resolve(ev.result);
 }
@@ -360,6 +374,7 @@ function completesWork(ev: HistoryEvent): ev is CompletionEvent {
   return (
     ev.type === 'activityCompleted' ||
     ev.type === 'activityFailed' ||
+    ev.type === 'activityCancelled' ||
     ev.type === 'timerFired' ||
     ev.type === 'childCompleted' ||
     ev.type === 'childFailed'
