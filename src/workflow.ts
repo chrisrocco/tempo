@@ -67,6 +67,18 @@
  * - Do not `await` anything the engine did not hand you (a raw `setTimeout`, a
  *   bare `fetch`). Only promises the engine resolves are safe, because only those
  *   resolve identically on replay.
+ * - Hand an activity a **reference, never the data** — an id, a path, a
+ *   revision, a cursor — and have it return one. Its arguments and its result
+ *   are written into history and replayed on every task for the rest of the run,
+ *   so a batch of rows passed once is paid for on every task after, and passed in
+ *   a loop it is what makes history grow. Both are capped at
+ *   `MAX_ACTIVITY_PAYLOAD_BYTES` (`protocol/`), and the cap is a guardrail against
+ *   rows rather than a budget to spend up to. Read it with
+ *   `DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD` (`server/server_core`): one bounds
+ *   how many events a run holds before a rollover is suggested, the other how
+ *   large the worst of them can be, and their product is the most history a run
+ *   can be asked to replay. An argument over the cap is a task failure, fixed by
+ *   redeploying; a result over it is an activity failure the workflow sees.
  *
  * One more rule, which is about the *source* rather than about a single run:
  * **changing which commands a workflow issues is a change to the histories already
