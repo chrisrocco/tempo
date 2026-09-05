@@ -1224,9 +1224,10 @@ export const MAX_CARRYOVER_BYTES = 16 * 1024;
  * Deliberately large next to the other two caps. Carryover and `awaiting` are
  * *state*, meant to fit in a few ids; an activity's arguments legitimately carry a
  * prompt, a query, or a document to act on, and an agent turn's messages are not
- * small. Temporal warns at this size and refuses at 2 MB; this refuses here,
- * because a warning nobody reads is not a rule. It is a guardrail against rows,
- * not a budget to spend up to.
+ * small, and a cap that gets in the way of one is a cap that gets worked around.
+ * Temporal warns at 256 KB and refuses at 2 MB; this sits between, and refuses
+ * rather than warns, because a warning nobody reads is not a rule. It is a
+ * guardrail against rows, not a budget to spend up to.
  *
  * Read it together with `DEFAULT_CONTINUE_AS_NEW_SUGGEST_THRESHOLD` in
  * `server/server_core`: that bounds how many events a run accumulates before the
@@ -1236,7 +1237,7 @@ export const MAX_CARRYOVER_BYTES = 16 * 1024;
  * `worker/activity_worker` for results — so the failure lands where the offending
  * code just ran.
  */
-export const MAX_ACTIVITY_PAYLOAD_BYTES = 256 * 1024;
+export const MAX_ACTIVITY_PAYLOAD_BYTES = 1024 * 1024;
 
 export interface WorkflowTask {
   token: TaskToken;
