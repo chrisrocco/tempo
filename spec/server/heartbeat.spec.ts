@@ -203,8 +203,9 @@ describe('heartbeats for an attempt the server gave up on', () => {
 
 /**
  * A register, not a log: one slot per attempt, overwritten by the next beat and
- * thrown away with the attempt. Nothing here is a history event, so none of it
- * outlives the attempt that reported it.
+ * thrown away with the attempt. Nothing here is a history event of its own; the
+ * one thing that outlives the attempt is its last value, copied onto the
+ * terminal event — the describe after this one.
  */
 describe('a checkpoint reported with a heartbeat', () => {
   async function pending(core: ServerCore, historyStore: MemoryHistoryStore) {
@@ -452,5 +453,104 @@ describe('an activity heartbeating through the worker', () => {
     expect(terminal.length).toBe(1);
     expect(terminal[0].type).toBe('activityFailed');
     expect(await core.pollActivityTask()).toBeUndefined(); // abandoned, not redelivered
+  });
+});
+
+/**
+ * The register is discarded with the attempt, but not before its last value is
+ * copied onto the event that settles the seq. That is the one durable trace of
+ * where an attempt got to, and it matters most for the outcomes nobody chose:
+ * an agent cancelled at turn three, or abandoned for silence with a job id it
+ * had already reported.
+ */
+describe('the last checkpoint, once the attempt settles', () => {
+  async function terminal(historyStore: MemoryHistoryStore) {
+    const rec = await historyStore.get('wf');
+    return rec!.history.find(
+      (e) =>
+        e.type === 'activityCompleted' ||
+        e.type === 'activityFailed' ||
+        e.type === 'activityCancelled',
+    ) as
+      {type: string; checkpoint?: unknown; checkpointAt?: number} | undefined;
+  }
+
+  it('rides on the completion', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+    const task = await core.pollActivityTask();
+    const before = Date.now();
+    await core.heartbeatActivityTask(task!.token, {jobId: 'q-8823', pct: 90});
+
+    await core.completeActivityTask(task!.token, {ok: true, result: 'ref-1'});
+
+    const event = await terminal(historyStore);
+    expect(event?.type).toBe('activityCompleted');
+    expect(event?.checkpoint).toEqual({jobId: 'q-8823', pct: 90});
+    expect(event?.checkpointAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it('rides on the failure that ends the retries', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {jobId: 'q-8823', pct: 55});
+
+    await core.completeActivityTask(task!.token, {ok: false, error: 'boom'});
+
+    const event = await terminal(historyStore);
+    expect(event?.type).toBe('activityFailed');
+    expect(event?.checkpoint).toEqual({jobId: 'q-8823', pct: 55});
+  });
+
+  it('rides on the cancellation the server writes for a running attempt', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 200};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {turn: 3});
+
+    await core.requestCancel('wf');
+
+    const event = await terminal(historyStore);
+    expect(event?.type).toBe('activityCancelled');
+    expect(event?.checkpoint).toEqual({turn: 3});
+  });
+
+  /**
+   * The attempt that went quiet is the one whose last word is worth keeping:
+   * the job id it reported is how the next attempt re-attaches.
+   */
+  it('rides on the failure written when the attempt is abandoned for silence', async () => {
+    const options: ActivityOptions = {heartbeatTimeoutMs: 40};
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, options);
+    enqueue(activityTaskQueue, options);
+    const task = await core.pollActivityTask();
+    await core.heartbeatActivityTask(task!.token, {jobId: 'q-8823'});
+
+    await wait(100); // silence past the deadline
+
+    const event = await terminal(historyStore);
+    expect(event?.type).toBe('activityFailed');
+    expect(event?.checkpoint).toEqual({jobId: 'q-8823'});
+  });
+
+  it('is absent when the attempt never reported one', async () => {
+    const {core, activityTaskQueue, historyStore} = coreWith(5000);
+    await seed(historyStore, {});
+    enqueue(activityTaskQueue, {});
+    const task = await core.pollActivityTask();
+
+    await core.completeActivityTask(task!.token, {ok: true, result: 'ref-1'});
+
+    const event = await terminal(historyStore);
+    expect(event?.type).toBe('activityCompleted');
+    expect('checkpoint' in event!).toBeFalse();
   });
 });

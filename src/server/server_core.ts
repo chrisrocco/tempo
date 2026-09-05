@@ -382,11 +382,15 @@ export interface ServerCore {
    * The activity worker (in-proc) reports a finished activity: append + wake.
    * Idempotent per seq — a second report for a seq that already has a terminal
    * event is dropped, which is what makes at-least-once delivery harmless.
+   *
+   * `lastCheckpoint` is for a caller that has already dropped the attempt's
+   * lease and with it the register; otherwise the register is read here.
    */
   reportActivityResult(
     workflowId: string,
     seq: number,
     result: ActivityResult,
+    lastCheckpoint?: {checkpoint: unknown; at: number},
   ): Promise<void>;
   /** Append an externally injected signal, then wake. */
   appendSignal(
@@ -1271,10 +1275,35 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       });
   }
 
+  /**
+   * The freshest checkpoint any live attempt for the seq has reported.
+   *
+   * Several attempts can be out for one seq after a lease-expiry redelivery, and
+   * the one that reported most recently is the one whose word is current — not
+   * necessarily the one settling the seq now. Read from the leases, so it has to
+   * be read *before* the settlement sweeps them.
+   */
+  function latestCheckpoint(
+    workflowId: string,
+    seq: number,
+  ): {checkpoint: unknown; at: number} | undefined {
+    let latest: {checkpoint: unknown; at: number} | undefined;
+    for (const lease of activityLeases.values())
+      if (
+        lease.workflowId === workflowId &&
+        lease.seq === seq &&
+        lease.checkpoint &&
+        (!latest || lease.checkpoint.at > latest.at)
+      )
+        latest = lease.checkpoint;
+    return latest;
+  }
+
   async function reportActivityResult(
     workflowId: string,
     seq: number,
     result: ActivityResult,
+    lastCheckpoint?: {checkpoint: unknown; at: number},
   ): Promise<void> {
     const rec = await historyStore.get(workflowId);
     if (!rec || rec.status !== 'running') return;
@@ -1366,17 +1395,32 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
         return;
       }
     }
+    // The register's last word, copied onto the outcome before the sweep below
+    // discards it — see `ActivityOutcomeBase`. Absent stays absent: an attempt
+    // that never beat with a payload has nothing to carry.
+    const live = latestCheckpoint(workflowId, seq);
+    const last =
+      lastCheckpoint === undefined
+        ? live
+        : live === undefined || lastCheckpoint.at >= live.at
+          ? lastCheckpoint
+          : live;
+    const carried =
+      last === undefined
+        ? {}
+        : {checkpoint: last.checkpoint, checkpointAt: last.at};
     await appendEvent(
       workflowId,
       result.ok
-        ? {type: 'activityCompleted', seq, result: result.result}
+        ? {type: 'activityCompleted', seq, result: result.result, ...carried}
         : cancelled
-          ? {type: 'activityCancelled', seq, error: result.error}
+          ? {type: 'activityCancelled', seq, error: result.error, ...carried}
           : {
               type: 'activityFailed',
               seq,
               error: result.error,
               stack: result.stack,
+              ...carried,
             },
     );
     await historyStore.clearActivityAttempts(workflowId, seq);
@@ -1941,6 +1985,9 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
   ): void {
     const lease = activityLeases.get(task.token);
     if (!lease) return; // already settled
+    // Read before the lease goes: the attempt that went quiet is exactly the one
+    // whose last word is worth keeping, and this is its only copy.
+    const lastCheckpoint = lease.checkpoint;
     activityLeases.delete(task.token);
     clearAttemptTimers(task.token);
     activityTaskQueue.complete(task.token); // no redelivery for this attempt
@@ -1956,17 +2003,22 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
       // for a `startToCloseTimeoutMs` that appears in no source file.
       ...(opts.defaulted ? {defaulted: true} : {}),
     });
-    void reportActivityResult(lease.workflowId, lease.seq, {
-      ok: false,
-      error:
-        kind === 'heartbeat'
-          ? `activity ${task.name} stopped heartbeating for ${timeoutMs}ms`
-          : `activity ${task.name} timed out after ${timeoutMs}ms${
-              opts.defaulted
-                ? ' (server default; set startToCloseTimeoutMs to change it, or 0 to opt out)'
-                : ''
-            }`,
-    });
+    void reportActivityResult(
+      lease.workflowId,
+      lease.seq,
+      {
+        ok: false,
+        error:
+          kind === 'heartbeat'
+            ? `activity ${task.name} stopped heartbeating for ${timeoutMs}ms`
+            : `activity ${task.name} timed out after ${timeoutMs}ms${
+                opts.defaulted
+                  ? ' (server default; set startToCloseTimeoutMs to change it, or 0 to opt out)'
+                  : ''
+              }`,
+      },
+      lastCheckpoint,
+    );
   }
 
   /** Arm one of an attempt's deadlines, replacing any timer already set for it. */
@@ -2176,8 +2228,18 @@ export function createServerCore(deps: ServerCoreDeps): ServerCore {
     // whose seq already settled, a double-ack of the same token, or a token
     // this server never issued.
     if (!lease) return;
+    // The reporting attempt's own last word, read before its lease goes. A
+    // sibling still out may have spoken more recently; `reportActivityResult`
+    // prefers whichever is freshest, and this is the fallback when the reporter
+    // was the only one.
+    const lastCheckpoint = lease.checkpoint;
     activityLeases.delete(token);
-    await reportActivityResult(lease.workflowId, lease.seq, result);
+    await reportActivityResult(
+      lease.workflowId,
+      lease.seq,
+      result,
+      lastCheckpoint,
+    );
   }
 
   return {

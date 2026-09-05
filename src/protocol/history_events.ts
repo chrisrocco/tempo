@@ -62,12 +62,38 @@ export interface CompletionEventBase extends HistoryEventBase {
   seq: number;
 }
 
-export interface ActivityCompletedEvent extends CompletionEventBase {
+/**
+ * What every activity outcome carries besides its seq: the last checkpoint the
+ * attempt reported, if it reported one.
+ *
+ * The checkpoint register is live state, discarded with the attempt — but not
+ * before its last value is copied here, at the moment the seq settles. That is
+ * the one durable trace of where an attempt got to, and it matters most for the
+ * outcomes nobody chose: an agent cancelled at turn three, or one abandoned for
+ * silence with a job id it had already reported, which is how the next attempt
+ * re-attaches. One field on the terminal event rather than a progress event per
+ * beat, because the register already answers "where is it now" while the attempt
+ * runs, and a trail of sampled beats in history would be noise with the same last
+ * value at the end of it.
+ *
+ * `checkpointAt` is beside the value for the reason `PendingActivityView` gives:
+ * sampling makes a checkpoint routinely older than the work it describes, and on
+ * a terminal event the gap between it and `ts` is how long the attempt ran on
+ * after its last word. Both optional: histories written before this field
+ * existed have none, and so does an attempt that never beat with a payload.
+ */
+export interface ActivityOutcomeBase extends CompletionEventBase {
+  checkpoint?: unknown;
+  /** When `checkpoint` arrived at the server, epoch ms. */
+  checkpointAt?: number;
+}
+
+export interface ActivityCompletedEvent extends ActivityOutcomeBase {
   type: 'activityCompleted';
   result: unknown;
 }
 
-export interface ActivityFailedEvent extends CompletionEventBase {
+export interface ActivityFailedEvent extends ActivityOutcomeBase {
   type: 'activityFailed';
   error: string;
   /**
@@ -106,7 +132,7 @@ export interface ActivityFailedEvent extends CompletionEventBase {
  * said in the in-flight case — kept because "execution cancelled" and "connection
  * reset by peer" are different stories about the same cancellation.
  */
-export interface ActivityCancelledEvent extends CompletionEventBase {
+export interface ActivityCancelledEvent extends ActivityOutcomeBase {
   type: 'activityCancelled';
   error: string;
 }

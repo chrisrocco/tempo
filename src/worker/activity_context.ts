@@ -57,7 +57,7 @@
  */
 
 import {AsyncLocalStorage} from 'node:async_hooks';
-import type {HeartbeatReply} from '../protocol';
+import {MAX_CHECKPOINT_BYTES, type HeartbeatReply} from '../protocol';
 
 /** The ambient state of the activity attempt currently running on this stack. */
 interface ActivityContext {
@@ -197,6 +197,22 @@ export function withActivityContext<T>(
   function beat(checkpoint?: unknown): void {
     const now = Date.now();
     if (now - lastSentAt < interval) return;
+    // Checked on the beats that send, not on every call: the throttle exists so
+    // a tight loop costs nothing per row, and a beat it drops sends nothing to
+    // cap. The first call always sends, so the first oversized checkpoint fails
+    // at the first call. Thrown into the activity rather than dropped — a
+    // checkpoint that quietly never arrived would be read as an attempt that
+    // reported nothing, which is a different fact.
+    if (checkpoint !== undefined) {
+      const size = JSON.stringify(checkpoint)?.length ?? 0;
+      if (size > MAX_CHECKPOINT_BYTES)
+        throw new Error(
+          `checkpoint is ${size} bytes, over the ${MAX_CHECKPOINT_BYTES} limit. A ` +
+            `checkpoint rides every sent beat and its last value is written into ` +
+            `history, so it must stay what the next attempt needs to resume — a ` +
+            `job id, a cursor, a position — never the work itself.`,
+        );
+    }
     lastSentAt = now;
     const reply = send(checkpoint);
     if (!reply) return;
